@@ -1,0 +1,28 @@
+import { ChevronDown } from "lucide-react";
+import { useChatStore } from "../state/chat-store";
+
+export function ModelPicker() {
+  const models = useChatStore((state) => state.models);
+  const selectedModel = useChatStore((state) => state.selectedModel);
+  const selectModel = useChatStore((state) => state.selectModel);
+
+  return (
+    <div className="relative">
+      <select
+        value={selectedModel}
+        onChange={(event) => selectModel(event.target.value)}
+        className="appearance-none rounded-lg border border-surface-border bg-surface-panel py-1.5 pl-3 pr-8 text-xs text-white/80 outline-none"
+      >
+        {models.map((model) => (
+          <option key={model.id} value={model.id}>
+            {model.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        size={13}
+        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40"
+      />
+    </div>
+  );
+}

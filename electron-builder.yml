@@ -1,0 +1,37 @@
+appId: dev.pi.desktop.demo
+productName: Pi Desktop Demo
+
+directories:
+  output: release
+  buildResources: assets
+
+files:
+  - dist-renderer/**
+  - dist-main/**
+  - package.json
+
+asar: true
+
+linux:
+  icon: assets/icon.png
+  category: Development
+  target:
+    - target: AppImage
+      arch:
+        - x64
+
+win:
+  icon: assets/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"

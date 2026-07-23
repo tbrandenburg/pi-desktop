@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist-main/
+dist-renderer/
+release/
+
+# Electron-builder
+electron-builder-effective-config.yaml
+*.blockmap
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Test / coverage
+coverage/
+*.tsbuildinfo
+
+# Misc local state
+.pi/
