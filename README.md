@@ -26,7 +26,8 @@ touches Node or provider APIs directly.
   the main process through a narrow, typed preload bridge
   (`src/preload/api-types.ts`); the stored API key is never sent back to the
   renderer after saving.
-- **Packaged for Linux** via `electron-builder` (AppImage).
+- **Packaged for Linux and Windows** via `electron-builder` (AppImage;
+  NSIS installer + portable exe).
 
 ## Architecture
 
@@ -64,8 +65,49 @@ npm run build        # build renderer + main for production
 npm run dist:linux   # package a Linux AppImage (release/)
 ```
 
-Or via `make`: `make install`, `make run`, `make test`, `make check`,
-`make build`, `make dist-linux`. Run `make help` for the full list.
+Or via `make` (run `make help` for the full, current list):
+
+```bash
+make install         # npm install
+make run             # dev mode: renderer (Vite) + main (tsc -w) + Electron
+make stop            # kill any running dev/electron processes
+make test            # vitest
+make lint            # tsc --noEmit (alias: make check)
+make build           # build renderer + main for production
+make pack            # package app dir, no installer (fast local check)
+make dist            # package installers for the current host platform
+make dist-linux      # package the Linux AppImage
+make dist-win        # package the Windows installer + portable exe
+                      # (cross-building from Linux/macOS requires 'wine')
+make clean           # remove build artifacts (dist-*, release, node_modules)
+```
+
+### Running the bundled (packaged) app
+
+Best-effort convenience targets that run whatever was already built under
+`release/` — they never build anything themselves, so run `make dist-linux`
+/ `make dist-win` first:
+
+```bash
+make run-bundled     # auto-detects the host platform (Linux or Windows)
+make run-linux       # run the built .AppImage directly
+make run-win         # run the built Windows app: native .exe if already on
+                      # Windows, otherwise via 'wine' (best-effort)
+```
+
+### Versioning & releases
+
+```bash
+make version-patch   # bump 0.1.0 -> 0.1.1: runs check+test, then commits
+make version-minor   # bump 0.1.0 -> 0.2.0    "chore(release): vX.Y.Z" and
+make version-major   # bump 0.1.0 -> 1.0.0    tags it (all local, no push)
+make release         # push the release commit + tag to origin
+make publish         # create the GitHub release for the current tag
+                      # (release notes only; no build artifacts attached)
+make release-patch   # one-shot: bump -> push -> publish
+make release-minor
+make release-major
+```
 
 ## Testing the packaged app
 
@@ -75,7 +117,7 @@ trusting a fix, build and launch the real thing:
 
 ```bash
 make dist-linux
-release/linux-unpacked/pi-desktop   # or the .AppImage in release/
+make run-linux   # or: release/linux-unpacked/pi-desktop, or the .AppImage directly
 ```
 
 See [`AGENTS.md`](AGENTS.md) for detailed guidance on testing the packaged
