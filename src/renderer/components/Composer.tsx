@@ -9,9 +9,10 @@ export function Composer() {
   const stopGeneration = useChatStore((state) => state.stopGeneration);
   const selectedModel = useChatStore((state) => state.selectedModel);
   const isGenerating = status === "thinking" || status === "streaming";
+  const hasModel = Boolean(selectedModel);
 
   const submit = () => {
-    if (isGenerating || !value.trim()) return;
+    if (isGenerating || !value.trim() || !hasModel) return;
     void sendMessage(value);
     setValue("");
   };
@@ -40,8 +41,14 @@ export function Composer() {
           placeholder="Send a message…"
           className="max-h-40 flex-1 resize-none bg-transparent text-sm text-white outline-none placeholder:text-white/30"
         />
-        <span className="mb-1 rounded-full border border-surface-border px-2 py-0.5 text-[11px] text-white/40">
-          {selectedModel || "no model"}
+        <span
+          className={
+            hasModel
+              ? "mb-1 rounded-full border border-surface-border px-2 py-0.5 text-[11px] text-white/40"
+              : "mb-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400"
+          }
+        >
+          {hasModel ? selectedModel : "⚠ Select a model to start chatting"}
         </span>
         {isGenerating ? (
           <button
@@ -56,9 +63,9 @@ export function Composer() {
           <button
             type="button"
             onClick={submit}
-            disabled={!value.trim()}
+            disabled={!value.trim() || !hasModel}
             className="mb-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-accent text-black transition disabled:opacity-30"
-            title="Send"
+            title={hasModel ? "Send" : "Select a model to start chatting"}
           >
             <Send size={14} />
           </button>
