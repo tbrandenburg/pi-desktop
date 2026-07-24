@@ -6,15 +6,9 @@ import {
 } from "../shared/schemas";
 import type { ModelInfo } from "../shared/events";
 import { ChatService } from "./llm/chat-service";
-import { resolvePiDefault } from "./llm/pi-config";
+import { listConfiguredModels, resolvePiDefault } from "./llm/pi-config";
 import { SettingsStore } from "./storage/settings-store";
 import { SessionStore } from "./storage/session-store";
-
-const CURATED_MODELS: ModelInfo[] = [
-  { id: "gpt-4o-mini", label: "GPT-4o mini" },
-  { id: "gpt-4o", label: "GPT-4o" },
-  { id: "gpt-4.1-mini", label: "GPT-4.1 mini" },
-];
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
   const settingsStore = new SettingsStore();
@@ -22,19 +16,22 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   const chatService = new ChatService(settingsStore, getWindow);
 
   ipcMain.handle("llm:list-models", async (): Promise<ModelInfo[]> => {
-    // If the user hasn't saved their own settings yet, put the model
-    // resolved from ~/.pi/agent first so it is selected by default and
-    // chat works out of the box.
+    // The model list is sourced entirely from the providers configured in
+    // `.pi/agent` (project-local, then global) -- no hardcoded placeholder
+    // models. If the user hasn't saved their own settings yet, the model
+    // resolved from `.pi/agent` is put first so it's selected by default
+    // and chat works out of the box.
     const settings = await settingsStore.get();
+    const models = listConfiguredModels();
     const piDefault = resolvePiDefault();
+
     if (piDefault && piDefault.model === settings.model) {
-      const label = `${piDefault.label} (from .pi)`;
-      return [
-        { id: piDefault.model, label },
-        ...CURATED_MODELS.filter((m) => m.id !== piDefault.model),
-      ];
+      const defaultEntry =
+        models.find((m) => m.id === piDefault.model) ?? { id: piDefault.model, label: piDefault.label };
+      return [defaultEntry, ...models.filter((m) => m.id !== piDefault.model)];
     }
-    return CURATED_MODELS;
+
+    return models;
   });
 
   ipcMain.handle("llm:start-chat", async (_event, rawRequest: unknown) => {

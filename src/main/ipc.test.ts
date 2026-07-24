@@ -3,10 +3,11 @@ import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import { registerIpcHandlers } from "./ipc";
 
 // This suite must be hermetic regardless of what the machine's real
-// ~/.pi/agent config happens to contain, so the .pi default resolution is
-// mocked and tested separately in pi-config.test.ts.
+// ~/.pi/agent config happens to contain, so .pi resolution is mocked and
+// tested separately in pi-config.test.ts.
 vi.mock("./llm/pi-config", () => ({
   resolvePiDefault: vi.fn(() => null),
+  listConfiguredModels: vi.fn(() => []),
 }));
 
 // In-memory fake replacing electron-store, so SettingsStore is exercised
@@ -124,13 +125,26 @@ describe("IPC settings round-trip integration", () => {
     ).rejects.toThrow();
   });
 
-  it("returns the curated model list on llm:list-models", async () => {
+  it("returns an empty model list when nothing is configured, rather than a fake placeholder model", async () => {
     const models = await invoke("llm:list-models");
-    expect(models).toEqual([
-      { id: "gpt-4o-mini", label: "GPT-4o mini" },
-      { id: "gpt-4o", label: "GPT-4o" },
-      { id: "gpt-4.1-mini", label: "GPT-4.1 mini" },
+    expect(models).toEqual([]);
+  });
+
+  it("returns models sourced from configured .pi providers, with the resolved default first", async () => {
+    const { listConfiguredModels } = await import("./llm/pi-config");
+    vi.mocked(listConfiguredModels).mockReturnValue([
+      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
+      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
     ]);
+
+    const models = await invoke("llm:list-models");
+
+    expect(models).toEqual([
+      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
+      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
+    ]);
+
+    vi.mocked(listConfiguredModels).mockReturnValue([]);
   });
 
   it("cancels an unknown request id through the IPC boundary without throwing", async () => {
