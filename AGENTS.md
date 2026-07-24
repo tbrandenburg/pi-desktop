@@ -11,7 +11,13 @@ For more details check docs/INITIAL.md
    the typed preload bridge (`src/preload`).
 5. Never place API keys in renderer state after saving. Settings round-trip through the
    main process only.
-6. Target for tonight: Linux only (AppImage). Windows packaging is out of scope for now.
+6. Target for tonight: Linux only (AppImage). Windows packaging is out of scope for now
+   (though `npm install` / `npm run check` / `npm test` / `npm run build` and
+   `electron-builder --win --x64` producing a runnable `win-unpacked` app dir have
+   all been verified to work fine natively on Windows — see STATUS.md Milestone 7.
+   Only the NSIS/portable installer targets need Windows Developer Mode enabled,
+   because electron-builder's `winCodeSign` cache extraction requires symlink
+   privileges that a stock non-admin Windows user/session doesn't have).
 7. Do not begin `pi-agent-core` / tool integration until the direct `pi-ai` streaming chat
    works end-to-end in dev mode.
 8. Keep STATUS.md updated with completed milestones and blockers.
