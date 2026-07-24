@@ -143,7 +143,17 @@ export class ChatService {
         return;
       }
 
-      const model = buildModel(settings.baseUrl, request.model || settings.model);
+      const modelId = request.model || settings.model;
+      if (!modelId) {
+        this.emit({
+          type: "error",
+          requestId,
+          message: "No model selected. Choose a model before sending a message.",
+        });
+        return;
+      }
+
+      const model = buildModel(settings.baseUrl, modelId);
       const context = toContext(request);
 
       this.emit({ type: "started", requestId });

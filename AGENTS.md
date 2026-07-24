@@ -98,6 +98,29 @@ For more details check docs/INITIAL.md
     outcome of an end-to-end UI review — do not invent busywork fixes just
     to have something to report. The only console noise was a harmless
     `favicon.ico` 404, which is not a real error and not worth suppressing.
+11. **2026-07-24**: Fixing issue #3 (no-model-selected hang) required
+    checking `ss -ltnp | grep <port>` *and* inspecting the owning PID's
+    `cwd`/cmdline before reusing a port for the dev server — port 5173 was
+    already bound by an unrelated sibling project (`made/packages/frontend`),
+    not a stale instance of this repo. Always pick a free port
+    (`ss -ltnp | grep <port>` empty) rather than assuming the default is
+    free or safe to kill.
+12. **2026-07-24**: In the Playwright browser harness, `browser_press_key`
+    with `Enter` does not reliably trigger a textarea's React `onKeyDown`
+    submit handler the same way a real keyboard event does — the composer's
+    value stayed unsubmitted. Clicking the actual Send button (or using
+    `slowly: true` typing that ends with a real keydown) is the reliable way
+    to exercise submit-on-Enter behavior in this harness; don't conclude a
+    submit handler is broken based on `press_key` alone without also trying
+    a direct click.
+13. **2026-07-24**: Verifying an empty-model-list state in the browser
+    harness required temporarily editing `fake-desktop-api.ts`'s
+    `listModels()` to return `[]` (Vite HMR picks it up instantly), then
+    restoring the original file byte-for-byte afterward (`git diff` empty)
+    — there's no store-manipulation hook exposed on `window` for tests to
+    force this state directly. If this edge case needs re-testing often,
+    consider adding a dev-only query-param toggle instead of hand-editing
+    the fake API file each time.
 
 ## How to test the compiled/packaged app (not just `npm test` / dev mode)
 

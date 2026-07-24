@@ -164,6 +164,37 @@ describe("ChatService integration", () => {
     expect(() => service.cancel(requestId)).not.toThrow();
   });
 
+  it("emits a single error event and never calls the provider when no model is selected", async () => {
+    const stream = vi.fn();
+
+    const settingsStore = {
+      get: vi.fn().mockResolvedValue({
+        apiKey: "sk-test",
+        baseUrl: "https://api.openai.com/v1",
+        model: "",
+      }),
+    } as unknown as SettingsStore;
+
+    const sent: ChatEvent[] = [];
+    const service = new ChatService(
+      settingsStore,
+      () => makeFakeWindow(sent),
+      makeLoader(stream),
+    );
+
+    await service.startChat({ ...makeRequest(), model: "" });
+    await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+
+    expect(sent).toEqual([
+      {
+        type: "error",
+        requestId: expect.any(String),
+        message: "No model selected. Choose a model before sending a message.",
+      },
+    ]);
+    expect(stream).not.toHaveBeenCalled();
+  });
+
   it("translates a native provider error event into a ChatEvent error without throwing", async () => {
     const stream = vi.fn().mockReturnValue(
       (async function* () {

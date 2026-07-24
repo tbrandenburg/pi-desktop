@@ -91,6 +91,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sendMessage: async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    if (!get().selectedModel) {
+      set({
+        status: "error",
+        errorMessage: "No model selected. Choose a model before sending a message.",
+      });
+      return;
+    }
 
     const userMessage: DisplayMessage = {
       id: crypto.randomUUID(),
@@ -159,13 +166,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ({ role, content }) => ({ role, content }),
     );
 
-    const { requestId } = await desktopApi().startChat({
-      conversationId: get().conversationId,
-      model: get().selectedModel,
-      messages: history,
-    });
-
-    set({ activeRequestId: requestId });
+    try {
+      const { requestId } = await desktopApi().startChat({
+        conversationId: get().conversationId,
+        model: get().selectedModel,
+        messages: history,
+      });
+      set({ activeRequestId: requestId });
+    } catch (error) {
+      unsubscribe?.();
+      unsubscribe = null;
+      set((state) => ({
+        status: "error",
+        activeRequestId: null,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        messages: state.messages.map((message) =>
+          message.id === assistantMessage.id
+            ? { ...message, streaming: false, error: error instanceof Error ? error.message : String(error) }
+            : message,
+        ),
+      }));
+    }
   },
 
   stopGeneration: async () => {

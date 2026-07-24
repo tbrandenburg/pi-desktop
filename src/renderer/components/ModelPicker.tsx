@@ -5,19 +5,25 @@ export function ModelPicker() {
   const models = useChatStore((state) => state.models);
   const selectedModel = useChatStore((state) => state.selectedModel);
   const selectModel = useChatStore((state) => state.selectModel);
+  const hasModels = models.length > 0;
 
   return (
     <div className="relative">
       <select
-        value={selectedModel}
+        value={hasModels ? selectedModel : ""}
         onChange={(event) => selectModel(event.target.value)}
-        className="appearance-none rounded-lg border border-surface-border bg-surface-panel py-1.5 pl-3 pr-8 text-xs text-white/80 outline-none"
+        disabled={!hasModels}
+        className="appearance-none rounded-lg border border-surface-border bg-surface-panel py-1.5 pl-3 pr-8 text-xs text-white/80 outline-none disabled:cursor-not-allowed disabled:text-white/40"
       >
-        {models.map((model) => (
-          <option key={model.id} value={model.id}>
-            {model.label}
-          </option>
-        ))}
+        {hasModels ? (
+          models.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.label}
+            </option>
+          ))
+        ) : (
+          <option value="">No models available</option>
+        )}
       </select>
       <ChevronDown
         size={13}
