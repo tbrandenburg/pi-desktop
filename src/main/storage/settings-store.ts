@@ -14,8 +14,8 @@ export interface StoredSettings {
 
 const DEFAULT_SETTINGS: StoredSettings = {
   apiKey: "",
-  baseUrl: "https://api.openai.com/v1",
-  model: "gpt-4o-mini",
+  baseUrl: "",
+  model: "",
 };
 
 /**
