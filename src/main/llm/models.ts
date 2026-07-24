@@ -144,6 +144,27 @@ function toCredential(entry: AuthJsonEntry | undefined): Credential | undefined 
  * pi-ai built-in provider (e.g. "openrouter") that has no `models.json`
  * entry at all still resolve real auth, exactly like the CLI.
  *
+ * This is a deliberately reduced-scope adaptation of two upstream patterns,
+ * not a from-scratch design:
+ *  - The `CredentialStore` interface shape (`read`/`list`/`modify`/`delete`)
+ *    and the in-memory `overrides` map for uncommitted changes mirror
+ *    `@earendil-works/pi-ai@0.82.0`'s `InMemoryCredentialStore`
+ *    (`node_modules/@earendil-works/pi-ai/dist/auth/credential-store.js`).
+ *  - Reading disk lazily on every `read()`/`list()` call and layering
+ *    in-memory overrides on top of it mirrors the CLI's `RuntimeCredentials`
+ *    overlay (`@earendil-works/pi-coding-agent@0.82.0`'s
+ *    `dist/core/runtime-credentials.js`) composed with `AuthStorage.list()`'s
+ *    project-over-global precedence merge (`dist/core/auth-storage.js`);
+ *    that package is not a dependency of this app, so it isn't in
+ *    node_modules -- verified via `npm pack
+ *    @earendil-works/pi-coding-agent@0.82.0` and inspecting the tarball.
+ *
+ * Deliberately NOT copied: `AuthStorage`'s `FileAuthStorageBackend` uses
+ * `proper-lockfile` for atomic, cross-process-safe writes to `auth.json`.
+ * This class never writes back to disk at all (see below), so there is
+ * nothing to lock -- only add file locking here if a login/logout UI that
+ * actually persists credentials is added later.
+ *
  * Read-mostly: `modify()`/`delete()` only update the in-memory view (used by
  * pi-ai's own OAuth refresh flow during a live request) and are never
  * persisted back to `auth.json` -- this app has no login/logout UI of its
@@ -228,6 +249,17 @@ function placeholderModel(id: string, provider: string, api: Api, baseUrl: strin
   // baked-in catalog (`MODELS`) carries that for known providers; there is
   // nothing to look up for a user's own endpoint, so placeholder metadata is
   // used, same as the Pi CLI does for custom providers.
+  //
+  // The zero-value defaults below intentionally match the fallbacks in
+  // `@earendil-works/pi-coding-agent@0.82.0`'s `modelFromJson()`
+  // (`dist/core/provider-composer.js`, verified via `npm pack`): they are
+  // `??`-chained after a model definition's own fields exactly the same way
+  // there, i.e. `reasoning: false`, `input: ["text"]`, zero-cost `cost`, and
+  // `contextWindow: 128_000`. One value is a known, deliberate-scope
+  // deviation rather than a copy error: upstream falls back to
+  // `maxTokens: 16384`, while this file uses `4096` -- left as-is here since
+  // changing it would be a functional change out of this comment-only issue's
+  // scope (tracked as a follow-up).
   return {
     id,
     name: id,
