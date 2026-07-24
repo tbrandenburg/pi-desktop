@@ -48,6 +48,46 @@ describe("buildModelsRegistry", () => {
     expect(auth?.auth.apiKey).toBe("sk-app-only");
   });
 
+  it("actually dispatches a real network stream call for an app-settings-only model (proves it is streamable, not just listable)", async () => {
+    // baseUrl deliberately points at a port nothing listens on, so the real
+    // pi-ai openai-completions implementation's HTTP client fails fast with a
+    // connection error -- this is the true system boundary (network), so it
+    // is not mocked. What this proves is that `models.stream()` got far
+    // enough to resolve auth for the right provider and issue a genuine
+    // outbound request; an "unconfigured provider"/auth error here would
+    // instead mean the registry wiring itself is broken.
+    const registry = await buildModelsRegistry(
+      home,
+      cwd,
+      {
+        apiKey: "sk-app-only",
+        baseUrl: "http://127.0.0.1:1/v1",
+        model: "gpt-4o-mini",
+      },
+      realModelsLoaders,
+    );
+
+    const found = findModelById(registry.models, "gpt-4o-mini");
+    expect(found).not.toBeNull();
+
+    const events = registry.models.stream(found!.model, {
+      messages: [{ role: "user", content: "hello", timestamp: Date.now() }],
+    });
+
+    const collected: string[] = [];
+    for await (const event of events) {
+      collected.push(event.type);
+    }
+
+    // Streams terminate with either "done" or "error" (see AssistantMessageEvent
+    // doc comment); a real connection failure must surface as "error", never
+    // silently resolve as "done".
+    expect(collected[collected.length - 1]).toBe("error");
+    const result = await events.result();
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toBeTruthy();
+  });
+
   it("returns no models when neither app settings nor .pi/agent config is present", async () => {
     const registry = await buildModelsRegistry(home, cwd, undefined, realModelsLoaders);
     await expect(registry.models.getAvailable()).resolves.toEqual([]);

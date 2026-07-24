@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AssistantMessageEvent, Context, Message } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessageEvent, Context, Message } from "@earendil-works/pi-ai";
 import type { BrowserWindow } from "electron";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
 import { buildModelsRegistry, findModelById, type ModelsRegistry } from "./models";
@@ -11,7 +11,7 @@ async function loadModelsRegistryForChat(
   return buildModelsRegistry(undefined, undefined, settings);
 }
 
-function toContext(request: StartChatRequest): Context {
+function toContext(request: StartChatRequest, api: Api, provider: string): Context {
   const messages: Message[] = request.messages.map((message) => {
     if (message.role === "user") {
       return { role: "user", content: message.content, timestamp: Date.now() };
@@ -19,8 +19,8 @@ function toContext(request: StartChatRequest): Context {
     return {
       role: "assistant",
       content: [{ type: "text", text: message.content }],
-      api: "openai-completions",
-      provider: "openai-compatible",
+      api,
+      provider,
       model: request.model,
       usage: {
         input: 0,
@@ -110,7 +110,7 @@ export class ChatService {
         return;
       }
 
-      const context = toContext(request);
+      const context = toContext(request, found.model.api, found.providerId);
 
       this.emit({ type: "started", requestId });
 
