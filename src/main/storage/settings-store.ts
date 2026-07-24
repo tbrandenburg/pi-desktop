@@ -68,6 +68,19 @@ export class SettingsStore {
     };
   }
 
+  /**
+   * True only when the user has explicitly saved their own provider
+   * settings (as opposed to `get()`'s `.pi/agent`-derived fallback). Used to
+   * decide whether the app's own settings.json should be registered as its
+   * own model source -- registering the *fallback* value would just
+   * duplicate whatever `.pi/agent` provider it was derived from, under a
+   * misleading "app-settings" label.
+   */
+  async hasSavedApiKey(): Promise<boolean> {
+    const store = await this.load();
+    return Boolean(store.get("apiKey"));
+  }
+
   async save(settings: ProviderSettings): Promise<void> {
     const store = await this.load();
     if (settings.apiKey) {

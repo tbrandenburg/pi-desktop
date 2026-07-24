@@ -1,6 +1,11 @@
 import os from "node:os";
 import type { ModelInfo } from "../../shared/events";
-import { buildModelsRegistry, type ModelsLoaders, type ModelsRegistry } from "./models";
+import {
+  buildModelsRegistry,
+  type AppSettingsProviderInput,
+  type ModelsLoaders,
+  type ModelsRegistry,
+} from "./models";
 
 export interface ResolvedPiDefault {
   apiKey: string;
@@ -67,18 +72,20 @@ export async function resolvePiDefault(
 }
 
 /**
- * Lists every model available from the currently configured `.pi/agent`
- * providers (project-local `<cwd>/.pi/agent` first, then the global
- * `~/.pi/agent`), so the model picker only ever shows models the user can
- * actually reach with the credentials they already have -- no hardcoded
- * placeholder models.
+ * Lists every model available from the currently configured providers:
+ * the app's own `settings.json` (if given), the global `~/.pi/agent`, and
+ * the project-local `<cwd>/.pi/agent` -- so the model picker shows every
+ * model the user can actually reach with credentials they already have,
+ * including a model configured purely through the app's own Settings UI
+ * with no `.pi/agent` config present at all.
  */
 export async function listConfiguredModels(
   homeDir: string = os.homedir(),
   cwd: string = process.cwd(),
+  appSettings?: AppSettingsProviderInput,
   loaders?: ModelsLoaders,
 ): Promise<ModelInfo[]> {
-  const registry = await buildModelsRegistry(homeDir, cwd, undefined, loaders);
+  const registry = await buildModelsRegistry(homeDir, cwd, appSettings, loaders);
   const available = await registry.models.getAvailable();
 
   const seen = new Set<string>();

@@ -379,7 +379,17 @@ describe("listConfiguredModels", () => {
   });
 
   it("returns an empty list when nothing is configured", async () => {
-    await expect(listConfiguredModels(home, emptyCwd, realModelsLoaders)).resolves.toEqual([]);
+    await expect(listConfiguredModels(home, emptyCwd, undefined, realModelsLoaders)).resolves.toEqual([]);
+  });
+
+  it("includes a model configured only via the app's own settings, with zero .pi files present", async () => {
+    const models = await listConfiguredModels(
+      home,
+      emptyCwd,
+      { apiKey: "sk-app-only", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+      realModelsLoaders,
+    );
+    expect(models).toEqual([{ id: "gpt-4o-mini", label: "app-settings/gpt-4o-mini" }]);
   });
 
   it("lists every model from every configured, credentialed provider across APIs", async () => {
@@ -405,7 +415,7 @@ describe("listConfiguredModels", () => {
     process.env.LLM7_TOKEN_LIST_TEST = "llm7-list-token";
     process.env.ANTHROPIC_TOKEN_LIST_TEST = "anthropic-list-token";
 
-    const models = await listConfiguredModels(home, emptyCwd, realModelsLoaders);
+    const models = await listConfiguredModels(home, emptyCwd, undefined, realModelsLoaders);
 
     expect(models).toEqual(
       expect.arrayContaining([
@@ -435,6 +445,6 @@ describe("listConfiguredModels", () => {
       }),
     );
 
-    await expect(listConfiguredModels(home, emptyCwd, realModelsLoaders)).resolves.toEqual([]);
+    await expect(listConfiguredModels(home, emptyCwd, undefined, realModelsLoaders)).resolves.toEqual([]);
   });
 });

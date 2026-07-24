@@ -270,6 +270,50 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
    in `dist-main/**/*.js`" as an acceptance check. Add explicit `!dist-main/
    **/*.test.js` / `!dist-main/**/test-support/**` negation globs to
    `electron-builder.yml`'s `files` list so the check (and the package
-   itself) only reflects real production code paths.
+    itself) only reflects real production code paths.
+6. **Verifying an acceptance criterion by literally re-reading the issue
+   against the diff, after "done", found a real functional gap that all
+   automated tests had missed**: `pi-config.ts`'s `listConfiguredModels()`
+   was still only ever called as `listConfiguredModels()` (no args) from
+   `ipc.ts`, so the app's own `settings.json` model was never registered in
+   the model registry the picker actually lists from — only
+   `resolvePiDefault()`'s `.pi/agent`-only fallback logic ran. Unit tests
+   passed because they called `listConfiguredModels(home, cwd, appSettings)`
+   directly with the new parameter; nothing exercised the real IPC call site
+   that omitted it. Caught only by manually re-running the issue's own
+   acceptance criteria end-to-end against the packaged app, not by any
+   automated check. Lesson: when an issue lists concrete acceptance criteria,
+   re-verify each one against the actual call sites (not just the function's
+   own unit tests) before declaring it done — a new optional parameter is
+   invisible to type-checking if every real caller still compiles without it.
+7. **`$HOME`/env-var overrides passed via `env VAR=x setsid nohup <AppImage>
+   &` are unreliable depending on argument order and whether the command
+   also relies on the shell tool's `workdir` parameter for `cwd`.** In this
+   project, `setsid nohup env HOME=fake "AppImage" ...` silently launched
+   with the real `$HOME` (proven by the app reading the real global
+   `~/.pi/agent` instead of the fake one), while `cd realDir && env HOME=fake
+   setsid nohup "AppImage" ...` (env variables set *before* `setsid`/`nohup`,
+   and `cd` executed as a literal shell command rather than relying on the
+   tool's `workdir` param) worked correctly and was independently confirmed
+   via `/proc/<pid>/cwd`. Always verify env/cwd actually reached the target
+   process (e.g. `readlink -f /proc/<pid>/cwd`, or an observable behavior
+   difference like a changed model list) before trusting a negative test
+   case in a launch-and-inspect E2E flow — do not assume the override took
+   effect just because the launch command didn't error. Note: Chromium
+   zeroes its own process's `/proc/<pid>/environ` for security, so it cannot
+   be read back directly to confirm env vars; use an observable behavior
+   difference instead.
+8. **A real (non-mocked) network-boundary test can still prove correct
+   wiring without a valid credential.** Verifying the `anthropic-messages`
+   API path end-to-end in the packaged app used a deliberately-invalid
+   placeholder API key against the real `api.anthropic.com` endpoint. The
+   real Anthropic server's `401 {"code":"authentication_error", ...}`
+   response (as opposed to a local "provider not configured"/wiring
+   exception) is itself valid, honest evidence that model resolution, auth
+   application, and the real HTTP dispatch all worked correctly — a full
+   successful reply isn't required to prove routing correctness when no
+   real credential is available. Report the limitation explicitly rather
+   than skipping the case or faking success.
+
 
 

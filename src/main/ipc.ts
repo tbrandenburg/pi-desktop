@@ -22,7 +22,17 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     // resolved from `.pi/agent` is put first so it's selected by default
     // and chat works out of the box.
     const settings = await settingsStore.get();
-    const models = await listConfiguredModels();
+    // Only register the app's own settings as their own model source when
+    // the user actually saved them explicitly -- `settings` here may just be
+    // resolvePiDefault()'s .pi/agent-derived fallback (see SettingsStore.get()),
+    // and registering that as a separate "app-settings" provider would just
+    // duplicate the underlying .pi/agent provider under a misleading label.
+    const hasSavedApiKey = await settingsStore.hasSavedApiKey();
+    const models = await listConfiguredModels(
+      undefined,
+      undefined,
+      hasSavedApiKey ? settings : undefined,
+    );
     const piDefault = await resolvePiDefault();
 
     if (piDefault && piDefault.model === settings.model) {
