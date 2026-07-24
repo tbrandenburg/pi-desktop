@@ -2,6 +2,7 @@ import os from "node:os";
 import type { ModelInfo } from "../../shared/events";
 import {
   buildModelsRegistry,
+  qualifyModelId,
   type AppSettingsProviderInput,
   type ModelsLoaders,
   type ModelsRegistry,
@@ -10,7 +11,9 @@ import {
 export interface ResolvedPiDefault {
   apiKey: string;
   baseUrl: string;
+  /** Bare model id (not qualified with a provider prefix). */
   model: string;
+  /** Fully-qualified `provider/modelId` -- see `qualifyModelId`. */
   label: string;
 }
 
@@ -33,7 +36,7 @@ async function resolveFromRegistry(
     apiKey: auth.auth.apiKey,
     baseUrl: model.baseUrl,
     model: model.id,
-    label: `${providerId}/${model.id}`,
+    label: qualifyModelId(providerId, model.id),
   };
 }
 
@@ -78,6 +81,12 @@ export async function resolvePiDefault(
  * model the user can actually reach with credentials they already have,
  * including a model configured purely through the app's own Settings UI
  * with no `.pi/agent` config present at all.
+ *
+ * `ModelInfo.id` is the fully-qualified `provider/modelId` (see
+ * `qualifyModelId`), not the bare model id -- required for correctness
+ * once pi-ai's built-in catalogs are registered, since bare model ids are
+ * *not* unique across providers (e.g. "gpt-5.6-luna" ships identically
+ * from six different built-in providers).
  */
 export async function listConfiguredModels(
   homeDir: string = os.homedir(),
@@ -88,17 +97,8 @@ export async function listConfiguredModels(
   const registry = await buildModelsRegistry(homeDir, cwd, appSettings, loaders);
   const available = await registry.models.getAvailable();
 
-  // Providers are iterated in precedence order (lowest first -- built-ins,
-  // then app-settings, then global/project custom; see buildModelsRegistry).
-  // pi-ai's built-in catalogs contain thousands of real model ids that can
-  // plausibly collide with a user's own custom/app-settings model id, so a
-  // plain first-seen dedupe would wrongly show a built-in's label for a
-  // user-configured model of the same id. A `Map` keyed by id, written in
-  // registration order, keeps the *last* (highest-precedence) provider's
-  // label for any id collision instead.
-  const byId = new Map<string, ModelInfo>();
-  for (const model of available) {
-    byId.set(model.id, { id: model.id, label: `${model.provider}/${model.id}` });
-  }
-  return Array.from(byId.values());
+  return available.map((model) => ({
+    id: qualifyModelId(model.provider, model.id),
+    label: `${model.provider}/${model.id}`,
+  }));
 }

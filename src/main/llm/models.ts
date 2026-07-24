@@ -389,26 +389,41 @@ export async function buildModelsRegistry(
 }
 
 /**
- * Finds a model by id across every provider in the registry.
+ * Builds the fully-qualified, globally-unique id for a model: `provider/modelId`.
+ * This -- not the bare model id -- is what's ever handed to the renderer as
+ * `ModelInfo.id` and round-tripped back as `StartChatRequest.model`.
  *
- * Providers are registered in precedence order (lowest first --
- * built-ins, then app-settings, then global custom, then project custom;
- * see `buildModelsRegistry`), and pi-ai's 37 built-in catalogs contain
- * thousands of real model ids (e.g. "gpt-4o-mini") that can plausibly
- * collide with a user's own custom/app-settings model id. Searching in
- * *reverse* registration order means a higher-precedence, user-configured
- * provider always wins an id collision over an incidental built-in catalog
- * entry of the same name.
+ * This is necessary because bare model ids are *not* unique once pi-ai's
+ * built-in catalogs are registered: e.g. "gpt-5.6-luna" ships identically
+ * from six different built-in providers (azure-openai-responses,
+ * cloudflare-ai-gateway, github-copilot, openai, openai-codex, opencode).
+ * A flat `id` string can never disambiguate which one the user picked.
+ */
+export function qualifyModelId(providerId: string, modelId: string): string {
+  return `${providerId}/${modelId}`;
+}
+
+/**
+ * Resolves a fully-qualified `provider/modelId` id (as produced by
+ * `qualifyModelId`) back to its exact model + provider -- an O(1), fully
+ * deterministic lookup with no cross-provider ambiguity, since the
+ * provider id is encoded directly in the string. The model id itself may
+ * contain further "/" characters (e.g. OpenRouter's own "openai/gpt-4o"
+ * naming), so only the *first* segment is treated as the provider id.
  */
 export function findModelById(
   models: MutableModels,
-  id: string,
+  qualifiedId: string,
 ): { model: Model<Api>; providerId: string } | null {
-  const providers = models.getProviders();
-  for (let i = providers.length - 1; i >= 0; i--) {
-    const provider = providers[i];
-    const match = provider.getModels().find((m) => m.id === id);
-    if (match) return { model: match, providerId: provider.id };
-  }
-  return null;
+  const separatorIndex = qualifiedId.indexOf("/");
+  if (separatorIndex === -1) return null;
+
+  const providerId = qualifiedId.slice(0, separatorIndex);
+  const modelId = qualifiedId.slice(separatorIndex + 1);
+
+  const provider = models.getProvider(providerId);
+  if (!provider) return null;
+
+  const match = provider.getModels().find((m) => m.id === modelId);
+  return match ? { model: match, providerId } : null;
 }

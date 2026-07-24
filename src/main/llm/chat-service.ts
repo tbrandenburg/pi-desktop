@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Api, AssistantMessageEvent, Context, Message } from "@earendil-works/pi-ai";
 import type { BrowserWindow } from "electron";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
-import { buildModelsRegistry, findModelById, type ModelsRegistry } from "./models";
+import { buildModelsRegistry, findModelById, qualifyModelId, APP_SETTINGS_PROVIDER_ID, type ModelsRegistry } from "./models";
 import type { SettingsStore } from "../storage/settings-store";
 
 async function loadModelsRegistryForChat(
@@ -89,7 +89,14 @@ export class ChatService {
         return;
       }
 
-      const modelId = request.model || settings.model;
+      // `request.model` (from the renderer's selected model) is always
+      // already fully-qualified (`provider/modelId`, see `qualifyModelId`).
+      // `settings.model` (StoredSettings, the defensive fallback used only
+      // when the renderer somehow didn't send one) is always a *bare* model
+      // id scoped to the app's own single-slot provider, so it must be
+      // qualified before `findModelById` can resolve it.
+      const modelId =
+        request.model || (settings.model && qualifyModelId(APP_SETTINGS_PROVIDER_ID, settings.model));
       if (!modelId) {
         this.emit({
           type: "error",

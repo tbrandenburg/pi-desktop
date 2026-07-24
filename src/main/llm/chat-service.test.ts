@@ -26,6 +26,7 @@ function makeRegistryLoader(stream: MutableModels["stream"]) {
   };
   const provider = { id: "app-settings", getModels: () => [model] };
   const models = {
+    getProvider: (id: string) => (id === "app-settings" ? provider : undefined),
     getProviders: () => [provider],
     stream,
   } as unknown as MutableModels;
@@ -46,7 +47,7 @@ function makeFakeWindow(sent: ChatEvent[]) {
 function makeRequest(): StartChatRequest {
   return {
     conversationId: "conv-1",
-    model: "gpt-4o-mini",
+    model: "app-settings/gpt-4o-mini",
     messages: [{ role: "user", content: "hello" }],
   };
 }

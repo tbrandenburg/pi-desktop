@@ -9,6 +9,13 @@ import { resolvePiDefault } from "../llm/pi-config";
 export interface StoredSettings {
   apiKey: string;
   baseUrl: string;
+  /**
+   * Bare model id (never qualified with a provider prefix), always scoped
+   * to the app's own single-slot provider -- see `APP_SETTINGS_PROVIDER_ID`
+   * in `../llm/models`. Callers that need a fully-qualified id for registry
+   * lookup/comparison (`chat-service.ts`, `ipc.ts`) qualify it themselves
+   * with `qualifyModelId(APP_SETTINGS_PROVIDER_ID, model)`.
+   */
   model: string;
 }
 

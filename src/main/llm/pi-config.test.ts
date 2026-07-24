@@ -389,7 +389,7 @@ describe("listConfiguredModels", () => {
       { apiKey: "sk-app-only", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
       realModelsLoaders,
     );
-    expect(models).toEqual([{ id: "gpt-4o-mini", label: "app-settings/gpt-4o-mini" }]);
+    expect(models).toEqual([{ id: "app-settings/gpt-4o-mini", label: "app-settings/gpt-4o-mini" }]);
   });
 
   it("lists every model from every configured, credentialed provider across APIs", async () => {
@@ -419,9 +419,9 @@ describe("listConfiguredModels", () => {
 
     expect(models).toEqual(
       expect.arrayContaining([
-        { id: "gpt-oss-20b", label: "llm7/gpt-oss-20b" },
-        { id: "minimax-m2.7", label: "llm7/minimax-m2.7" },
-        { id: "claude-opus", label: "anthropic-custom/claude-opus" },
+        { id: "llm7/gpt-oss-20b", label: "llm7/gpt-oss-20b" },
+        { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
+        { id: "anthropic-custom/claude-opus", label: "anthropic-custom/claude-opus" },
       ]),
     );
     expect(models).toHaveLength(3);

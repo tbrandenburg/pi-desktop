@@ -147,6 +147,36 @@ describe("IPC settings round-trip integration", () => {
     vi.mocked(listConfiguredModels).mockResolvedValue([]);
   });
 
+  it("reorders the resolved .pi/agent default to the front using its fully-qualified id (not the bare model id)", async () => {
+    // Regression coverage: ResolvedPiDefault.model is a *bare* id (matched
+    // against StoredSettings.model, itself bare), while ModelInfo.id from
+    // listConfiguredModels is always fully-qualified ("provider/modelId").
+    // The reordering must match against `piDefault.label` (qualified), not
+    // `piDefault.model` (bare) -- a bare-vs-qualified mismatch here would
+    // silently disable the "put the current default first" behavior.
+    const { listConfiguredModels, resolvePiDefault } = await import("./llm/pi-config");
+    vi.mocked(listConfiguredModels).mockResolvedValue([
+      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
+      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
+    ]);
+    vi.mocked(resolvePiDefault).mockResolvedValue({
+      apiKey: "sk-test",
+      baseUrl: "https://api.llm7.io/v1",
+      model: "minimax-m2.7",
+      label: "llm7/minimax-m2.7",
+    });
+
+    const models = await invoke("llm:list-models");
+
+    expect(models).toEqual([
+      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
+      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
+    ]);
+
+    vi.mocked(listConfiguredModels).mockResolvedValue([]);
+    vi.mocked(resolvePiDefault).mockResolvedValue(null);
+  });
+
   it("cancels an unknown request id through the IPC boundary without throwing", async () => {
     // ChatService.cancel() is a no-op for unknown/completed request ids; this
     // verifies the llm:cancel-chat handler wires through to it correctly

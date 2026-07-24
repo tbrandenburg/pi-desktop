@@ -2,7 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildModelsRegistry, findModelById, APP_SETTINGS_PROVIDER_ID } from "./models";
+import {
+  buildModelsRegistry,
+  findModelById,
+  qualifyModelId,
+  APP_SETTINGS_PROVIDER_ID,
+} from "./models";
 import { realModelsLoaders } from "./test-support/real-models-loaders";
 
 describe("buildModelsRegistry", () => {
@@ -39,7 +44,7 @@ describe("buildModelsRegistry", () => {
       expect.objectContaining({ id: "gpt-4o-mini", provider: APP_SETTINGS_PROVIDER_ID }),
     ]);
 
-    const found = findModelById(registry.models, "gpt-4o-mini");
+    const found = findModelById(registry.models, qualifyModelId(APP_SETTINGS_PROVIDER_ID, "gpt-4o-mini"));
     expect(found?.providerId).toBe(APP_SETTINGS_PROVIDER_ID);
 
     // stream() must resolve auth from the in-memory static apiKey without
@@ -67,7 +72,7 @@ describe("buildModelsRegistry", () => {
       realModelsLoaders,
     );
 
-    const found = findModelById(registry.models, "gpt-4o-mini");
+    const found = findModelById(registry.models, qualifyModelId(APP_SETTINGS_PROVIDER_ID, "gpt-4o-mini"));
     expect(found).not.toBeNull();
 
     const events = registry.models.stream(found!.model, {
@@ -173,11 +178,33 @@ describe("buildModelsRegistry with pi-ai built-in providers (auth.json)", () => 
     expect(auth?.auth.apiKey).toBe("sk-or-project-key");
   });
 
-  it("prefers a user-configured model over a built-in catalog entry of the same id (id-collision precedence)", async () => {
-    // A real built-in provider (openai) ships a model literally named
-    // "gpt-4o-mini". A user-configured app-settings model of the same id
-    // must win the lookup -- proves findModelById doesn't silently resolve
-    // to an unrelated built-in provider on a plausible id collision.
+  it("resolves a fully-qualified id to the exact provider requested, even when a bare model id is ambiguous across providers", async () => {
+    // Real-world regression: pi-ai's built-in catalog ships a model
+    // literally named "gpt-5.6-luna" identically from *six* different
+    // built-in providers (azure-openai-responses, cloudflare-ai-gateway,
+    // github-copilot, openai, openai-codex, opencode). A bare-id lookup is
+    // structurally ambiguous; qualifyModelId/findModelById must resolve
+    // deterministically to the exact provider encoded in the id, not
+    // whichever provider happens to register last.
+    const registry = await buildModelsRegistry(home, cwd, undefined, realModelsLoaders);
+
+    const collidingProviders = registry.models
+      .getProviders()
+      .filter((p) => p.getModels().some((m) => m.id === "gpt-5.6-luna"))
+      .map((p) => p.id);
+    expect(collidingProviders.length).toBeGreaterThanOrEqual(6);
+
+    for (const providerId of collidingProviders) {
+      const found = findModelById(registry.models, qualifyModelId(providerId, "gpt-5.6-luna"));
+      expect(found?.providerId).toBe(providerId);
+    }
+  });
+
+  it("a user-configured app-settings model never collides with a built-in catalog entry of the same bare id", async () => {
+    // Built-in "openai" ships a model literally named "gpt-4o-mini". A
+    // user-configured app-settings model of the same *bare* id is a
+    // structurally distinct, fully-qualified id ("app-settings/gpt-4o-mini"
+    // vs "openai/gpt-4o-mini") and cannot collide with it.
     const registry = await buildModelsRegistry(
       home,
       cwd,
@@ -185,7 +212,13 @@ describe("buildModelsRegistry with pi-ai built-in providers (auth.json)", () => 
       realModelsLoaders,
     );
 
-    const found = findModelById(registry.models, "gpt-4o-mini");
-    expect(found?.providerId).toBe(APP_SETTINGS_PROVIDER_ID);
+    const appSettingsMatch = findModelById(
+      registry.models,
+      qualifyModelId(APP_SETTINGS_PROVIDER_ID, "gpt-4o-mini"),
+    );
+    expect(appSettingsMatch?.providerId).toBe(APP_SETTINGS_PROVIDER_ID);
+
+    const builtinMatch = findModelById(registry.models, qualifyModelId("openai", "gpt-4o-mini"));
+    expect(builtinMatch?.providerId).toBe("openai");
   });
 });

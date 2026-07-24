@@ -349,5 +349,36 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
     id* of the resolved match, not just that a model with the given id was
     found at all — a test that only checks "a match exists" cannot catch a
     same-id collision resolving to the wrong provider.
-
+11. **A "fixed" precedence-based tie-break for id collisions was still
+    wrong, and only a user re-testing their own real, specific model caught
+    it.** The reverse-precedence `findModelById` (lesson 10) only
+    disambiguates *user-configured vs. built-in* collisions; it does
+    nothing for collisions *between two built-in providers*, which turned
+    out to be extremely common: `MODELS.generated.ts` ships the literal
+    model id `"gpt-5.6-luna"` identically from **six** different built-in
+    providers (azure-openai-responses, cloudflare-ai-gateway,
+    github-copilot, openai, openai-codex, opencode). Selecting
+    `github-copilot`'s `gpt-5.6-luna` in the picker silently resolved to
+    `opencode`'s (registered later in `builtinProviders()`'s array),
+    producing a confusing `"Provider is not configured: opencode"` error
+    instead of the real, correct `"OAuth refresh failed for github-copilot"`
+    (confirmed by running the *real* `pi` CLI side-by-side with the same
+    model/provider pair — it hit the identical expired-token error,
+    proving the underlying credential issue was real and unrelated to our
+    app, once the routing bug was fixed). The only real fix was structural,
+    not another precedence heuristic: make `ModelInfo.id` (and
+    `StartChatRequest.model`) a **fully-qualified** `provider/modelId`
+    string everywhere, so lookup is an O(1) exact match with zero
+    cross-provider ambiguity, instead of ever searching by bare id. This
+    required auditing *every* consumer of the bare model id end-to-end
+    (`SettingsStore.get()`'s two branches, `ipc.ts`'s reordering
+    comparison, `chat-service.ts`'s fallback) to keep them internally
+    consistent about which fields are bare (scoped to one known provider)
+    vs. qualified (used for cross-provider lookup) — a partial fix that
+    qualifies some call sites but not others reintroduces the exact same
+    bug in a different shape. Lesson: when a user reports "X should just
+    work, try Y yourself" for a *specific* real value, don't substitute a
+    similar-looking test case (e.g. a different free-tier model) — reproduce
+    with the *exact* value named, since bugs like this are id-specific, not
+    provider-class-specific.
 
