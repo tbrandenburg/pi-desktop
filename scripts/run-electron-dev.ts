@@ -1,25 +1,32 @@
 /**
- * Waits for the Vite dev server to become reachable, then launches Electron
- * pointed at the built main process output. Used only by `npm run dev`.
+ * Starts the Vite dev server in-process (via Vite's Node API), waits for the
+ * main process build to be ready, then launches Electron pointed at the real
+ * bound dev server URL. Used only by `npm run dev`.
+ *
+ * No port is hardcoded: Vite picks its own starting port (see
+ * vite.config.ts) and auto-increments to the next free one if taken, since
+ * `strictPort` is not set. The actual bound URL is read back from
+ * `server.resolvedUrls` after `listen()` resolves.
  */
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { createServer } from "vite";
 
-const DEV_SERVER_URL = "http://localhost:5173";
 const MAIN_ENTRY = "dist-main/main/index.js";
 
-async function waitForServer(url: string, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url);
-      if (response.ok || response.status < 500) return;
-    } catch {
-      // Server not up yet; retry.
-    }
-    await delay(300);
+async function startViteDevServer(): Promise<string> {
+  const server = await createServer({
+    configFile: "vite.config.ts",
+  });
+  await server.listen();
+
+  const url = server.resolvedUrls?.local[0];
+  if (!url) {
+    throw new Error("Vite dev server started but no local URL was resolved");
   }
-  throw new Error(`Timed out waiting for dev server at ${url}`);
+
+  console.log(`[run-electron-dev] Vite dev server listening at ${url}`);
+  return url;
 }
 
 async function waitForMainBuild(timeoutMs: number): Promise<void> {
@@ -33,15 +40,15 @@ async function waitForMainBuild(timeoutMs: number): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  await Promise.all([
-    waitForServer(DEV_SERVER_URL, 30_000),
+  const [devServerUrl] = await Promise.all([
+    startViteDevServer(),
     waitForMainBuild(30_000),
   ]);
 
   const electronPath = (await import("electron")).default as unknown as string;
   const child = spawn(electronPath, ["."], {
     stdio: "inherit",
-    env: { ...process.env, VITE_DEV_SERVER_URL: DEV_SERVER_URL },
+    env: { ...process.env, VITE_DEV_SERVER_URL: devServerUrl },
   });
 
   child.on("exit", (code) => process.exit(code ?? 0));
