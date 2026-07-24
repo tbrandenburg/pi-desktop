@@ -2,6 +2,43 @@
 
 For more details check docs/INITIAL.md
 
+## Make targets
+
+The Makefile is the source of truth (`make help` always reflects it exactly);
+this list exists so agents don't have to open the Makefile just to know what
+exists.
+
+- `make install` — Install all dependencies (`npm install`).
+- `make run` — Start dev mode (renderer + main + electron via `npm run dev`).
+- `make stop` — Kill any running dev/electron processes started by `make run`.
+- `make test` — Run unit tests (`vitest`).
+- `make lint` / `make check` — Type-check renderer + main (`tsc --noEmit`, no
+  auto-fix; both names are aliases).
+- `make build` (`build-renderer`, `build-main`) — Build renderer + main for
+  production.
+- `make pack` — Build + package app dir only, no installer (fast local check).
+- `make dist` — Build + package installers for the current host platform.
+- `make dist-linux` — Build + package the Linux AppImage.
+- `make dist-win` — Build + package Windows nsis + portable installers
+  (requires `wine`/`mono` when cross-building from Linux).
+- `make clean` — Remove build artifacts (`dist-main`, `dist-renderer`,
+  `release`, `node_modules`).
+- `make run-bundled` — Run whatever was already built for the current host
+  platform (best-effort, picks the newest match under `release/`).
+- `make run-linux` / `make run-win` — Run a specific already-built artifact
+  directly (Linux AppImage / Windows exe, the latter via `wine` when
+  cross-running).
+- `make version-patch` / `version-minor` / `version-major` — Run `check` +
+  `test` first, then bump `package.json`/`package-lock.json`, commit
+  `chore(release): vX.Y.Z`, and git-tag it. Nothing pushed yet.
+- `make release` — Push the current release commit + its version tag to
+  `origin`.
+- `make publish` — Create the GitHub release for the current tag via `gh`
+  (release notes only; no build artifacts attached — run `dist-linux`/
+  `dist-win` separately and attach manually if needed).
+- `make release-patch` / `release-minor` / `release-major` — One-shot:
+  version bump → push → publish, in that order.
+
 ## Architecture rules (do not break)
 
 1. Do not change the architecture: Electron + React + Vite + pi-ai (+ optional pi-agent-core).
