@@ -9,6 +9,13 @@ import { resolvePiDefault } from "../llm/pi-config";
 export interface StoredSettings {
   apiKey: string;
   baseUrl: string;
+  /**
+   * Bare model id (never qualified with a provider prefix), always scoped
+   * to the app's own single-slot provider -- see `APP_SETTINGS_PROVIDER_ID`
+   * in `../llm/models`. Callers that need a fully-qualified id for registry
+   * lookup/comparison (`chat-service.ts`, `ipc.ts`) qualify it themselves
+   * with `qualifyModelId(APP_SETTINGS_PROVIDER_ID, model)`.
+   */
   model: string;
 }
 
@@ -42,7 +49,7 @@ export class SettingsStore {
     // default provider/model is already configured in ~/.pi/agent, so the
     // app can chat on first launch without a manual API key entry.
     if (!store.get("apiKey")) {
-      const piDefault = resolvePiDefault();
+      const piDefault = await resolvePiDefault();
       if (piDefault) {
         return {
           apiKey: piDefault.apiKey,
@@ -66,6 +73,19 @@ export class SettingsStore {
       model: settings.model,
       hasApiKey: settings.apiKey.length > 0,
     };
+  }
+
+  /**
+   * True only when the user has explicitly saved their own provider
+   * settings (as opposed to `get()`'s `.pi/agent`-derived fallback). Used to
+   * decide whether the app's own settings.json should be registered as its
+   * own model source -- registering the *fallback* value would just
+   * duplicate whatever `.pi/agent` provider it was derived from, under a
+   * misleading "app-settings" label.
+   */
+  async hasSavedApiKey(): Promise<boolean> {
+    const store = await this.load();
+    return Boolean(store.get("apiKey"));
   }
 
   async save(settings: ProviderSettings): Promise<void> {

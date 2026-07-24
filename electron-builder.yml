@@ -8,6 +8,9 @@ directories:
 files:
   - dist-renderer/**
   - dist-main/**
+  - "!dist-main/**/*.test.js"
+  - "!dist-main/**/*.test.js.map"
+  - "!dist-main/**/test-support/**"
   - package.json
 
 asar: true

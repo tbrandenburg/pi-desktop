@@ -245,4 +245,140 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
    CJS downlevel of `import()`) was only found by testing `asar: true` and
    `asar: false` independently and noticing the same class of error
    persisted either way once the actual root cause was isolated.
+4. **The `nativeDynamicImport` (`new Function(...)`) trick throws
+   `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` under Vitest's default vm-based
+   pool** — it has no real V8 module graph, so `new Function(...)`-constructed
+   code has no `importModuleDynamically` callback wired up, even though the
+   exact same trick works fine in the real packaged app and in `npm run dev`.
+   This means any module that calls the real loader directly (e.g.
+   `src/main/llm/models.ts`'s `buildModelsRegistry`) cannot be unit-tested
+   end-to-end by simply calling it — the loaders (`loadPiAi`/`loadApiModule`)
+   must be injectable parameters with real-package defaults, and tests must
+   inject a version that imports `@earendil-works/pi-ai` (and its subpaths)
+   the normal static way at the top of the *test* file, which Vitest's own
+   Vite-based resolver loads regardless of `tsconfig.main.json`'s
+   `moduleResolution: "Node"`. Since `Node` resolution can't see pi-ai's
+   subpath `"exports"` at all, add ambient `declare module "@earendil-works/
+   pi-ai/api/..."` shims (see `src/main/llm/test-support/pi-ai-subpaths.d.ts`)
+   so `tsc --noEmit` still type-checks the test fixtures.
+5. **`electron-builder`'s `files: dist-main/**` packages every compiled
+   `*.test.js`, including test-only fixture modules, into the app — even
+   ones nothing in production ever imports.** A test fixture that does a
+   real (non-hidden) `require("@earendil-works/pi-ai")` for testing purposes
+   is inert (never executed) but still literally present in the shipped
+   asar, which defeats the purpose of grepping "no `require(...)` of pi-ai
+   in `dist-main/**/*.js`" as an acceptance check. Add explicit `!dist-main/
+   **/*.test.js` / `!dist-main/**/test-support/**` negation globs to
+   `electron-builder.yml`'s `files` list so the check (and the package
+    itself) only reflects real production code paths.
+6. **Verifying an acceptance criterion by literally re-reading the issue
+   against the diff, after "done", found a real functional gap that all
+   automated tests had missed**: `pi-config.ts`'s `listConfiguredModels()`
+   was still only ever called as `listConfiguredModels()` (no args) from
+   `ipc.ts`, so the app's own `settings.json` model was never registered in
+   the model registry the picker actually lists from — only
+   `resolvePiDefault()`'s `.pi/agent`-only fallback logic ran. Unit tests
+   passed because they called `listConfiguredModels(home, cwd, appSettings)`
+   directly with the new parameter; nothing exercised the real IPC call site
+   that omitted it. Caught only by manually re-running the issue's own
+   acceptance criteria end-to-end against the packaged app, not by any
+   automated check. Lesson: when an issue lists concrete acceptance criteria,
+   re-verify each one against the actual call sites (not just the function's
+   own unit tests) before declaring it done — a new optional parameter is
+   invisible to type-checking if every real caller still compiles without it.
+7. **`$HOME`/env-var overrides passed via `env VAR=x setsid nohup <AppImage>
+   &` are unreliable depending on argument order and whether the command
+   also relies on the shell tool's `workdir` parameter for `cwd`.** In this
+   project, `setsid nohup env HOME=fake "AppImage" ...` silently launched
+   with the real `$HOME` (proven by the app reading the real global
+   `~/.pi/agent` instead of the fake one), while `cd realDir && env HOME=fake
+   setsid nohup "AppImage" ...` (env variables set *before* `setsid`/`nohup`,
+   and `cd` executed as a literal shell command rather than relying on the
+   tool's `workdir` param) worked correctly and was independently confirmed
+   via `/proc/<pid>/cwd`. Always verify env/cwd actually reached the target
+   process (e.g. `readlink -f /proc/<pid>/cwd`, or an observable behavior
+   difference like a changed model list) before trusting a negative test
+   case in a launch-and-inspect E2E flow — do not assume the override took
+   effect just because the launch command didn't error. Note: Chromium
+   zeroes its own process's `/proc/<pid>/environ` for security, so it cannot
+   be read back directly to confirm env vars; use an observable behavior
+   difference instead.
+8. **A real (non-mocked) network-boundary test can still prove correct
+   wiring without a valid credential.** Verifying the `anthropic-messages`
+   API path end-to-end in the packaged app used a deliberately-invalid
+   placeholder API key against the real `api.anthropic.com` endpoint. The
+   real Anthropic server's `401 {"code":"authentication_error", ...}`
+   response (as opposed to a local "provider not configured"/wiring
+   exception) is itself valid, honest evidence that model resolution, auth
+   application, and the real HTTP dispatch all worked correctly — a full
+   successful reply isn't required to prove routing correctness when no
+   real credential is available. Report the limitation explicitly rather
+   than skipping the case or faking success.
+9. **A user-directed manual test found a bigger gap than the original PR
+   review had: the model registry never used any of pi-ai's 37 built-in
+   provider catalogs (`@earendil-works/pi-ai/providers/all`'s
+   `builtinProviders()`) at all — it only supported custom `models.json`
+   providers and the app's own `settings.json`.** A user with a real global
+   `~/.pi/agent/auth.json` OpenRouter `api_key` credential and *no*
+   `models.json` entry for it got zero OpenRouter models, even though this
+   is a completely standard, common real-world config (the CLI itself works
+   this way). Root cause: `buildModelsRegistry()` never called
+   `builtinProviders()`, so an auth.json-only credential for a known
+   provider had no provider registration to attach to at all. Fixed by
+   registering every built-in provider (lowest precedence) and adding a real
+   `CredentialStore` that reads `.pi/agent/auth.json` (project overriding
+   global per provider id, mirroring `models.json`/`settings.json`
+   precedence) — this alone surfaced OpenRouter's real ~270-model catalog’s
+   real per-model cost/context-window metadata, live-verified end-to-end
+   (list → select → real chat reply) using the user's actual OpenRouter
+   key. Lesson: "does the issue's stated design intent (`pi-ai` ships N
+   built-in provider catalogs...) actually get *used* anywhere in the
+   diff?" is a distinct question from "do the unit tests pass" — grep the
+   diff for the feature the issue said was the point, not just its test
+   coverage.
+10. **Registering pi-ai's full built-in catalogs (thousands of real model
+    ids across 37 providers) turns "look up a model by id" into a genuine
+    collision risk** — e.g. Azure OpenAI's and OpenAI's own catalogs both
+    ship a model literally named `gpt-4o-mini`, which silently shadowed a
+    same-named test fixture for the app's own custom `settings.json`
+    provider. Fixed by making both `findModelById` (chat routing) and
+    `listConfiguredModels`'s id-keyed dedupe search/prefer providers in
+    *reverse* registration order, so a higher-precedence, user-configured
+    provider always wins an id collision over an incidentally-matching
+    built-in catalog entry. Caught by a unit test asserting the *provider
+    id* of the resolved match, not just that a model with the given id was
+    found at all — a test that only checks "a match exists" cannot catch a
+    same-id collision resolving to the wrong provider.
+11. **A "fixed" precedence-based tie-break for id collisions was still
+    wrong, and only a user re-testing their own real, specific model caught
+    it.** The reverse-precedence `findModelById` (lesson 10) only
+    disambiguates *user-configured vs. built-in* collisions; it does
+    nothing for collisions *between two built-in providers*, which turned
+    out to be extremely common: `MODELS.generated.ts` ships the literal
+    model id `"gpt-5.6-luna"` identically from **six** different built-in
+    providers (azure-openai-responses, cloudflare-ai-gateway,
+    github-copilot, openai, openai-codex, opencode). Selecting
+    `github-copilot`'s `gpt-5.6-luna` in the picker silently resolved to
+    `opencode`'s (registered later in `builtinProviders()`'s array),
+    producing a confusing `"Provider is not configured: opencode"` error
+    instead of the real, correct `"OAuth refresh failed for github-copilot"`
+    (confirmed by running the *real* `pi` CLI side-by-side with the same
+    model/provider pair — it hit the identical expired-token error,
+    proving the underlying credential issue was real and unrelated to our
+    app, once the routing bug was fixed). The only real fix was structural,
+    not another precedence heuristic: make `ModelInfo.id` (and
+    `StartChatRequest.model`) a **fully-qualified** `provider/modelId`
+    string everywhere, so lookup is an O(1) exact match with zero
+    cross-provider ambiguity, instead of ever searching by bare id. This
+    required auditing *every* consumer of the bare model id end-to-end
+    (`SettingsStore.get()`'s two branches, `ipc.ts`'s reordering
+    comparison, `chat-service.ts`'s fallback) to keep them internally
+    consistent about which fields are bare (scoped to one known provider)
+    vs. qualified (used for cross-provider lookup) — a partial fix that
+    qualifies some call sites but not others reintroduces the exact same
+    bug in a different shape. Lesson: when a user reports "X should just
+    work, try Y yourself" for a *specific* real value, don't substitute a
+    similar-looking test case (e.g. a different free-tier model) — reproduce
+    with the *exact* value named, since bugs like this are id-specific, not
+    provider-class-specific.
 

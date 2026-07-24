@@ -8,6 +8,7 @@ VERSION = $(shell node -p "require('./package.json').version")
 
 .PHONY: help install run stop test lint check build build-renderer build-main clean \
         dist dist-linux dist-win pack \
+        run-bundled run-linux run-win \
         version-patch version-minor version-major release publish \
         release-patch release-minor release-major
 
@@ -26,6 +27,11 @@ help:
 	@echo "  make dist-win    Build and package Windows installer (nsis + portable)"
 	@echo "                   Requires 'wine' when cross-building from Linux."
 	@echo "  make clean       Remove build artifacts (dist-*, release, node_modules)"
+	@echo "  make run-bundled Run the already-built app for the current host platform"
+	@echo "                   (best-effort: picks whatever's newest in release/)"
+	@echo "  make run-linux   Run the built Linux AppImage directly"
+	@echo "  make run-win     Run the built Windows app (native .exe, or via"
+	@echo "                   'wine' when cross-running from Linux/macOS)"
 	@echo "  make version-patch/-minor/-major"
 	@echo "                   Bump version (package.json + package-lock.json),"
 	@echo "                   commit 'chore(release): vX.Y.Z' and git tag it"
@@ -98,6 +104,71 @@ dist-win: build
 clean:
 	rm -rf dist-main dist-renderer release
 	rm -rf node_modules
+
+## --- Run the already-built (bundled) app ----------------------------------
+##
+## Convenience-only: these never build anything themselves (run `make
+## dist-linux`/`dist-win` first) and are best-effort about locating the
+## artifact, since electron-builder's exact filename varies by version/arch
+## (e.g. AppImage names use "x86_64", not "x64"). They just pick the most
+## recently built matching file under release/.
+
+## Run whatever was built for the current host platform (Linux or Windows)
+run-bundled:
+	@case "$$(uname -s)" in \
+		Linux*) $(MAKE) run-linux ;; \
+		MINGW*|MSYS*|CYGWIN*) $(MAKE) run-win ;; \
+		*) echo "error: unsupported host platform for 'make run-bundled': $$(uname -s)"; \
+		   echo "Run 'make run-linux' or 'make run-win' explicitly instead."; \
+		   exit 1 ;; \
+	esac
+
+## Run the built Linux AppImage (make dist-linux must have run first).
+## --no-sandbox is required in many dev containers/CI images where the
+## bundled chrome-sandbox helper isn't installed setuid-root, and
+## --disable-gpu avoids a GPU-process crash-loop on headless/software-
+## rendered X11 displays (VMs, containers, remote desktops) -- a real
+## desktop install typically doesn't need either, but both are harmless
+## there too (just software rendering instead of hardware-accelerated).
+run-linux:
+	@appimage=$$(ls -t release/*.AppImage 2>/dev/null | head -n1); \
+	if [ -z "$$appimage" ]; then \
+		echo "error: no .AppImage found under release/. Run 'make dist-linux' first."; \
+		exit 1; \
+	fi; \
+	chmod +x "$$appimage"; \
+	echo "Running: $$appimage"; \
+	"$$appimage" --no-sandbox --disable-gpu
+
+## Run the built Windows app (make dist-win must have run first).
+## Prefers the unpacked win-unpacked/*.exe (fastest, no installer prompts);
+## falls back to the portable exe, then the nsis installer exe. Runs
+## natively if already on Windows, otherwise via 'wine' (best-effort).
+run-win:
+	@exe=$$(ls -t release/win-unpacked/*.exe 2>/dev/null | head -n1); \
+	if [ -z "$$exe" ]; then \
+		exe=$$(ls -t release/*portable*.exe 2>/dev/null | head -n1); \
+	fi; \
+	if [ -z "$$exe" ]; then \
+		exe=$$(ls -t release/*setup*.exe 2>/dev/null | head -n1); \
+	fi; \
+	if [ -z "$$exe" ]; then \
+		echo "error: no Windows .exe found under release/. Run 'make dist-win' first."; \
+		exit 1; \
+	fi; \
+	case "$$(uname -s)" in \
+		MINGW*|MSYS*|CYGWIN*) \
+			echo "Running: $$exe"; \
+			"$$exe" ;; \
+		*) \
+			command -v wine >/dev/null 2>&1 || { \
+				echo "error: 'wine' is required to run a Windows .exe from $$(uname -s)."; \
+				echo "Install it first, e.g.: sudo apt-get install wine mono-complete"; \
+				exit 1; \
+			}; \
+			echo "Running via wine: $$exe"; \
+			wine "$$exe" ;; \
+	esac
 
 ## --- Versioning & release -------------------------------------------------
 ##

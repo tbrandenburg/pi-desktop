@@ -22,13 +22,31 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     // resolved from `.pi/agent` is put first so it's selected by default
     // and chat works out of the box.
     const settings = await settingsStore.get();
-    const models = listConfiguredModels();
-    const piDefault = resolvePiDefault();
+    // Only register the app's own settings as their own model source when
+    // the user actually saved them explicitly -- `settings` here may just be
+    // resolvePiDefault()'s .pi/agent-derived fallback (see SettingsStore.get()),
+    // and registering that as a separate "app-settings" provider would just
+    // duplicate the underlying .pi/agent provider under a misleading label.
+    const hasSavedApiKey = await settingsStore.hasSavedApiKey();
+    const models = await listConfiguredModels(
+      undefined,
+      undefined,
+      hasSavedApiKey ? settings : undefined,
+    );
+    const piDefault = await resolvePiDefault();
 
+    // `piDefault.model` and `settings.model` are both *bare* model ids (see
+    // ResolvedPiDefault/StoredSettings) -- equal here means the currently
+    // active settings genuinely are this resolved .pi/agent default (not a
+    // coincidental same-name match against an unrelated custom model),
+    // since `settings.model` only ever equals `piDefault.model` when
+    // SettingsStore.get() itself returned the fallback value. `models`
+    // entries use the fully-qualified id (`piDefault.label`), so match on
+    // that instead.
     if (piDefault && piDefault.model === settings.model) {
       const defaultEntry =
-        models.find((m) => m.id === piDefault.model) ?? { id: piDefault.model, label: piDefault.label };
-      return [defaultEntry, ...models.filter((m) => m.id !== piDefault.model)];
+        models.find((m) => m.id === piDefault.label) ?? { id: piDefault.label, label: piDefault.label };
+      return [defaultEntry, ...models.filter((m) => m.id !== piDefault.label)];
     }
 
     return models;
