@@ -254,12 +254,8 @@ function placeholderModel(id: string, provider: string, api: Api, baseUrl: strin
   // `@earendil-works/pi-coding-agent@0.82.0`'s `modelFromJson()`
   // (`dist/core/provider-composer.js`, verified via `npm pack`): they are
   // `??`-chained after a model definition's own fields exactly the same way
-  // there, i.e. `reasoning: false`, `input: ["text"]`, zero-cost `cost`, and
-  // `contextWindow: 128_000`. One value is a known, deliberate-scope
-  // deviation rather than a copy error: upstream falls back to
-  // `maxTokens: 16384`, while this file uses `4096` -- left as-is here since
-  // changing it would be a functional change out of this comment-only issue's
-  // scope (tracked as a follow-up).
+  // there, i.e. `reasoning: false`, `input: ["text"]`, zero-cost `cost`,
+  // `contextWindow: 128_000`, and `maxTokens: 16384`.
   return {
     id,
     name: id,
@@ -270,7 +266,7 @@ function placeholderModel(id: string, provider: string, api: Api, baseUrl: strin
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
-    maxTokens: 4096,
+    maxTokens: 16384,
   };
 }
 

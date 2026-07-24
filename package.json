@@ -10,7 +10,7 @@
   "scripts": {
     "dev:renderer": "vite",
     "dev:main": "tsc -p tsconfig.main.json -w",
-    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"tsx scripts/run-electron-dev.ts\"",
+    "dev": "concurrently -k \"npm:dev:main\" \"tsx scripts/run-electron-dev.ts\"",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
     "build": "npm run build:renderer && npm run build:main",
