@@ -1,6 +1,9 @@
 # STATUS
 
-Scope for tonight: Linux only (AppImage). Windows packaging is out of scope.
+Scope for tonight: Linux only (AppImage). Windows packaging was out of scope
+initially, but has since been verified to build and run natively on Windows
+(see Milestone 7 below); only the NSIS/portable installer step still needs a
+host-side Developer Mode setting.
 
 ## Completed milestones
 
@@ -128,3 +131,30 @@ Real display, real IPC, real provider smoke test (CDP-driven, no OS input
   ("Confirmed" / "Demo works") -- proving both the .pi-default-model fix and
   the ESM-import packaging fix work together in the real production build.
 ```
+## Milestone 7 — Windows build verified (2026-07-24)
+
+- Ran `npm install` (810 packages), `npm run check` (clean), and `npm test`
+  (6 files, 27 tests passed) natively on Windows 10/11 — all pass unchanged,
+  no platform-specific code paths needed.
+- `npm run build` (Vite renderer + `tsc` main) succeeds on Windows.
+- `npx electron-builder --win --x64` successfully produces an unpacked app
+  at `release/win-unpacked/Pi Desktop Demo.exe` (`--dir`-equivalent output).
+  Launched it directly (`Start-Process`): a real Electron window titled
+  "Pi Desktop" opened and stayed running, confirming the app boots and
+  renders correctly on native Windows with no code changes required.
+- The NSIS/portable installer targets (`win.target: nsis, portable` in
+  `electron-builder.yml`) **fail** on a stock, non-admin, non-Developer-Mode
+  Windows machine: electron-builder downloads the `winCodeSign` tool cache
+  (used even for unsigned Windows builds) and fails to extract it because
+  that archive contains symlinks for the bundled macOS/Darwin lib files —
+  `ERROR: Cannot create symbolic link : A required privilege is not held by
+  the client.` Creating symlinks without elevation requires Windows
+  **Developer Mode** enabled (Settings → For developers), or running the
+  build from an elevated shell. Not attempted here (no admin elevation, per
+  operational safety rules). The unpacked `win-unpacked` app is unaffected
+  and fully runnable without this — only the installer/portable `.exe`
+  packaging step needs it.
+- Conclusion: Windows is no longer out of scope for running/building the
+  app dir; only producing signed-style NSIS/portable installers needs an
+  extra one-time host setting (Developer Mode) that wasn't available in
+  this environment.
