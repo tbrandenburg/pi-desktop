@@ -88,12 +88,17 @@ export async function listConfiguredModels(
   const registry = await buildModelsRegistry(homeDir, cwd, appSettings, loaders);
   const available = await registry.models.getAvailable();
 
-  const seen = new Set<string>();
-  const models: ModelInfo[] = [];
+  // Providers are iterated in precedence order (lowest first -- built-ins,
+  // then app-settings, then global/project custom; see buildModelsRegistry).
+  // pi-ai's built-in catalogs contain thousands of real model ids that can
+  // plausibly collide with a user's own custom/app-settings model id, so a
+  // plain first-seen dedupe would wrongly show a built-in's label for a
+  // user-configured model of the same id. A `Map` keyed by id, written in
+  // registration order, keeps the *last* (highest-precedence) provider's
+  // label for any id collision instead.
+  const byId = new Map<string, ModelInfo>();
   for (const model of available) {
-    if (seen.has(model.id)) continue;
-    seen.add(model.id);
-    models.push({ id: model.id, label: `${model.provider}/${model.id}` });
+    byId.set(model.id, { id: model.id, label: `${model.provider}/${model.id}` });
   }
-  return models;
+  return Array.from(byId.values());
 }

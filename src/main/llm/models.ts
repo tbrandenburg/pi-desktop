@@ -3,9 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import type {
   Api,
+  Credential,
+  CredentialInfo,
+  CredentialStore,
   CreateProviderOptions,
   Model,
   MutableModels,
+  Provider,
   ProviderStreams,
 } from "@earendil-works/pi-ai";
 
@@ -58,6 +62,21 @@ function defaultLoadApiModule(api: string): Promise<ProviderStreams> {
   return modulePromise;
 }
 
+export interface BuiltinProvidersModule {
+  builtinProviders: () => Provider[];
+}
+
+const builtinProvidersSpecifier = "@earendil-works/pi-ai/providers/all";
+let builtinProvidersModule: Promise<BuiltinProvidersModule> | null = null;
+function defaultLoadBuiltinProviders(): Promise<BuiltinProvidersModule> {
+  if (!builtinProvidersModule) {
+    builtinProvidersModule = nativeDynamicImport(
+      builtinProvidersSpecifier,
+    ) as Promise<BuiltinProvidersModule>;
+  }
+  return builtinProvidersModule;
+}
+
 /**
  * Injectable pi-ai loaders. Production code relies on the defaults above
  * (real dynamic import). Because that import is deliberately hidden from
@@ -73,6 +92,7 @@ function defaultLoadApiModule(api: string): Promise<ProviderStreams> {
 export interface ModelsLoaders {
   loadPiAi?: () => Promise<PiAiModule>;
   loadApiModule?: (api: string) => Promise<ProviderStreams>;
+  loadBuiltinProviders?: () => Promise<BuiltinProvidersModule>;
 }
 
 interface AgentSettingsFile {
@@ -93,6 +113,98 @@ interface AgentProviderConfig {
 
 interface AgentModelsFile {
   providers?: Record<string, AgentProviderConfig>;
+}
+
+interface AuthJsonEntry {
+  type?: string;
+  key?: string;
+  refresh?: string;
+  access?: string;
+  expires?: number;
+  [key: string]: unknown;
+}
+
+type AuthJsonFile = Record<string, AuthJsonEntry>;
+
+function toCredential(entry: AuthJsonEntry | undefined): Credential | undefined {
+  if (!entry) return undefined;
+  if (entry.type === "api_key" && entry.key) {
+    return { type: "api_key", key: entry.key };
+  }
+  if (entry.type === "oauth" && entry.refresh && entry.access && typeof entry.expires === "number") {
+    return { type: "oauth", refresh: entry.refresh, access: entry.access, expires: entry.expires };
+  }
+  return undefined;
+}
+
+/**
+ * Reads credentials from `.pi/agent/auth.json` (the same file the Pi
+ * CLI/agent writes), project-local overriding global per provider id -- the
+ * same precedence as `models.json`/`settings.json`. This is what lets a
+ * pi-ai built-in provider (e.g. "openrouter") that has no `models.json`
+ * entry at all still resolve real auth, exactly like the CLI.
+ *
+ * Read-mostly: `modify()`/`delete()` only update the in-memory view (used by
+ * pi-ai's own OAuth refresh flow during a live request) and are never
+ * persisted back to `auth.json` -- this app has no login/logout UI of its
+ * own, so a refreshed token only lives for the current process lifetime.
+ */
+class AuthJsonCredentialStore implements CredentialStore {
+  private overrides = new Map<string, Credential | null>();
+
+  constructor(
+    private readonly globalDir: string,
+    private readonly projectDir: string,
+  ) {}
+
+  private fromDisk(providerId: string): Credential | undefined {
+    const project = readJson<AuthJsonFile>(path.join(this.projectDir, "auth.json"));
+    const projectCredential = toCredential(project?.[providerId]);
+    if (projectCredential) return projectCredential;
+
+    const global = readJson<AuthJsonFile>(path.join(this.globalDir, "auth.json"));
+    return toCredential(global?.[providerId]);
+  }
+
+  async read(providerId: string): Promise<Credential | undefined> {
+    if (this.overrides.has(providerId)) {
+      return this.overrides.get(providerId) ?? undefined;
+    }
+    return this.fromDisk(providerId);
+  }
+
+  async list(): Promise<readonly CredentialInfo[]> {
+    const merged = new Map<string, Credential>();
+    for (const dir of [this.globalDir, this.projectDir]) {
+      const file = readJson<AuthJsonFile>(path.join(dir, "auth.json")) ?? {};
+      for (const [providerId, entry] of Object.entries(file)) {
+        const credential = toCredential(entry);
+        if (credential) merged.set(providerId, credential);
+      }
+    }
+    for (const [providerId, credential] of this.overrides) {
+      if (credential) merged.set(providerId, credential);
+      else merged.delete(providerId);
+    }
+    return Array.from(merged.entries()).map(([providerId, credential]) => ({
+      providerId,
+      type: credential.type,
+    }));
+  }
+
+  async modify(
+    providerId: string,
+    fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+  ): Promise<Credential | undefined> {
+    const current = await this.read(providerId);
+    const next = await fn(current);
+    this.overrides.set(providerId, next ?? null);
+    return next;
+  }
+
+  async delete(providerId: string): Promise<void> {
+    this.overrides.set(providerId, null);
+  }
 }
 
 function readJson<T>(filePath: string): T | null {
@@ -215,12 +327,21 @@ export interface ModelsRegistry {
  * source, in precedence order (lowest first, since `setProvider` upserts
  * by id -- last one wins):
  *
- *   1. the app's own `settings.json` (via `SettingsStore`), if provided,
- *   2. the global `~/.pi/agent` providers,
- *   3. the project-local `<cwd>/.pi/agent` providers (highest precedence).
+ *   1. every pi-ai built-in provider (37 known providers, e.g. "openrouter",
+ *      "anthropic", "google", "github-copilot", ...), credentialed from
+ *      `.pi/agent/auth.json` (project overriding global) -- this is what
+ *      surfaces a provider's full real model catalog (e.g. OpenRouter's
+ *      ~270 models with real cost/context-window metadata) as soon as the
+ *      user has a credential for it, with zero `models.json` entry needed,
+ *   2. the app's own `settings.json` (via `SettingsStore`), if provided,
+ *   3. the global `~/.pi/agent` custom providers (`models.json`),
+ *   4. the project-local `<cwd>/.pi/agent` custom providers (highest
+ *      precedence) -- a custom `models.json` entry with the same id as a
+ *      built-in provider fully overrides it.
  *
  * `models.json` is optional at every level -- a source that has none simply
- * contributes no providers.
+ * contributes no custom providers, and built-ins still work off `auth.json`
+ * alone.
  */
 export async function buildModelsRegistry(
   homeDir: string = os.homedir(),
@@ -230,17 +351,25 @@ export async function buildModelsRegistry(
 ): Promise<ModelsRegistry> {
   const loadPiAi = loaders.loadPiAi ?? defaultLoadPiAi;
   const loadApiModule = loaders.loadApiModule ?? defaultLoadApiModule;
+  const loadBuiltinProviders = loaders.loadBuiltinProviders ?? defaultLoadBuiltinProviders;
 
   const { createModels, createProvider } = await loadPiAi();
-  const models = createModels();
+
+  const globalDir = path.join(homeDir, ".pi", "agent");
+  const projectDir = path.join(cwd, ".pi", "agent");
+
+  const credentials = new AuthJsonCredentialStore(globalDir, projectDir);
+  const models = createModels({ credentials });
+
+  const { builtinProviders } = await loadBuiltinProviders();
+  for (const provider of builtinProviders()) {
+    models.setProvider(provider);
+  }
 
   if (appSettings) {
     const opts = await appSettingsProviderOptions(appSettings, loadApiModule);
     if (opts) models.setProvider(createProvider(opts));
   }
-
-  const globalDir = path.join(homeDir, ".pi", "agent");
-  const projectDir = path.join(cwd, ".pi", "agent");
 
   for (const opts of await readProvidersFromAgentDir(globalDir, loadApiModule)) {
     models.setProvider(createProvider(opts));
@@ -259,12 +388,25 @@ export async function buildModelsRegistry(
   };
 }
 
-/** Finds a model by id across every provider in the registry. */
+/**
+ * Finds a model by id across every provider in the registry.
+ *
+ * Providers are registered in precedence order (lowest first --
+ * built-ins, then app-settings, then global custom, then project custom;
+ * see `buildModelsRegistry`), and pi-ai's 37 built-in catalogs contain
+ * thousands of real model ids (e.g. "gpt-4o-mini") that can plausibly
+ * collide with a user's own custom/app-settings model id. Searching in
+ * *reverse* registration order means a higher-precedence, user-configured
+ * provider always wins an id collision over an incidental built-in catalog
+ * entry of the same name.
+ */
 export function findModelById(
   models: MutableModels,
   id: string,
 ): { model: Model<Api>; providerId: string } | null {
-  for (const provider of models.getProviders()) {
+  const providers = models.getProviders();
+  for (let i = providers.length - 1; i >= 0; i--) {
+    const provider = providers[i];
     const match = provider.getModels().find((m) => m.id === id);
     if (match) return { model: match, providerId: provider.id };
   }

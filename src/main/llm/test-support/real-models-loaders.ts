@@ -2,6 +2,7 @@ import { createModels, createProvider } from "@earendil-works/pi-ai";
 import * as openAICompletions from "@earendil-works/pi-ai/api/openai-completions";
 import * as anthropicMessages from "@earendil-works/pi-ai/api/anthropic-messages";
 import * as googleGenerativeAi from "@earendil-works/pi-ai/api/google-generative-ai";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ModelsLoaders } from "../models";
 
 // Real `@earendil-works/pi-ai` code (createModels/createProvider + every API
@@ -27,4 +28,5 @@ export const realModelsLoaders: ModelsLoaders = {
     if (!module) throw new Error(`Unsupported pi-ai API in test fixture: "${api}"`);
     return module;
   },
+  loadBuiltinProviders: async () => ({ builtinProviders }),
 };

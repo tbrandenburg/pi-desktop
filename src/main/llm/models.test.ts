@@ -107,3 +107,85 @@ describe("buildModelsRegistry", () => {
     await expect(registry.models.getAvailable()).resolves.toEqual([]);
   });
 });
+
+describe("buildModelsRegistry with pi-ai built-in providers (auth.json)", () => {
+  let home: string;
+  let cwd: string;
+  let agentDir: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-builtin-home-"));
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-builtin-cwd-"));
+    agentDir = path.join(home, ".pi", "agent");
+    fs.mkdirSync(agentDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("discovers pi-ai's full built-in OpenRouter catalog from auth.json alone, with no models.json entry", async () => {
+    fs.writeFileSync(
+      path.join(agentDir, "auth.json"),
+      JSON.stringify({ openrouter: { type: "api_key", key: "sk-or-test-key" } }),
+    );
+
+    const registry = await buildModelsRegistry(home, cwd, undefined, realModelsLoaders);
+    const available = await registry.models.getAvailable("openrouter");
+
+    // Real, unmocked pi-ai built-in catalog: proves this isn't a hand-picked
+    // subset -- the actual generated OpenRouter model count ships with the
+    // installed pi-ai version.
+    expect(available.length).toBeGreaterThan(100);
+    expect(available.every((m) => m.provider === "openrouter")).toBe(true);
+
+    const auth = await registry.models.getAuth("openrouter");
+    expect(auth?.auth.apiKey).toBe("sk-or-test-key");
+  });
+
+  it("does not surface a built-in provider's models when no credential is configured for it", async () => {
+    // No auth.json at all: openrouter is a registered built-in provider (so
+    // its catalog exists), but must not be "available" without a credential.
+    const registry = await buildModelsRegistry(home, cwd, undefined, realModelsLoaders);
+    const provider = registry.models.getProvider("openrouter");
+    expect(provider).toBeDefined();
+    expect(provider!.getModels().length).toBeGreaterThan(100);
+
+    const available = await registry.models.getAvailable("openrouter");
+    expect(available).toEqual([]);
+  });
+
+  it("lets project-local auth.json override the global credential for the same provider id", async () => {
+    fs.writeFileSync(
+      path.join(agentDir, "auth.json"),
+      JSON.stringify({ openrouter: { type: "api_key", key: "sk-or-global-key" } }),
+    );
+    const projectAgentDir = path.join(cwd, ".pi", "agent");
+    fs.mkdirSync(projectAgentDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectAgentDir, "auth.json"),
+      JSON.stringify({ openrouter: { type: "api_key", key: "sk-or-project-key" } }),
+    );
+
+    const registry = await buildModelsRegistry(home, cwd, undefined, realModelsLoaders);
+    const auth = await registry.models.getAuth("openrouter");
+    expect(auth?.auth.apiKey).toBe("sk-or-project-key");
+  });
+
+  it("prefers a user-configured model over a built-in catalog entry of the same id (id-collision precedence)", async () => {
+    // A real built-in provider (openai) ships a model literally named
+    // "gpt-4o-mini". A user-configured app-settings model of the same id
+    // must win the lookup -- proves findModelById doesn't silently resolve
+    // to an unrelated built-in provider on a plausible id collision.
+    const registry = await buildModelsRegistry(
+      home,
+      cwd,
+      { apiKey: "sk-app-only", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+      realModelsLoaders,
+    );
+
+    const found = findModelById(registry.models, "gpt-4o-mini");
+    expect(found?.providerId).toBe(APP_SETTINGS_PROVIDER_ID);
+  });
+});

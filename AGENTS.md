@@ -314,6 +314,40 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
    successful reply isn't required to prove routing correctness when no
    real credential is available. Report the limitation explicitly rather
    than skipping the case or faking success.
-
+9. **A user-directed manual test found a bigger gap than the original PR
+   review had: the model registry never used any of pi-ai's 37 built-in
+   provider catalogs (`@earendil-works/pi-ai/providers/all`'s
+   `builtinProviders()`) at all — it only supported custom `models.json`
+   providers and the app's own `settings.json`.** A user with a real global
+   `~/.pi/agent/auth.json` OpenRouter `api_key` credential and *no*
+   `models.json` entry for it got zero OpenRouter models, even though this
+   is a completely standard, common real-world config (the CLI itself works
+   this way). Root cause: `buildModelsRegistry()` never called
+   `builtinProviders()`, so an auth.json-only credential for a known
+   provider had no provider registration to attach to at all. Fixed by
+   registering every built-in provider (lowest precedence) and adding a real
+   `CredentialStore` that reads `.pi/agent/auth.json` (project overriding
+   global per provider id, mirroring `models.json`/`settings.json`
+   precedence) — this alone surfaced OpenRouter's real ~270-model catalog’s
+   real per-model cost/context-window metadata, live-verified end-to-end
+   (list → select → real chat reply) using the user's actual OpenRouter
+   key. Lesson: "does the issue's stated design intent (`pi-ai` ships N
+   built-in provider catalogs...) actually get *used* anywhere in the
+   diff?" is a distinct question from "do the unit tests pass" — grep the
+   diff for the feature the issue said was the point, not just its test
+   coverage.
+10. **Registering pi-ai's full built-in catalogs (thousands of real model
+    ids across 37 providers) turns "look up a model by id" into a genuine
+    collision risk** — e.g. Azure OpenAI's and OpenAI's own catalogs both
+    ship a model literally named `gpt-4o-mini`, which silently shadowed a
+    same-named test fixture for the app's own custom `settings.json`
+    provider. Fixed by making both `findModelById` (chat routing) and
+    `listConfiguredModels`'s id-keyed dedupe search/prefer providers in
+    *reverse* registration order, so a higher-precedence, user-configured
+    provider always wins an id collision over an incidentally-matching
+    built-in catalog entry. Caught by a unit test asserting the *provider
+    id* of the resolved match, not just that a model with the given id was
+    found at all — a test that only checks "a match exists" cannot catch a
+    same-id collision resolving to the wrong provider.
 
 

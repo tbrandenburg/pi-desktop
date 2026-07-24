@@ -22,3 +22,9 @@ declare module "@earendil-works/pi-ai/api/google-generative-ai" {
   export const stream: ProviderStreams["stream"];
   export const streamSimple: ProviderStreams["streamSimple"];
 }
+
+declare module "@earendil-works/pi-ai/providers/all" {
+  import type { Provider } from "@earendil-works/pi-ai";
+  export function builtinProviders(): Provider[];
+}
+
