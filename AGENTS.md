@@ -60,6 +60,28 @@ exists.
 8. Keep STATUS.md updated with completed milestones and blockers.
 9. Test the production package, not only dev mode, before declaring packaging done.
 
+## Testing Rules
+
+These rules govern how agents write tests in this repo. They are mandatory,
+apply at generation time, and exist to stop drift before it happens rather
+than catch it after the fact.
+
+1. **No regression oracles.** Never derive a test's expected value by calling
+   the function/logic under test itself. Expected values must be hand-computed
+   or come from an independent, authoritative source (spec, fixture, known-good
+   reference), never from re-running the code being tested.
+2. **>= 2 behavioral assertions per test.** Every test must contain at least
+   two assertions that would actually fail if the underlying logic were
+   broken. Assertions that only check "did not throw" or verify type/shape
+   without checking real values do not count.
+3. **No mocking unless mocking is the subject.** Never mock a dependency
+   unless the mock itself is the explicit thing under test (e.g. testing
+   retry logic around a flaky dependency). Prefer real implementations and
+   integration over mocking.
+4. **Cleanup for anything stateful.** Any test involving timers, event
+   listeners, subscriptions, or open handles (sockets, file handles,
+   intervals) must have an `afterEach` (or equivalent) that cleans them up.
+
 ## Lessons learned (end-to-end UI review)
 
 1. **Session browsing/recovery was a UI placeholder, not a real feature.**
