@@ -39,5 +39,9 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  artifactName: "${productName}-${version}-${os}-${arch}-setup.${ext}"
+
+portable:
+  artifactName: "${productName}-${version}-${os}-${arch}-portable.${ext}"
 
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
