@@ -1,6 +1,16 @@
 import type { DesktopLLMApi, SessionRecord } from "../../shared/events";
 
 /**
+ * Reads the `?fakeModels=` query param from the current browser URL to force
+ * edge-case states in the fake desktop API without hand-editing this file
+ * (see AGENTS.md lesson 13). Add new cases here as new edge cases arise.
+ */
+function fakeModelsOverride(): "empty" | null {
+  const value = new URLSearchParams(window.location.search).get("fakeModels");
+  return value === "empty" ? "empty" : null;
+}
+
+/**
  * In-memory stand-in for the Electron preload bridge, used only when the app
  * is opened in a plain browser tab (no `window.desktopApi`, e.g. the Vite
  * dev server without Electron). Lets the whole renderer — session browsing,
@@ -15,6 +25,7 @@ export function createFakeDesktopApi(): DesktopLLMApi {
 
   return {
     async listModels() {
+      if (fakeModelsOverride() === "empty") return [];
       return [
         { id: "fake-mini", label: "Fake Mini (browser test)" },
         { id: "fake-pro", label: "Fake Pro (browser test)" },

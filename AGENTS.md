@@ -121,8 +121,21 @@ For more details check docs/INITIAL.md
     force this state directly. If this edge case needs re-testing often,
     consider adding a dev-only query-param toggle instead of hand-editing
     the fake API file each time.
-
-## How to test the compiled/packaged app (not just `npm test` / dev mode)
+14. **2026-07-24**: Item 13's suggested fix was implemented
+    (`?fakeModels=empty` query param read directly in `fake-desktop-api.ts`)
+    during a 3-way parallel subagent workflow. Before implementing it, the
+    subagent re-verified the issue's *other* premise — that the fake bridge
+    has "no compile-time parity guarantee" with `DesktopLLMApi` — by
+    temporarily removing a method from the fake's returned object literal
+    and re-running `npm run check`: it failed with a real `TS2741` missing-
+    property error, proving the existing `: DesktopLLMApi` return-type
+    annotation already gives full structural compile-time checking, making
+    a `satisfies DesktopLLMApi` addition redundant. Lesson: when a
+    parallel-subagent task description restates an assumption as fact
+    (e.g. "no compile-time guarantee exists"), instruct the subagent to
+    prove it with a real failing/passing test before implementing the
+    proposed fix — cheap to verify, and here it correctly cut scope instead
+    of adding a no-op annotation.
 
 `npm test` and dev mode (`npm run dev`) both run through Vite/Node module
 resolution directly from `.ts` source or a live dev server. Neither one

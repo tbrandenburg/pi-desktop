@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { immer } from "zustand/middleware/immer";
 import type { ChatMessage, ModelInfo, SessionSummary } from "../../shared/events";
 import { desktopApi } from "../lib/desktop-api";
 
@@ -36,7 +37,7 @@ interface ChatState {
 
 let unsubscribe: (() => void) | null = null;
 
-export const useChatStore = create<ChatState>((set, get) => ({
+export const useChatStore = create<ChatState>()(immer((set, get) => ({
   conversationId: crypto.randomUUID(),
   sessions: [],
   models: [],
@@ -111,53 +112,47 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streaming: true,
     };
 
-    set((state) => ({
-      messages: [...state.messages, userMessage, assistantMessage],
-      status: "thinking",
-      errorMessage: null,
-    }));
+    set((draft) => {
+      draft.messages.push(userMessage, assistantMessage);
+      draft.status = "thinking";
+      draft.errorMessage = null;
+    });
 
     unsubscribe?.();
     unsubscribe = desktopApi().onChatEvent((event) => {
       if (event.requestId !== get().activeRequestId) return;
 
       if (event.type === "text-delta") {
-        set((state) => ({
-          status: "streaming",
-          messages: state.messages.map((message) =>
-            message.id === assistantMessage.id
-              ? { ...message, content: message.content + event.text }
-              : message,
-          ),
-        }));
+        set((draft) => {
+          draft.status = "streaming";
+          const message = draft.messages.find((m) => m.id === assistantMessage.id);
+          if (message) message.content += event.text;
+        });
         return;
       }
 
       if (event.type === "completed") {
-        set((state) => ({
-          status: "idle",
-          activeRequestId: null,
-          messages: state.messages.map((message) =>
-            message.id === assistantMessage.id
-              ? { ...message, streaming: false }
-              : message,
-          ),
-        }));
+        set((draft) => {
+          draft.status = "idle";
+          draft.activeRequestId = null;
+          const message = draft.messages.find((m) => m.id === assistantMessage.id);
+          if (message) message.streaming = false;
+        });
         void get().persistSession();
         return;
       }
 
       if (event.type === "error") {
-        set((state) => ({
-          status: "error",
-          activeRequestId: null,
-          errorMessage: event.message,
-          messages: state.messages.map((message) =>
-            message.id === assistantMessage.id
-              ? { ...message, streaming: false, error: event.message }
-              : message,
-          ),
-        }));
+        set((draft) => {
+          draft.status = "error";
+          draft.activeRequestId = null;
+          draft.errorMessage = event.message;
+          const message = draft.messages.find((m) => m.id === assistantMessage.id);
+          if (message) {
+            message.streaming = false;
+            message.error = event.message;
+          }
+        });
         void get().persistSession();
       }
     });
@@ -176,16 +171,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (error) {
       unsubscribe?.();
       unsubscribe = null;
-      set((state) => ({
-        status: "error",
-        activeRequestId: null,
-        errorMessage: error instanceof Error ? error.message : String(error),
-        messages: state.messages.map((message) =>
-          message.id === assistantMessage.id
-            ? { ...message, streaming: false, error: error instanceof Error ? error.message : String(error) }
-            : message,
-        ),
-      }));
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      set((draft) => {
+        draft.status = "error";
+        draft.activeRequestId = null;
+        draft.errorMessage = errorMessage;
+        const message = draft.messages.find((m) => m.id === assistantMessage.id);
+        if (message) {
+          message.streaming = false;
+          message.error = errorMessage;
+        }
+      });
     }
   },
 
@@ -193,13 +189,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const requestId = get().activeRequestId;
     if (!requestId) return;
     await desktopApi().cancelChat(requestId);
-    set((state) => ({
-      status: "idle",
-      activeRequestId: null,
-      messages: state.messages.map((message) =>
-        message.streaming ? { ...message, streaming: false } : message,
-      ),
-    }));
+    set((draft) => {
+      draft.status = "idle";
+      draft.activeRequestId = null;
+      for (const message of draft.messages) {
+        if (message.streaming) message.streaming = false;
+      }
+    });
     void get().persistSession();
   },
 
@@ -217,4 +213,4 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await get().loadSessions();
     if (get().conversationId === id) get().resetConversation();
   },
-}));
+})));
