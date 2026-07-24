@@ -136,6 +136,15 @@ For more details check docs/INITIAL.md
     prove it with a real failing/passing test before implementing the
     proposed fix — cheap to verify, and here it correctly cut scope instead
     of adding a no-op annotation.
+15. **2026-07-24**: Fastest, most robust way to verify a renderer HMR edit
+    (no Electron restart) is to point Playwright directly at the resolved
+    dev server URL printed by `run-electron-dev.ts` (e.g.
+    `http://localhost:5174`), not to CDP-drive the spawned Electron process
+    — a plain Chromium tab renders the same Vite-served React app
+    identically, with far less setup. Edit the text, re-run
+    `browser_find`/snapshot to confirm the change appeared with no
+    navigation, then revert the edit and confirm `git diff` is empty before
+    calling it verified.
 
 `npm test` and dev mode (`npm run dev`) both run through Vite/Node module
 resolution directly from `.ts` source or a live dev server. Neither one
