@@ -22,8 +22,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     // resolved from `.pi/agent` is put first so it's selected by default
     // and chat works out of the box.
     const settings = await settingsStore.get();
-    const models = listConfiguredModels();
-    const piDefault = resolvePiDefault();
+    const models = await listConfiguredModels();
+    const piDefault = await resolvePiDefault();
 
     if (piDefault && piDefault.model === settings.model) {
       const defaultEntry =

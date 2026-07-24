@@ -42,7 +42,7 @@ export class SettingsStore {
     // default provider/model is already configured in ~/.pi/agent, so the
     // app can chat on first launch without a manual API key entry.
     if (!store.get("apiKey")) {
-      const piDefault = resolvePiDefault();
+      const piDefault = await resolvePiDefault();
       if (piDefault) {
         return {
           apiKey: piDefault.apiKey,

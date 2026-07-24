@@ -245,4 +245,31 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
    CJS downlevel of `import()`) was only found by testing `asar: true` and
    `asar: false` independently and noticing the same class of error
    persisted either way once the actual root cause was isolated.
+4. **The `nativeDynamicImport` (`new Function(...)`) trick throws
+   `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` under Vitest's default vm-based
+   pool** — it has no real V8 module graph, so `new Function(...)`-constructed
+   code has no `importModuleDynamically` callback wired up, even though the
+   exact same trick works fine in the real packaged app and in `npm run dev`.
+   This means any module that calls the real loader directly (e.g.
+   `src/main/llm/models.ts`'s `buildModelsRegistry`) cannot be unit-tested
+   end-to-end by simply calling it — the loaders (`loadPiAi`/`loadApiModule`)
+   must be injectable parameters with real-package defaults, and tests must
+   inject a version that imports `@earendil-works/pi-ai` (and its subpaths)
+   the normal static way at the top of the *test* file, which Vitest's own
+   Vite-based resolver loads regardless of `tsconfig.main.json`'s
+   `moduleResolution: "Node"`. Since `Node` resolution can't see pi-ai's
+   subpath `"exports"` at all, add ambient `declare module "@earendil-works/
+   pi-ai/api/..."` shims (see `src/main/llm/test-support/pi-ai-subpaths.d.ts`)
+   so `tsc --noEmit` still type-checks the test fixtures.
+5. **`electron-builder`'s `files: dist-main/**` packages every compiled
+   `*.test.js`, including test-only fixture modules, into the app — even
+   ones nothing in production ever imports.** A test fixture that does a
+   real (non-hidden) `require("@earendil-works/pi-ai")` for testing purposes
+   is inert (never executed) but still literally present in the shipped
+   asar, which defeats the purpose of grepping "no `require(...)` of pi-ai
+   in `dist-main/**/*.js`" as an acceptance check. Add explicit `!dist-main/
+   **/*.test.js` / `!dist-main/**/test-support/**` negation globs to
+   `electron-builder.yml`'s `files` list so the check (and the package
+   itself) only reflects real production code paths.
+
 

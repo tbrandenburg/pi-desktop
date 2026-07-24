@@ -6,8 +6,8 @@ import { registerIpcHandlers } from "./ipc";
 // ~/.pi/agent config happens to contain, so .pi resolution is mocked and
 // tested separately in pi-config.test.ts.
 vi.mock("./llm/pi-config", () => ({
-  resolvePiDefault: vi.fn(() => null),
-  listConfiguredModels: vi.fn(() => []),
+  resolvePiDefault: vi.fn(() => Promise.resolve(null)),
+  listConfiguredModels: vi.fn(() => Promise.resolve([])),
 }));
 
 // In-memory fake replacing electron-store, so SettingsStore is exercised
@@ -132,7 +132,7 @@ describe("IPC settings round-trip integration", () => {
 
   it("returns models sourced from configured .pi providers, with the resolved default first", async () => {
     const { listConfiguredModels } = await import("./llm/pi-config");
-    vi.mocked(listConfiguredModels).mockReturnValue([
+    vi.mocked(listConfiguredModels).mockResolvedValue([
       { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
       { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
     ]);
@@ -144,7 +144,7 @@ describe("IPC settings round-trip integration", () => {
       { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
     ]);
 
-    vi.mocked(listConfiguredModels).mockReturnValue([]);
+    vi.mocked(listConfiguredModels).mockResolvedValue([]);
   });
 
   it("cancels an unknown request id through the IPC boundary without throwing", async () => {

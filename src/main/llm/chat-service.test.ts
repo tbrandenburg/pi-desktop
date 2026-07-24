@@ -1,19 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { BrowserWindow } from "electron";
-import { ChatService, type OpenAICompletionsModule } from "./chat-service";
+import type { MutableModels } from "@earendil-works/pi-ai";
+import { ChatService } from "./chat-service";
+import type { ModelsRegistry } from "./models";
 import type { SettingsStore } from "../storage/settings-store";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
 
-// The real loader uses an indirect `new Function("...", "return import(...)")`
-// call so tsc's CommonJS output can never downlevel it into a require() (see
-// the comment on `nativeDynamicImport` in chat-service.ts for why that
-// matters). That trick deliberately hides the import from static analysis,
-// which also makes it invisible to vi.mock's module interception -- so
-// ChatService takes the loader as an injectable constructor dependency
-// instead, and tests provide a fake loader directly rather than mocking the
-// "@earendil-works/pi-ai/api/openai-completions" module.
-function makeLoader(stream: OpenAICompletionsModule["stream"]) {
-  return async (): Promise<OpenAICompletionsModule> => ({ stream });
+// The real loader dynamically imports pi-ai (see `nativeDynamicImport` in
+// models.ts, hidden from tsc/vi.mock the same way as the original
+// openai-completions loader was). ChatService takes the registry loader as
+// an injectable constructor dependency instead, so tests provide a fake
+// registry directly rather than mocking pi-ai modules.
+function makeRegistryLoader(stream: MutableModels["stream"]) {
+  const model = {
+    id: "gpt-4o-mini",
+    name: "gpt-4o-mini",
+    api: "openai-completions",
+    provider: "app-settings",
+    baseUrl: "https://api.openai.com/v1",
+    reasoning: false,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 4096,
+  };
+  const provider = { id: "app-settings", getModels: () => [model] };
+  const models = {
+    getProviders: () => [provider],
+    stream,
+  } as unknown as MutableModels;
+  return async (): Promise<ModelsRegistry> => ({ models });
 }
 
 function makeFakeWindow(sent: ChatEvent[]) {
@@ -70,7 +86,7 @@ describe("ChatService integration", () => {
     const service = new ChatService(
       settingsStore,
       () => makeFakeWindow(sent),
-      makeLoader(stream),
+      makeRegistryLoader(stream),
     );
 
     await service.startChat(makeRequest());
@@ -105,7 +121,7 @@ describe("ChatService integration", () => {
     const service = new ChatService(
       settingsStore,
       () => makeFakeWindow(sent),
-      makeLoader(stream),
+      makeRegistryLoader(stream),
     );
 
     await service.startChat(makeRequest());
@@ -150,7 +166,7 @@ describe("ChatService integration", () => {
     const service = new ChatService(
       settingsStore,
       () => makeFakeWindow(sent),
-      makeLoader(stream),
+      makeRegistryLoader(stream),
     );
 
     const requestId = await service.startChat(makeRequest());
@@ -179,7 +195,7 @@ describe("ChatService integration", () => {
     const service = new ChatService(
       settingsStore,
       () => makeFakeWindow(sent),
-      makeLoader(stream),
+      makeRegistryLoader(stream),
     );
 
     await service.startChat({ ...makeRequest(), model: "" });
@@ -219,7 +235,7 @@ describe("ChatService integration", () => {
     const service = new ChatService(
       settingsStore,
       () => makeFakeWindow(sent),
-      makeLoader(stream),
+      makeRegistryLoader(stream),
     );
 
     await service.startChat(makeRequest());
@@ -232,3 +248,4 @@ describe("ChatService integration", () => {
     expect(sent.some((e) => e.type === "completed")).toBe(false);
   });
 });
+

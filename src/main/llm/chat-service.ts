@@ -1,70 +1,14 @@
 import { randomUUID } from "node:crypto";
-import type {
-  AssistantMessageEvent,
-  AssistantMessageEventStream,
-  Context,
-  Message,
-  Model,
-  OpenAICompletionsOptions,
-} from "@earendil-works/pi-ai";
+import type { AssistantMessageEvent, Context, Message } from "@earendil-works/pi-ai";
 import type { BrowserWindow } from "electron";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
+import { buildModelsRegistry, findModelById, type ModelsRegistry } from "./models";
 import type { SettingsStore } from "../storage/settings-store";
 
-// pi-ai ships ESM-only and only exposes this subpath through its package.json
-// "exports" map (an "import" condition, no "require" condition), so it must
-// be loaded with a genuine dynamic import() rather than a static one.
-//
-// IMPORTANT: with tsconfig.main.json's "module": "CommonJS", tsc silently
-// downlevels a literal `await import(x)` into
-// `Promise.resolve().then(() => require(x))`, and require() can never load
-// an ESM package -- it throws at runtime with either
-// ERR_PACKAGE_PATH_NOT_EXPORTED (pi-ai's exports map has no "require"
-// condition) or "require() of ES Module ... not supported". This only
-// surfaces when running the compiled/packaged app, never in plain-TS unit
-// tests, so it's easy to miss without testing the real build. Switching the
-// whole main process to an ESM-aware module target (e.g. "Node16") would
-// fix it but forces invasive changes across the codebase (explicit ".js"
-// import extensions, resolution-mode attributes on type-only imports).
-// Instead, the standard minimal workaround is used: construct the dynamic
-// import via `new Function(...)`, which hides it from tsc's static
-// downlevel transform so a genuine native import() runs at runtime.
-const nativeDynamicImport: (specifier: string) => Promise<unknown> = new Function(
-  "specifier",
-  "return import(specifier);",
-) as (specifier: string) => Promise<unknown>;
-
-export interface OpenAICompletionsModule {
-  stream: (
-    model: Model<"openai-completions">,
-    context: Context,
-    options?: OpenAICompletionsOptions,
-  ) => AssistantMessageEventStream;
-}
-const openAICompletionsSpecifier = "@earendil-works/pi-ai/api/openai-completions";
-let openAICompletionsModule: OpenAICompletionsModule | null = null;
-async function loadOpenAICompletionsFromPiAi(): Promise<OpenAICompletionsModule> {
-  if (!openAICompletionsModule) {
-    openAICompletionsModule = (await nativeDynamicImport(
-      openAICompletionsSpecifier,
-    )) as unknown as OpenAICompletionsModule;
-  }
-  return openAICompletionsModule;
-}
-
-function buildModel(baseUrl: string, modelId: string): Model<"openai-completions"> {
-  return {
-    id: modelId,
-    name: modelId,
-    api: "openai-completions",
-    provider: "openai-compatible",
-    baseUrl,
-    reasoning: false,
-    input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128_000,
-    maxTokens: 4096,
-  };
+async function loadModelsRegistryForChat(
+  settings: { apiKey: string; baseUrl: string; model: string },
+): Promise<ModelsRegistry> {
+  return buildModelsRegistry(undefined, undefined, settings);
 }
 
 function toContext(request: StartChatRequest): Context {
@@ -103,7 +47,9 @@ export class ChatService {
   constructor(
     private readonly settingsStore: SettingsStore,
     private readonly getWindow: () => BrowserWindow | null,
-    private readonly loadOpenAICompletions: () => Promise<OpenAICompletionsModule> = loadOpenAICompletionsFromPiAi,
+    private readonly loadModelsRegistry: (
+      settings: { apiKey: string; baseUrl: string; model: string },
+    ) => Promise<ModelsRegistry> = loadModelsRegistryForChat,
   ) {}
 
   async startChat(request: StartChatRequest): Promise<string> {
@@ -153,16 +99,22 @@ export class ChatService {
         return;
       }
 
-      const model = buildModel(settings.baseUrl, modelId);
+      const registry = await this.loadModelsRegistry(settings);
+      const found = findModelById(registry.models, modelId);
+      if (!found) {
+        this.emit({
+          type: "error",
+          requestId,
+          message: `Model "${modelId}" is not configured. Open settings and select a configured model.`,
+        });
+        return;
+      }
+
       const context = toContext(request);
 
       this.emit({ type: "started", requestId });
 
-      const { stream: openAICompletionsStream } = await this.loadOpenAICompletions();
-      const events = openAICompletionsStream(model, context, {
-        apiKey: settings.apiKey,
-        signal,
-      });
+      const events = registry.models.stream(found.model, context, { signal });
 
       for await (const event of events as AsyncIterable<AssistantMessageEvent>) {
         this.forward(requestId, event);

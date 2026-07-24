@@ -6,7 +6,7 @@ import { SettingsStore } from "./settings-store";
 import { resolvePiDefault } from "../llm/pi-config";
 
 vi.mock("../llm/pi-config", () => ({
-  resolvePiDefault: vi.fn(() => null),
+  resolvePiDefault: vi.fn(() => Promise.resolve(null)),
 }));
 
 // Real electron-store (not mocked) writing to a throwaway directory on disk,
@@ -100,7 +100,7 @@ describe("SettingsStore persistence (real electron-store)", () => {
   });
 
   it("falls back to the resolved .pi/agent default when the user never saved settings", async () => {
-    vi.mocked(resolvePiDefault).mockReturnValue({
+    vi.mocked(resolvePiDefault).mockResolvedValue({
       apiKey: "sk-pi-default",
       baseUrl: "https://openrouter.ai/api/v1",
       model: "openai/gpt-5.4-mini",
@@ -123,11 +123,11 @@ describe("SettingsStore persistence (real electron-store)", () => {
       hasApiKey: true,
     });
 
-    vi.mocked(resolvePiDefault).mockReturnValue(null);
+    vi.mocked(resolvePiDefault).mockResolvedValue(null);
   });
 
   it("prefers explicitly saved settings over the .pi/agent default", async () => {
-    vi.mocked(resolvePiDefault).mockReturnValue({
+    vi.mocked(resolvePiDefault).mockResolvedValue({
       apiKey: "sk-pi-default",
       baseUrl: "https://openrouter.ai/api/v1",
       model: "openai/gpt-5.4-mini",
@@ -145,6 +145,6 @@ describe("SettingsStore persistence (real electron-store)", () => {
     expect(settings.apiKey).toBe("sk-user-provided");
     expect(settings.model).toBe("gpt-4o");
 
-    vi.mocked(resolvePiDefault).mockReturnValue(null);
+    vi.mocked(resolvePiDefault).mockResolvedValue(null);
   });
 });
