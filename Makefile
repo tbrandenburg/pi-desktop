@@ -1,8 +1,15 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
+# Recursively (lazily) expanded: re-reads package.json on every reference, so
+# it reflects the version *after* a version-bump target has just run it,
+# even within the same `make` invocation (e.g. `make release-patch`).
+VERSION = $(shell node -p "require('./package.json').version")
+
 .PHONY: help install run stop test lint check build build-renderer build-main clean \
-        dist dist-linux dist-win pack
+        dist dist-linux dist-win pack \
+        version-patch version-minor version-major release publish \
+        release-patch release-minor release-major
 
 ## Show available targets
 help:
@@ -19,6 +26,14 @@ help:
 	@echo "  make dist-win    Build and package Windows installer (nsis + portable)"
 	@echo "                   Requires 'wine' when cross-building from Linux."
 	@echo "  make clean       Remove build artifacts (dist-*, release, node_modules)"
+	@echo "  make version-patch/-minor/-major"
+	@echo "                   Bump version (package.json + package-lock.json),"
+	@echo "                   commit 'chore(release): vX.Y.Z' and git tag it"
+	@echo "  make release     Push the release commit + tag to origin"
+	@echo "  make publish     Create the GitHub release for the current tag"
+	@echo "                   (release notes only; no build artifacts attached)"
+	@echo "  make release-patch/-minor/-major"
+	@echo "                   One-shot: bump + push + publish"
 
 ## Install all dependencies
 install:
@@ -83,3 +98,41 @@ dist-win: build
 clean:
 	rm -rf dist-main dist-renderer release
 	rm -rf node_modules
+
+## --- Versioning & release -------------------------------------------------
+##
+## Version bumps always run `npm run check` + `npm test` first (never tag a
+## broken commit), then `npm version <bump>`, which updates package.json +
+## package-lock.json, commits "chore(release): vX.Y.Z", and creates the
+## matching annotated git tag "vX.Y.Z" — all locally, nothing pushed yet.
+
+## Bump patch version (0.1.0 -> 0.1.1): commit + git tag, no push
+version-patch: check test
+	npm version patch -m "chore(release): v%s"
+
+## Bump minor version (0.1.0 -> 0.2.0): commit + git tag, no push
+version-minor: check test
+	npm version minor -m "chore(release): v%s"
+
+## Bump major version (0.1.0 -> 1.0.0): commit + git tag, no push
+version-major: check test
+	npm version major -m "chore(release): v%s"
+
+## Push the current release commit and its version tag to origin
+release:
+	git push origin HEAD
+	git push origin "v$(VERSION)"
+
+## Create the GitHub release for the current version's tag.
+## Notes-only for now: no build artifacts are attached (see dist-linux/dist-win).
+publish:
+	@command -v gh >/dev/null 2>&1 || { \
+		echo "error: 'gh' (GitHub CLI) is required to publish a release."; \
+		exit 1; \
+	}
+	gh release create "v$(VERSION)" --title "v$(VERSION)" --generate-notes
+
+## One-shot release flows: bump -> push -> publish
+release-patch: version-patch release publish
+release-minor: version-minor release publish
+release-major: version-major release publish
