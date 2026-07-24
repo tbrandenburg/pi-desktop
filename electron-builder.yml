@@ -11,6 +11,12 @@ files:
   - package.json
 
 asar: true
+# @earendil-works/pi-ai is ESM-only and loaded via a genuine dynamic
+# import() (see the `nativeDynamicImport` comment in chat-service.ts for why
+# it's constructed via `new Function(...)` instead of a literal `import()`
+# expression -- tsc's CommonJS output would otherwise silently downlevel it
+# to a require(), which can never load an ESM module and only fails in the
+# compiled/packaged app, never in plain-TS unit tests).
 
 linux:
   icon: assets/icon.png

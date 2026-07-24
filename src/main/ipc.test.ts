@@ -2,6 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import { registerIpcHandlers } from "./ipc";
 
+// This suite must be hermetic regardless of what the machine's real
+// ~/.pi/agent config happens to contain, so the .pi default resolution is
+// mocked and tested separately in pi-config.test.ts.
+vi.mock("./llm/pi-config", () => ({
+  resolvePiDefault: vi.fn(() => null),
+}));
+
 // In-memory fake replacing electron-store, so SettingsStore is exercised
 // exactly as in production while avoiding any dependency on a real
 // userData directory / Electron app instance.

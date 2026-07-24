@@ -3,6 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "description": "Pi Desktop Demo - Electron + React chat app powered by pi-ai",
+  "author": "tbrandenburg",
+  "license": "MIT",
   "main": "dist-main/main/index.js",
   "type": "commonjs",
   "scripts": {

@@ -3,6 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SettingsStore } from "./settings-store";
+import { resolvePiDefault } from "../llm/pi-config";
+
+vi.mock("../llm/pi-config", () => ({
+  resolvePiDefault: vi.fn(() => null),
+}));
 
 // Real electron-store (not mocked) writing to a throwaway directory on disk,
 // to prove settings genuinely survive across process/app restarts rather
@@ -92,5 +97,54 @@ describe("SettingsStore persistence (real electron-store)", () => {
     const settings = await third.get();
     expect(settings.apiKey).toBe("sk-original");
     expect(settings.model).toBe("gpt-4o-mini-updated");
+  });
+
+  it("falls back to the resolved .pi/agent default when the user never saved settings", async () => {
+    vi.mocked(resolvePiDefault).mockReturnValue({
+      apiKey: "sk-pi-default",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "openai/gpt-5.4-mini",
+      label: "openrouter/openai/gpt-5.4-mini",
+    });
+
+    const store = newStoreAt(cwd);
+    const settings = await store.get();
+
+    expect(settings).toEqual({
+      apiKey: "sk-pi-default",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "openai/gpt-5.4-mini",
+    });
+
+    const summary = await store.getSummary();
+    expect(summary).toEqual({
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "openai/gpt-5.4-mini",
+      hasApiKey: true,
+    });
+
+    vi.mocked(resolvePiDefault).mockReturnValue(null);
+  });
+
+  it("prefers explicitly saved settings over the .pi/agent default", async () => {
+    vi.mocked(resolvePiDefault).mockReturnValue({
+      apiKey: "sk-pi-default",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "openai/gpt-5.4-mini",
+      label: "openrouter/openai/gpt-5.4-mini",
+    });
+
+    const store = newStoreAt(cwd);
+    await store.save({
+      apiKey: "sk-user-provided",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4o",
+    });
+
+    const settings = await store.get();
+    expect(settings.apiKey).toBe("sk-user-provided");
+    expect(settings.model).toBe("gpt-4o");
+
+    vi.mocked(resolvePiDefault).mockReturnValue(null);
   });
 });

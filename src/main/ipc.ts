@@ -6,6 +6,7 @@ import {
 } from "../shared/schemas";
 import type { ModelInfo } from "../shared/events";
 import { ChatService } from "./llm/chat-service";
+import { resolvePiDefault } from "./llm/pi-config";
 import { SettingsStore } from "./storage/settings-store";
 import { SessionStore } from "./storage/session-store";
 
@@ -21,6 +22,18 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   const chatService = new ChatService(settingsStore, getWindow);
 
   ipcMain.handle("llm:list-models", async (): Promise<ModelInfo[]> => {
+    // If the user hasn't saved their own settings yet, put the model
+    // resolved from ~/.pi/agent first so it is selected by default and
+    // chat works out of the box.
+    const settings = await settingsStore.get();
+    const piDefault = resolvePiDefault();
+    if (piDefault && piDefault.model === settings.model) {
+      const label = `${piDefault.label} (from .pi)`;
+      return [
+        { id: piDefault.model, label },
+        ...CURATED_MODELS.filter((m) => m.id !== piDefault.model),
+      ];
+    }
     return CURATED_MODELS;
   });
 

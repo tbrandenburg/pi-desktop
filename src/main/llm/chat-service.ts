@@ -11,24 +11,42 @@ import type { BrowserWindow } from "electron";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
 import type { SettingsStore } from "../storage/settings-store";
 
-// pi-ai ships as ESM-only and only exposes this subpath through its package.json
-// "exports" map (not a real "dist/..." filesystem path), so the API module must
-// be loaded with a dynamic import rather than a static one. The subpath isn't
-// resolvable under this project's classic "Node" TS moduleResolution, so the
-// module shape is declared manually here instead of via `typeof import(...)`.
-interface OpenAICompletionsModule {
+// pi-ai ships ESM-only and only exposes this subpath through its package.json
+// "exports" map (an "import" condition, no "require" condition), so it must
+// be loaded with a genuine dynamic import() rather than a static one.
+//
+// IMPORTANT: with tsconfig.main.json's "module": "CommonJS", tsc silently
+// downlevels a literal `await import(x)` into
+// `Promise.resolve().then(() => require(x))`, and require() can never load
+// an ESM package -- it throws at runtime with either
+// ERR_PACKAGE_PATH_NOT_EXPORTED (pi-ai's exports map has no "require"
+// condition) or "require() of ES Module ... not supported". This only
+// surfaces when running the compiled/packaged app, never in plain-TS unit
+// tests, so it's easy to miss without testing the real build. Switching the
+// whole main process to an ESM-aware module target (e.g. "Node16") would
+// fix it but forces invasive changes across the codebase (explicit ".js"
+// import extensions, resolution-mode attributes on type-only imports).
+// Instead, the standard minimal workaround is used: construct the dynamic
+// import via `new Function(...)`, which hides it from tsc's static
+// downlevel transform so a genuine native import() runs at runtime.
+const nativeDynamicImport: (specifier: string) => Promise<unknown> = new Function(
+  "specifier",
+  "return import(specifier);",
+) as (specifier: string) => Promise<unknown>;
+
+export interface OpenAICompletionsModule {
   stream: (
     model: Model<"openai-completions">,
     context: Context,
     options?: OpenAICompletionsOptions,
   ) => AssistantMessageEventStream;
 }
-let openAICompletionsModule: OpenAICompletionsModule | null = null;
 const openAICompletionsSpecifier = "@earendil-works/pi-ai/api/openai-completions";
-async function loadOpenAICompletions(): Promise<OpenAICompletionsModule> {
+let openAICompletionsModule: OpenAICompletionsModule | null = null;
+async function loadOpenAICompletionsFromPiAi(): Promise<OpenAICompletionsModule> {
   if (!openAICompletionsModule) {
-    openAICompletionsModule = (await import(
-      openAICompletionsSpecifier
+    openAICompletionsModule = (await nativeDynamicImport(
+      openAICompletionsSpecifier,
     )) as unknown as OpenAICompletionsModule;
   }
   return openAICompletionsModule;
@@ -85,6 +103,7 @@ export class ChatService {
   constructor(
     private readonly settingsStore: SettingsStore,
     private readonly getWindow: () => BrowserWindow | null,
+    private readonly loadOpenAICompletions: () => Promise<OpenAICompletionsModule> = loadOpenAICompletionsFromPiAi,
   ) {}
 
   async startChat(request: StartChatRequest): Promise<string> {
@@ -129,7 +148,7 @@ export class ChatService {
 
       this.emit({ type: "started", requestId });
 
-      const { stream: openAICompletionsStream } = await loadOpenAICompletions();
+      const { stream: openAICompletionsStream } = await this.loadOpenAICompletions();
       const events = openAICompletionsStream(model, context, {
         apiKey: settings.apiKey,
         signal,

@@ -92,3 +92,128 @@ For more details check docs/INITIAL.md
     outcome of an end-to-end UI review — do not invent busywork fixes just
     to have something to report. The only console noise was a harmless
     `favicon.ico` 404, which is not a real error and not worth suppressing.
+
+## How to test the compiled/packaged app (not just `npm test` / dev mode)
+
+`npm test` and dev mode (`npm run dev`) both run through Vite/Node module
+resolution directly from `.ts` source or a live dev server. Neither one
+exercises `tsc`'s actual CommonJS compilation output, nor Electron's real
+packaged file layout (`asar`, `resources/app`, native module unpacking).
+**A change can pass every unit test and work perfectly in `npm run dev` and
+still crash 100% of the time in the shipped AppImage.** Always validate the
+real artifact before declaring a fix or milestone done:
+
+1. Build and package for real: `make dist-linux` (or
+   `npm run build && npx electron-builder --linux AppImage`). This produces
+   `release/Pi Desktop Demo-<version>-linux-x86_64.AppImage` and, for faster
+   iteration, `release/linux-unpacked/pi-desktop` (same app, no AppImage
+   squashfs mount — use this first when only re-testing main-process logic).
+2. Launch it **detached**, with a **remote debugging port**, and — critically
+   — with an **explicit, unique `--user-data-dir`** so repeated launches
+   never collide with a previous instance's single-instance lock (Electron
+   silently forwards a second launch to the first running instance instead
+   of erroring, which will make you debug the wrong process):
+   ```bash
+   setsid nohup env DISPLAY=:0.0 \
+     "release/Pi Desktop Demo-0.1.0-linux-x86_64.AppImage" \
+     --no-sandbox --remote-debugging-port=9222 \
+     --user-data-dir=/tmp/opencode/pi-userdata-<unique> \
+     > /tmp/opencode/run.log 2>&1 < /dev/null &
+   disown
+   ```
+3. **Before every launch**, confirm no previous instance is still alive
+   (`pgrep -af "Pi Desktop Demo\|linux-unpacked/pi-desktop"`) and kill it
+   first. Overlapping instances on the same debug port make every
+   subsequent CDP command silently talk to the wrong (stale) process, and
+   overlapping `electron-builder` invocations racing on `release/` produce
+   confusing, unrelated-looking build errors (`ENOENT: ... rename`,
+   `unlinkat ...: directory not empty`) that have nothing to do with your
+   code change.
+4. Drive the real running app via the Chrome DevTools Protocol instead of
+   OS-level clicks/keystrokes (see the next section for why): fetch
+   `http://localhost:<port>/json` to get the page's `webSocketDebuggerUrl`,
+   then use the `ws` package (already a transitive dependency; import via
+   plain `node -e`/inline script — no need to add it to `package.json`) to
+   send `Runtime.enable` and `Runtime.evaluate` commands that click buttons,
+   set the composer's value via its native `<textarea>` value setter +
+   `input` event, and dispatch a real `Enter` `keydown`. This exercises the
+   full real IPC path (preload → main → `ChatService` → real provider HTTP
+   call) with zero mocks.
+5. Give slow free-tier model providers real time to respond (15–45s) before
+   concluding a request is stuck; check for `429`/rate-limit text in the
+   page body separately from a genuine hang.
+6. Only trust "it works" once you've seen an actual assistant reply appear
+   in `document.body.innerText` from a **fresh** conversation with **zero**
+   manually-entered settings — that's the actual first-launch demo path.
+
+## Never drive the desktop with OS-level input injection
+
+During this project, using `xdotool`-style OS input synthesis (X11
+`fake_input` via a small Python/Xlib script, since `xdotool` wasn't
+installed) to click/type into the running AppImage sent keystrokes into the
+**wrong window** (an unrelated terminal tab) because window focus was not
+what it was assumed to be. This risked disrupting or corrupting completely
+unrelated processes running on the same shared desktop session — including
+accidentally killing a stray `vite` dev server that turned out to belong to
+a different, unrelated project (`made/packages/frontend`), which could not
+be un-killed afterward.
+
+- **Never use OS-level input injection (`xdotool`, raw X11 `fake_input`,
+  `ydotool`, etc.) to test this app**, or any app, when other windows may be
+  present on the same display. There is no reliable way to guarantee focus
+  lands on the intended window from a non-interactive script.
+- **Always drive the app via Chrome DevTools Protocol** instead (see above):
+  it targets a specific page/process by its debug port and page ID, so
+  input can never leak into an unrelated window.
+- If you must interact with the real OS desktop for verification (e.g. a
+  final screenshot), only ever use **read-only** inspection (`import -window
+  root` for screenshots, listing windows) — never synthesize clicks or
+  keystrokes at the OS level.
+- If a stray process is discovered mid-investigation (e.g. via `pgrep`) and
+  its origin isn't 100% certain, do not kill it speculatively. Check its
+  `cwd` (`readlink -f /proc/<pid>/cwd`) and full command line first, and if
+  there's any doubt it might belong to something the user is actively
+  relying on, leave it alone and ask instead of guessing.
+
+## Diagnosing bugs that only reproduce in the packaged app
+
+Two real, non-obvious bugs were found this way during this project — both
+fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
+
+1. **`tsc`'s CommonJS output silently rewrites `await import(x)` into
+   `Promise.resolve().then(() => require(x))`.** If `x` refers to an
+   ESM-only package (like `@earendil-works/pi-ai`), this throws
+   `ERR_PACKAGE_PATH_NOT_EXPORTED` or `"require() of ES Module ... not
+   supported"` **only once compiled and run**, never when running plain
+   `.ts` via `tsx`/`vitest` (which use real ESM-aware module resolution).
+   Confirm this by grepping the *compiled* output
+   (`dist-main/main/**/*.js` or `release/linux-unpacked/resources/app*/
+   dist-main/**/*.js`) for the specifier in question — if you see
+   `require(...)` where you wrote `import(...)`, this is the cause. Fix by
+   hiding the call from tsc's static analysis:
+   `new Function("specifier", "return import(specifier);")` — this survives
+   compilation as a literal string, so V8 performs a genuine dynamic import
+   at runtime. Because this also hides the call from Vitest's `vi.mock`
+   module interception, make the loader an **injectable constructor
+   dependency** instead, and have tests pass a fake implementation directly
+   rather than mocking the module path.
+2. **Electron's `app.isPackaged`/asar-aware module patches only apply to the
+   real packaged app** — a plain `node -e "import(...)"` test, or even
+   `ELECTRON_RUN_AS_NODE=1 electron -e "..."`, will NOT reproduce
+   Electron-main-process-specific resolution quirks. Always reproduce the
+   failure by launching the actual app (see the section above) and reading
+   the exact error text/stack from its own stdout log — add a temporary
+   `console.error(error)` in the relevant `catch` block if the error surfaced
+   to the UI is too terse, rebuild `dist-main` only (`npm run build:main`,
+   much faster than a full `electron-builder` package), and re-launch to see
+   the full stack trace. Remove the temporary logging once diagnosed.
+3. When a fix requires ruling out multiple candidate causes (e.g. "is this
+   an `asar` limitation, or a module-resolution bug?"), verify each
+   hypothesis by toggling exactly one variable at a time and re-testing
+   against the real packaged app — don't stop at the first plausible-looking
+   theory. In this project, an initial "Node's ESM loader can't read from
+   `asar`" conclusion turned out to be a red herring; the real cause (tsc's
+   CJS downlevel of `import()`) was only found by testing `asar: true` and
+   `asar: false` independently and noticing the same class of error
+   persisted either way once the actual root cause was isolated.
+

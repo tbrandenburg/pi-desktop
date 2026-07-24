@@ -4,6 +4,7 @@ import type {
   ProviderSettings,
   ProviderSettingsSummary,
 } from "../../shared/events";
+import { resolvePiDefault } from "../llm/pi-config";
 
 export interface StoredSettings {
   apiKey: string;
@@ -36,6 +37,21 @@ export class SettingsStore {
 
   async get(): Promise<StoredSettings> {
     const store = await this.load();
+
+    // The user has never explicitly saved an API key: fall back to whatever
+    // default provider/model is already configured in ~/.pi/agent, so the
+    // app can chat on first launch without a manual API key entry.
+    if (!store.get("apiKey")) {
+      const piDefault = resolvePiDefault();
+      if (piDefault) {
+        return {
+          apiKey: piDefault.apiKey,
+          baseUrl: piDefault.baseUrl,
+          model: piDefault.model,
+        };
+      }
+    }
+
     return {
       apiKey: store.get("apiKey"),
       baseUrl: store.get("baseUrl"),

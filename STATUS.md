@@ -48,32 +48,51 @@ Scope for tonight: Linux only (AppImage). Windows packaging is out of scope.
 
 ## Critical bug found and fixed during this review
 
-- **Broken pi-ai streaming import (would have crashed every chat request in
-  production)**: `chat-service.ts` dynamically imported
-  `@earendil-works/pi-ai/dist/api/openai-completions.js`. That subpath is
-  **not** part of the package's `exports` map (only `./api/*` →
-  `./dist/api/*.js` is exposed), so Node's ESM loader throws
-  `ERR_PACKAGE_PATH_NOT_EXPORTED` at runtime. The existing unit test suite
-  never caught this because `chat-service.test.ts` fully mocks the module
-  under the same (wrong) specifier, so the mock always resolved regardless of
-  whether the real path was valid.
-  - Fixed to import `@earendil-works/pi-ai/api/openai-completions` (the
-    correct exported subpath), stored as a non-literal specifier constant so
-    TypeScript's classic `Node` module resolution (which cannot see subpath
-    `exports` maps) does not reject the string at compile time while Node's
-    real ESM loader still resolves it correctly.
-  - Replaced the now-unresolvable `typeof import(...)` type with a manually
-    declared `OpenAICompletionsModule` interface built from `pi-ai`'s
-    top-level exported types (`Model`, `Context`, `OpenAICompletionsOptions`,
-    `AssistantMessageEventStream`).
-  - Verified with a real, non-mocked end-to-end call: ran `ChatService`
-    directly (via `tsx`) against the live free `https://api.llm7.io/v1`
-    endpoint (`gpt-oss:20b`) with a real `LLM7_TOKEN`. Observed the full
-    correct event sequence: `started` → `reasoning-delta`* → `text-delta`
-    ("BAN" + "ANA") → `usage` → `completed`. This proves the streaming path
-    genuinely works against a real provider, not just against test mocks.
-  - Re-ran `npm run check`, `npm run test` (13/13 passing), `npm run build`,
-    and `npx electron-builder --linux AppImage` after the fix; all succeed.
+- **First-launch used a hardcoded, always-empty OpenAI provider config,
+  showing "No API key configured" before the user could ever chat.**
+  Added `src/main/llm/pi-config.ts`, which resolves a ready-to-use default
+  provider/model straight from the user's existing `~/.pi/agent`
+  configuration (`settings.json` `defaultProvider`/`defaultModel`,
+  `auth.json` API keys for known providers, `models.json` custom
+  OpenAI-compatible providers with env-var-referenced keys). `SettingsStore`
+  now falls back to this resolved default whenever the user hasn't
+  explicitly saved their own API key, and `listModels()` surfaces it first
+  in the model picker labeled `"<provider>/<model> (from .pi)"`, so it's
+  selected by default. Respects the current `.pi` config exactly
+  (`defaultProvider: "llm7"`, `defaultModel: "minimax-m2.7"` picked correctly
+  out of that provider's multiple listed models, not just the first one).
+- **Every chat request would have crashed in the packaged app (never caught
+  by unit tests).** Root cause, found via CDP-driven testing of the actual
+  built AppImage (not just `npm test`, which always passed): `pi-ai` is
+  ESM-only, and `tsconfig.main.json`'s `"module": "CommonJS"` causes `tsc` to
+  silently downlevel `await import(x)` into
+  `Promise.resolve().then(() => require(x))`. `require()` can never load an
+  ESM package, so this threw `ERR_PACKAGE_PATH_NOT_EXPORTED` or `"require()
+  of ES Module ... not supported"` at runtime — but only in the
+  compiled/packaged app, never in plain-TS unit tests, which is why it went
+  unnoticed. Fixed by hiding the dynamic import from tsc's static rewrite via
+  `new Function("specifier", "return import(specifier);")` in
+  `chat-service.ts`, which preserves a genuine native `import()` at runtime.
+  Also made the pi-ai loader an injectable constructor dependency on
+  `ChatService` (rather than relying on `vi.mock` module interception, which
+  can't see through the same hiding trick), so tests inject a fake loader
+  directly.
+  - Verified end-to-end against the real packaged, `asar`-enabled AppImage
+    (not just `linux-unpacked`): launched via CDP remote debugging, sent a
+    real message with no manual settings configured, and received an actual
+    model reply ("Confirmed" / "Demo works") from the live `llm7` provider
+    using the `.pi`-resolved `minimax-m2.7` model.
+  - Re-ran `npm run check`, `npm test` (27/27 passing), and a full
+    `make dist-linux` after the fix; all succeed.
+
+## Previously fixed (still valid)
+
+- **Broken pi-ai streaming import subpath**: `chat-service.ts` originally
+  imported a subpath not exposed by `pi-ai`'s `exports` map. Fixed to import
+  `@earendil-works/pi-ai/api/openai-completions` (the correct exported
+  subpath).
+
+
 
 ## Deliberately out of scope tonight
 
@@ -99,14 +118,13 @@ Scope for tonight: Linux only (AppImage). Windows packaging is out of scope.
 
 ```
 npm run check   → tsc --noEmit clean for both tsconfig.json and tsconfig.main.json
-npm run test    → 4 test files, 13 tests passed
-npm run build   → renderer + main build succeed
-npx electron-builder --linux AppImage → release/Pi Desktop Demo-0.1.0-linux-x86_64.AppImage produced
-Real display smoke test → AppImage launched on DISPLAY=:0.0, window
-  screenshot confirms the welcome screen renders correctly (Tailwind styling,
-  sidebar, model picker, composer all present).
-Real (non-mocked) LLM streaming test → ChatService run directly via tsx
-  against https://api.llm7.io/v1 (gpt-oss:20b) produced started →
-  reasoning-delta → text-delta → usage → completed events with correct
-  content ("BANANA").
+npm run test    → 6 test files, 27 tests passed
+make dist-linux → release/Pi Desktop Demo-0.1.0-linux-x86_64.AppImage produced (asar: true)
+Real display, real IPC, real provider smoke test (CDP-driven, no OS input
+  injection) → launched the packaged AppImage on DISPLAY=:0.0, started a new
+  chat with zero manual configuration, confirmed the model picker defaulted
+  to "llm7/minimax-m2.7 (from .pi)" (resolved from ~/.pi/agent), sent a real
+  message, and received an actual streamed reply from the live llm7 provider
+  ("Confirmed" / "Demo works") -- proving both the .pi-default-model fix and
+  the ESM-import packaging fix work together in the real production build.
 ```

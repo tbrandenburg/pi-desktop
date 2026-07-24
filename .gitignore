@@ -33,3 +33,7 @@ coverage/
 
 # Misc local state
 .pi/
+
+# Playwright MCP scratch output
+.playwright-mcp/
+

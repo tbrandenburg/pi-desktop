@@ -1,14 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { BrowserWindow } from "electron";
-import { ChatService } from "./chat-service";
+import { ChatService, type OpenAICompletionsModule } from "./chat-service";
 import type { SettingsStore } from "../storage/settings-store";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
 
-const openAICompletionsSpecifier = "@earendil-works/pi-ai/api/openai-completions";
-
-vi.mock("@earendil-works/pi-ai/api/openai-completions", () => ({
-  stream: vi.fn(),
-}));
+// The real loader uses an indirect `new Function("...", "return import(...)")`
+// call so tsc's CommonJS output can never downlevel it into a require() (see
+// the comment on `nativeDynamicImport` in chat-service.ts for why that
+// matters). That trick deliberately hides the import from static analysis,
+// which also makes it invisible to vi.mock's module interception -- so
+// ChatService takes the loader as an injectable constructor dependency
+// instead, and tests provide a fake loader directly rather than mocking the
+// "@earendil-works/pi-ai/api/openai-completions" module.
+function makeLoader(stream: OpenAICompletionsModule["stream"]) {
+  return async (): Promise<OpenAICompletionsModule> => ({ stream });
+}
 
 function makeFakeWindow(sent: ChatEvent[]) {
   return {
@@ -35,8 +41,7 @@ describe("ChatService integration", () => {
   });
 
   it("streams pi-ai events end-to-end and translates them into the correct ChatEvent sequence", async () => {
-    const { stream } = await import(openAICompletionsSpecifier);
-    vi.mocked(stream).mockReturnValue(
+    const stream = vi.fn().mockReturnValue(
       (async function* () {
         yield { type: "text_delta", delta: "Hel" };
         yield { type: "text_delta", delta: "lo" };
@@ -62,7 +67,11 @@ describe("ChatService integration", () => {
     } as unknown as SettingsStore;
 
     const sent: ChatEvent[] = [];
-    const service = new ChatService(settingsStore, () => makeFakeWindow(sent));
+    const service = new ChatService(
+      settingsStore,
+      () => makeFakeWindow(sent),
+      makeLoader(stream),
+    );
 
     await service.startChat(makeRequest());
     // allow the fire-and-forget async stream loop to fully drain
@@ -82,8 +91,7 @@ describe("ChatService integration", () => {
   });
 
   it("emits a single error event and never calls the provider when no API key is configured", async () => {
-    const { stream } = await import(openAICompletionsSpecifier);
-    const streamMock = vi.mocked(stream);
+    const stream = vi.fn();
 
     const settingsStore = {
       get: vi.fn().mockResolvedValue({
@@ -94,7 +102,11 @@ describe("ChatService integration", () => {
     } as unknown as SettingsStore;
 
     const sent: ChatEvent[] = [];
-    const service = new ChatService(settingsStore, () => makeFakeWindow(sent));
+    const service = new ChatService(
+      settingsStore,
+      () => makeFakeWindow(sent),
+      makeLoader(stream),
+    );
 
     await service.startChat(makeRequest());
     await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
@@ -103,28 +115,28 @@ describe("ChatService integration", () => {
       {
         type: "error",
         requestId: expect.any(String),
-        message:
-          "No API key configured. Open settings and add a provider API key first.",
+        message: "No API key configured. Open settings and add a provider API key first.",
       },
     ]);
-    expect(streamMock).not.toHaveBeenCalled();
+    expect(stream).not.toHaveBeenCalled();
   });
 
   it("aborts the underlying stream on cancel and surfaces the failure as an error event", async () => {
-    const { stream } = await import(openAICompletionsSpecifier);
-    vi.mocked(stream).mockImplementation((_model: unknown, _context: unknown, options: { signal?: AbortSignal }) => {
-      return (async function* () {
-        await new Promise((_resolve, reject) => {
-          const signal = options?.signal;
-          if (signal?.aborted) {
-            reject(new Error("Aborted"));
-            return;
-          }
-          signal?.addEventListener("abort", () => reject(new Error("Aborted")));
-        });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      })() as any;
-    });
+    const stream = vi
+      .fn()
+      .mockImplementation((_model: unknown, _context: unknown, options: { signal?: AbortSignal }) => {
+        return (async function* () {
+          await new Promise((_resolve, reject) => {
+            const signal = options?.signal;
+            if (signal?.aborted) {
+              reject(new Error("Aborted"));
+              return;
+            }
+            signal?.addEventListener("abort", () => reject(new Error("Aborted")));
+          });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        })() as any;
+      });
 
     const settingsStore = {
       get: vi.fn().mockResolvedValue({
@@ -135,7 +147,11 @@ describe("ChatService integration", () => {
     } as unknown as SettingsStore;
 
     const sent: ChatEvent[] = [];
-    const service = new ChatService(settingsStore, () => makeFakeWindow(sent));
+    const service = new ChatService(
+      settingsStore,
+      () => makeFakeWindow(sent),
+      makeLoader(stream),
+    );
 
     const requestId = await service.startChat(makeRequest());
     service.cancel(requestId);
@@ -149,8 +165,7 @@ describe("ChatService integration", () => {
   });
 
   it("translates a native provider error event into a ChatEvent error without throwing", async () => {
-    const { stream } = await import(openAICompletionsSpecifier);
-    vi.mocked(stream).mockReturnValue(
+    const stream = vi.fn().mockReturnValue(
       (async function* () {
         yield { type: "text_delta", delta: "partial" };
         yield {
@@ -170,7 +185,11 @@ describe("ChatService integration", () => {
     } as unknown as SettingsStore;
 
     const sent: ChatEvent[] = [];
-    const service = new ChatService(settingsStore, () => makeFakeWindow(sent));
+    const service = new ChatService(
+      settingsStore,
+      () => makeFakeWindow(sent),
+      makeLoader(stream),
+    );
 
     await service.startChat(makeRequest());
     await vi.waitFor(() => expect(sent.some((e) => e.type === "error")).toBe(true));
