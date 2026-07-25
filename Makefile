@@ -18,8 +18,8 @@ help:
 	@echo "  make install     Install all dependencies"
 	@echo "  make run         Start app in dev mode (renderer + main + electron)"
 	@echo "  make stop        Kill any running dev/electron processes"
-	@echo "  make test        Run unit tests (vitest)"
-	@echo "  make lint        Type-check the renderer and main process"
+	@echo "  make test        Run unit tests (vitest); warns if suite takes >60s"
+	@echo "  make lint        Type-check renderer + main; warns on files >500 LOC"
 	@echo "  make build       Build renderer + main for production"
 	@echo "  make pack        Build and package app dir (no installer, fast local check)"
 	@echo "  make dist        Build and package installers for the current platform"
@@ -56,13 +56,22 @@ stop:
 	-pkill -f "scripts/run-electron-dev.ts" 2>/dev/null || true
 	-pkill -f "electron \." 2>/dev/null || true
 
-## Run all tests
+## Run all tests (warns if suite exceeds 60s, but never fails on slowness alone)
 test:
-	npm run test
+	@start=$$(date +%s); \
+	npm run test; \
+	status=$$?; \
+	end=$$(date +%s); \
+	elapsed=$$((end - start)); \
+	if [ $$elapsed -gt 60 ]; then \
+		echo "WARNING: test suite took $${elapsed}s (threshold: 60s)"; \
+	fi; \
+	exit $$status
 
-## Type-check code (renderer + main)
+## Type-check code (renderer + main); also warns on source files over 500 LOC
 lint:
 	npm run check
+	@find src \( -name "*.ts" -o -name "*.tsx" \) | grep -Ev '\.test\.' | xargs wc -l | grep -v ' total$$' | awk '$$1>500{print "WARNING: " $$2 " has " $$1 " lines"}'
 
 ## Alias for lint (type-check), kept for convention parity
 check: lint
