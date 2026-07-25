@@ -691,7 +691,26 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   its PID → confirm ownership with `readlink -f /proc/<pid>/cwd` (should be your
   e2e worktree) + `ps -p <pid> -o cmd=` (should show your unique
   `--user-data-dir`) → then `kill <pid>` directly. Re-check the port is released
-  afterward, and never kill an unrelated PID (e.g. a sibling project's `vite`)
-  found in the same sweep.
+   afterward, and never kill an unrelated PID (e.g. a sibling project's `vite`)
+   found in the same sweep.
+- 2026-07-25: The Electron 33 -> 43 major bump (issue #43) needed **zero
+  application code changes** — the whole risk was in Chromium/renderer +
+  dependency compat, not this app's own API usage. Confirmed cheaply by
+  reading Electron `breaking-changes.md` for majors 34->43 and cross-checking
+  each item against a grep of `src/main`'s actual Electron API surface (all
+  minimal/stable: `app`, `BrowserWindow`, `ipcMain.handle`, `webContents
+  .send`, `contextBridge`, `ipcRenderer`, standard `webPreferences`). Two
+  concrete gotchas for the next Electron bump: (1) `electron-builder@25.x`
+  predates Electron 41-43 and must be bumped alongside (26.15.x packages 43
+  fine); (2) Electron 42+ **no longer downloads its binary via a `postinstall`
+  script** — `node_modules/electron/dist/` is legitimately empty after
+  `npm install` and only populated on the first real `electron` bin
+  invocation, so do NOT treat an empty `dist/` as a broken install;
+  `electron-builder` fetches its own cached Electron for packaging regardless.
+  As always, the only trustworthy proof was a real packaged-AppImage CDP chat
+  round-trip (Chromium 150, live `PONG`/`PING` replies), not `make check`
+  alone — no native addons meant `@electron/rebuild` had nothing to break,
+  which was the single biggest de-risker.
+
 
 
