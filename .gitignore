@@ -37,3 +37,7 @@ coverage/
 # Playwright MCP scratch output
 .playwright-mcp/
 
+# Stryker mutation testing output
+reports/
+.stryker-tmp/
+
