@@ -30,7 +30,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 function CodeBlock({ language, value }: { language: string; value: string }) {
   return (
     <div className="my-2 overflow-hidden rounded-lg border border-surface-border">
-      <div className="flex items-center justify-between border-b border-surface-border bg-white/5 px-3 py-1.5">
+      <div className="flex items-center justify-between border-b border-surface-border bg-surface-hover px-3 py-1.5">
         <span className="text-[11px] uppercase tracking-wide text-white/40">
           {language || "text"}
         </span>
@@ -39,7 +39,12 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
       <SyntaxHighlighter
         language={language || "text"}
         style={oneDark}
-        customStyle={{ margin: 0, fontSize: "13px", padding: "12px 14px" }}
+        customStyle={{
+          margin: 0,
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: "13px",
+          padding: "12px 14px",
+        }}
       >
         {value}
       </SyntaxHighlighter>

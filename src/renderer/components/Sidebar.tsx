@@ -25,7 +25,7 @@ export function Sidebar() {
         type="button"
         onClick={() => setCollapsed((value) => !value)}
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        className={`mb-3 flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition hover:bg-white/5 hover:text-white ${
+        className={`mb-3 flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition hover:bg-surface-hover hover:text-white ${
           collapsed ? "" : "self-end"
         }`}
       >
@@ -53,7 +53,7 @@ export function Sidebar() {
                 className={`group flex items-center rounded-lg text-xs transition ${
                   session.id === conversationId
                     ? "bg-white/10 text-white"
-                    : "text-white/60 hover:bg-white/5 hover:text-white/80"
+                    : "text-white/60 hover:bg-surface-hover hover:text-white/80"
                 }`}
               >
                 <button

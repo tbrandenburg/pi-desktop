@@ -12,12 +12,10 @@ body {
   margin: 0;
   background-color: #0f0f11;
   color: #f3f3f1;
-  font-family:
-    "Inter",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  /* Native OS UI font, no webfont load — matches the sans stack in
+   * tailwind.config.js so body text and Tailwind's font-sans utility
+   * always agree. */
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
   font-size: 15px;
 }
 
