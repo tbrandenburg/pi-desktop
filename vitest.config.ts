@@ -36,6 +36,11 @@ export default defineConfig({
         "scripts/**",
         "*.config.*",
         "**/*.d.ts",
+        // Isolated agent worktrees live inside the repo root (see AGENTS.md
+        // "in-repo worktrees" convention) but must never be scanned for
+        // coverage - they can contain their own stale dist-main/dist-renderer
+        // build output or duplicate scripts/** files from parallel work.
+        ".worktrees/**",
       ],
       // Intentionally no `thresholds` yet: Vitest's coverage.thresholds has
       // no warn-only mode (setting it always sets exit code 1 on failure,
