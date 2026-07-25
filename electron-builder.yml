@@ -21,6 +21,21 @@ asar: true
 # to a require(), which can never load an ESM module and only fails in the
 # compiled/packaged app, never in plain-TS unit tests).
 
+# `make publish` (see Makefile) always creates the GitHub release as a
+# normal, published release via `gh release create` -- never a draft.
+# electron-builder's own default publish releaseType is "draft", and it
+# silently *skips* uploading (exit 0, no error) rather than attaching when
+# the existing release's type doesn't match its own releaseType (observed
+# real-world during the v0.3.1 CI verification run: both linux/windows jobs
+# logged "GitHub release not created ... existingType=release
+# publishingType=draft" and uploaded nothing). Setting releaseType: release
+# here makes electron-builder's GitHub publisher match `make publish`'s
+# release type so `--publish always` (used by .github/workflows/release.yml)
+# actually attaches the built artifacts instead of quietly no-op'ing.
+publish:
+  provider: github
+  releaseType: release
+
 linux:
   icon: assets/icon.png
   category: Development
