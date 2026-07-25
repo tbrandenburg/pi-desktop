@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import { ChatTimeline } from "./ChatTimeline";
 import { Composer } from "./Composer";
 import { ErrorBanner } from "./ErrorBanner";
-import { ModelPicker } from "./ModelPicker";
 import { SettingsDialog } from "./SettingsDialog";
 import { Sidebar } from "./Sidebar";
 import { useChatStore } from "../state/chat-store";
@@ -29,7 +28,6 @@ export function AppShell() {
             Pi Desktop
           </span>
           <div className="flex items-center gap-3">
-            <ModelPicker />
             <button
               type="button"
               onClick={openSettings}

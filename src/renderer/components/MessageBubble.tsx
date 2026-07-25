@@ -84,7 +84,7 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
           <p className="mt-2 text-xs text-red-400">{message.error}</p>
         )}
         {!isUser && !message.streaming && message.content && (
-          <div className="mt-2 flex justify-end border-t border-surface-border/60 pt-2">
+          <div className="mt-2 flex justify-end pt-2">
             <CopyButton
               text={message.content}
               className="flex items-center gap-1 text-[11px] text-white/40 transition hover:text-white"

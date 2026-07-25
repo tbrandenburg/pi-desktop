@@ -1,8 +1,9 @@
-import { MessageSquarePlus, X } from "lucide-react";
-import { useEffect } from "react";
+import { MessageSquarePlus, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useChatStore } from "../state/chat-store";
 
 export function Sidebar() {
+  const [collapsed, setCollapsed] = useState(true);
   const conversationId = useChatStore((state) => state.conversationId);
   const sessions = useChatStore((state) => state.sessions);
   const loadSessions = useChatStore((state) => state.loadSessions);
@@ -15,48 +16,69 @@ export function Sidebar() {
   }, [loadSessions]);
 
   return (
-    <aside className="flex w-60 flex-col border-r border-surface-border bg-surface-panel/60 px-3 py-4">
+    <aside
+      className={`flex flex-col overflow-hidden border-r border-surface-border bg-surface-panel/60 py-4 transition-[width] duration-200 ease-in-out ${
+        collapsed ? "w-14 px-2" : "w-60 px-3"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={() => setCollapsed((value) => !value)}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        className={`mb-3 flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition hover:bg-white/5 hover:text-white ${
+          collapsed ? "" : "self-end"
+        }`}
+      >
+        {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+      </button>
+
       <button
         type="button"
         onClick={resetConversation}
-        className="flex items-center gap-2 rounded-lg border border-surface-border px-3 py-2 text-sm text-white/80 transition hover:border-accent/40 hover:text-white"
+        title="New chat"
+        className={`flex items-center gap-2 rounded-lg border border-surface-border text-sm text-white/80 transition hover:border-accent/40 hover:text-white ${
+          collapsed ? "justify-center px-0 py-2" : "px-3 py-2"
+        }`}
       >
         <MessageSquarePlus size={16} />
-        New chat
+        {!collapsed && "New chat"}
       </button>
-      <div className="mt-4 flex-1 space-y-1 overflow-y-auto">
-        {sessions.length > 0 ? (
-          sessions.map((session) => (
-            <div
-              key={session.id}
-              className={`group flex items-center rounded-lg text-xs transition ${
-                session.id === conversationId
-                  ? "bg-white/10 text-white"
-                  : "text-white/60 hover:bg-white/5 hover:text-white/80"
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => void loadConversation(session.id)}
-                className="block flex-1 truncate px-3 py-2 text-left"
-                title={session.title}
+
+      {!collapsed && (
+        <div className="mt-4 flex-1 space-y-1 overflow-y-auto">
+          {sessions.length > 0 ? (
+            sessions.map((session) => (
+              <div
+                key={session.id}
+                className={`group flex items-center rounded-lg text-xs transition ${
+                  session.id === conversationId
+                    ? "bg-white/10 text-white"
+                    : "text-white/60 hover:bg-white/5 hover:text-white/80"
+                }`}
               >
-                {session.title}
-              </button>
-              <button
-                type="button"
-                onClick={() => void deleteSession(session.id)}
-                aria-label={`Delete ${session.title}`}
-                className="mr-1 rounded p-1 text-white/30 opacity-0 transition hover:text-white/80 group-hover:opacity-100"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          ))
-        ) : (
-          <p className="px-3 py-2 text-xs text-white/30">No conversations yet.</p>
-        )}
-      </div>
+                <button
+                  type="button"
+                  onClick={() => void loadConversation(session.id)}
+                  className="block flex-1 truncate px-3 py-2 text-left"
+                  title={session.title}
+                >
+                  {session.title}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteSession(session.id)}
+                  aria-label={`Delete ${session.title}`}
+                  className="mr-1 rounded p-1 text-white/30 opacity-0 transition hover:text-white/80 group-hover:opacity-100"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))
+          ) : (
+            <p className="px-3 py-2 text-xs text-white/30">No conversations yet.</p>
+          )}
+        </div>
+      )}
     </aside>
   );
 }

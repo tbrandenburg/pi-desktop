@@ -1,5 +1,6 @@
-import { Paperclip, Send, Square } from "lucide-react";
+import { Send, Square } from "lucide-react";
 import { useState } from "react";
+import { ModelPicker } from "./ModelPicker";
 import { useChatStore } from "../state/chat-store";
 
 export function Composer() {
@@ -19,15 +20,7 @@ export function Composer() {
 
   return (
     <div className="border-t border-surface-border bg-surface-panel/60 px-6 py-4">
-      <div className="flex items-end gap-3 rounded-2xl border border-surface-border bg-surface-panel px-4 py-3 focus-within:border-accent/50">
-        <button
-          type="button"
-          disabled
-          className="mt-1 text-white/25"
-          title="Attachments (coming soon)"
-        >
-          <Paperclip size={18} />
-        </button>
+      <div className="relative rounded-2xl border border-surface-border bg-surface-panel px-4 py-3 focus-within:border-accent/50">
         <textarea
           value={value}
           onChange={(event) => setValue(event.target.value)}
@@ -39,22 +32,13 @@ export function Composer() {
           }}
           rows={1}
           placeholder="Send a message…"
-          className="max-h-40 flex-1 resize-none bg-transparent text-sm text-white outline-none placeholder:text-white/30"
+          className="max-h-40 w-full resize-none bg-transparent pr-10 text-sm text-white outline-none placeholder:text-white/30"
         />
-        <span
-          className={
-            hasModel
-              ? "mb-1 rounded-full border border-surface-border px-2 py-0.5 text-[11px] text-white/40"
-              : "mb-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400"
-          }
-        >
-          {hasModel ? selectedModel : "⚠ Select a model to start chatting"}
-        </span>
         {isGenerating ? (
           <button
             type="button"
             onClick={() => void stopGeneration()}
-            className="mb-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+            className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
             title="Stop generation"
           >
             <Square size={14} />
@@ -64,14 +48,17 @@ export function Composer() {
             type="button"
             onClick={submit}
             disabled={!value.trim() || !hasModel}
-            className="mb-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-accent text-black transition disabled:opacity-30"
+            className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-accent text-black transition disabled:opacity-30"
             title={hasModel ? "Send" : "Select a model to start chatting"}
           >
             <Send size={14} />
           </button>
         )}
       </div>
-      <p className="mt-2 text-[11px] text-white/30">Enter to send · Shift+Enter for newline</p>
+      <div className="mt-2 flex items-center justify-between">
+        <p className="text-[11px] text-white/30">Enter to send · Shift+Enter for newline</p>
+        <ModelPicker />
+      </div>
     </div>
   );
 }

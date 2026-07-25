@@ -8,7 +8,7 @@ export function ModelPicker() {
   const hasModels = models.length > 0;
 
   return (
-    <div className="relative">
+    <div className="relative opacity-50 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100">
       <select
         value={hasModels ? selectedModel : ""}
         onChange={(event) => selectModel(event.target.value)}
