@@ -20,5 +20,15 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary"],
+      // Intentionally no `thresholds` yet: Vitest's coverage.thresholds has
+      // no warn-only mode (setting it always sets exit code 1 on failure,
+      // see vitest-dev/vitest packages/vitest/src/node/coverage.ts
+      // `reportThresholds`/`checkThresholds`), and there is no baseline
+      // branch-coverage number yet. Report-only for now; a real threshold
+      // can be added once a baseline exists (see follow-up issue #24).
+    },
   },
 });

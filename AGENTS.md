@@ -490,3 +490,20 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
     with the *exact* value named, since bugs like this are id-specific, not
     provider-class-specific.
 
+## Lessons learned (parallel issue resolution)
+
+- 2026-07-25: Two of five "quick" quality-drift issues shortlisted for a
+  parallel batch (#11 maxTokens default, #13 dynamic dev port) turned out to
+  already be fixed by an earlier, unrelated commit (`7bb66e8`) whose message
+  didn't mention either issue number. Always grep/read the actual current
+  source for each candidate issue's described symptom before dispatching a
+  subagent for it — a stale open GitHub issue is not proof the bug still
+  exists; five minutes of `grep`/`git log -- <file>` here avoided two wasted
+  subagent runs and produced two immediate issue closures instead.
+- 2026-07-25: When two independent issues both touch the same file (here,
+  #16 and #18 both edit `Makefile`, in different targets), assign them to a
+  single subagent instead of two parallel ones. Splitting by target instead
+  of by file looks more "independent" on paper but risks a real merge
+  conflict when two agents rewrite the same file concurrently; splitting by
+  file ownership is the safer contract to give.
+
