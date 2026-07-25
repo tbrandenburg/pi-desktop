@@ -44,3 +44,11 @@ coverage/
 reports/
 .stryker-tmp/
 
+# Agents
+.agents/
+.agent/
+.ghar/
+.claude/
+
+# dev
+dev/
