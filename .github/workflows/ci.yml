@@ -1,15 +1,19 @@
 name: CI
 
-"on": [push, pull_request]
-
-# Same-repo branches fire both a `push` and a `pull_request` (synchronize)
-# event for the identical commit, producing two duplicate `check-and-test`
-# entries in the PR's checks list (both green, but cosmetically looks like
-# an ambiguous/unstable merge status). Group by workflow+ref and cancel the
-# stale run so only the latest one for a given ref actually completes.
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+# Only run on push for main (post-merge / direct pushes), never for feature
+# branches -- a feature branch's commits are already covered by the
+# `pull_request` trigger below. Triggering on every branch push AND its
+# matching pull_request (synchronize) event produced two duplicate
+# `check-and-test` entries for the identical commit in the PR checks list.
+# An earlier attempt fixed this with `concurrency: cancel-in-progress`, but
+# that leaves a visible CANCELLED check in the PR's statusCheckRollup, which
+# flips `mergeStateStatus` to UNSTABLE -- the exact "merge issues" symptom
+# this was meant to fix. Not triggering the redundant run in the first place
+# avoids a CANCELLED entry entirely.
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   check-and-test:
