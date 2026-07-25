@@ -23,6 +23,13 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
+      // Vitest 4 removed `coverage.all`/`coverage.extensions` and now
+      // requires an explicit `include` to report on real application
+      // source (see the v4 migration guide, "Removed Options coverage.all
+      // and coverage.extensions"). Without this, v4 only reports files
+      // actually loaded during the test run with no glob to resolve them
+      // against, which produced an empty "All files | 0 | 0 | 0 | 0" report.
+      include: ["src/**/*.{ts,tsx}"],
       // Only measure real application source. Without this, the v8
       // provider's default "everything touched by a loaded module" scope
       // pulls in compiled build output (dist-main/**, when it happens to
@@ -36,6 +43,8 @@ export default defineConfig({
         "scripts/**",
         "*.config.*",
         "**/*.d.ts",
+        "src/**/*.test.ts",
+        "src/**/*.test.tsx",
         // Isolated agent worktrees live inside the repo root (see AGENTS.md
         // "in-repo worktrees" convention) but must never be scanned for
         // coverage - they can contain their own stale dist-main/dist-renderer
