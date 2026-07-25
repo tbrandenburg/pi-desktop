@@ -204,6 +204,33 @@ than catch it after the fact.
     `browser_find`/snapshot to confirm the change appeared with no
     navigation, then revert the edit and confirm `git diff` is empty before
     calling it verified.
+16. **2026-07-25**: Driving the real *packaged* app via CDP (see "Testing the
+    production package" below) previously meant hand-writing a throwaway
+    `node -e "..."` script every time. Conserved the common actions
+    (dump `document.body.innerText`, fill-and-submit the composer via the
+    native `<textarea>` value setter + a real `Enter` keydown, poll for the
+    "Stop generation" button to disappear, scroll-to-bottom + screenshot) into
+    a checked-in `scripts/cdp-drive.ts`, runnable directly via
+    `npx tsx scripts/cdp-drive.ts <port> <text|send|wait-idle|screenshot>
+    [arg]` (also aliased as `npm run cdp --`). Verified end-to-end against a
+    real launched AppImage (all four actions) before committing. Re-use this
+    instead of re-deriving the CDP dance from scratch each time; extend it
+    with new actions rather than writing one-off scripts again.
+17. **2026-07-25**: A saved `provider-settings.json` file existing on disk
+    under the app's userData dir does **not** guarantee the app-configured
+    provider (`app-settings` in `src/main/llm/models.ts`) shows up in the
+    model picker. `src/main/ipc.ts`'s `llm:list-models` handler only
+    registers it when `settingsStore.hasSavedApiKey()` is true — a file can
+    exist (e.g. left over from `resolvePiDefault()`'s `.pi/agent`-derived
+    fallback being persisted, per that function's own doc comment) without
+    the user ever having explicitly saved it through the Settings UI. When a
+    "configured model" seems to be missing from the picker despite a
+    settings file being present, check `hasSavedApiKey()`'s actual condition
+    before assuming the provider registration is broken — in practice, the
+    already-selected default model (resolved from real `~/.pi/agent`
+    credentials, e.g. a free-tier provider) is usually a perfectly valid
+    "actually configured model" to demo with instead of chasing a specific
+    provider that isn't wired up as expected.
 
 `npm test` and dev mode (`npm run dev`) both run through Vite/Node module
 resolution directly from `.ts` source or a live dev server. Neither one

@@ -18,7 +18,8 @@
     "dist": "npm run build && electron-builder",
     "dist:linux": "npm run build && electron-builder --linux AppImage",
     "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "cdp": "tsx scripts/cdp-drive.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.81.1",
