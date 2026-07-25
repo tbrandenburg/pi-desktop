@@ -560,4 +560,15 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   `readlink -f /proc/<pid>/cwd` + `ps -p <pid> -o cmd` that it's really your
   own process before `kill`-ing it directly by PID — never assume a pattern-
   based pkill got everything just because the command itself exited 0.
+- 2026-07-25: Creating a `git worktree` as a **sibling** directory
+  (`../pi-desktop-<branch>`) puts every tool call inside it (even
+  `npm install`) under OpenCode's `external_directory` permission, which
+  defaults to `"ask"` and can silently block/reject instead of prompting,
+  depending on the session. Always create isolated worktrees **inside** the
+  repo instead (e.g. `.worktrees/<branch>/`) and add `.worktrees/` to
+  `.gitignore` once — this keeps the worktree under the already-approved
+  working directory with zero permission friction, matches the common
+  `.git-worktrees/`-style community convention, and is fully supported by
+  `git worktree add <path>` (no restriction on nesting under the repo root
+  per the official git-worktree docs).
 
