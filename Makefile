@@ -19,7 +19,7 @@ help:
 	@echo "  make run         Start app in dev mode (renderer + main + electron)"
 	@echo "  make stop        Kill any running dev/electron processes"
 	@echo "  make test        Run unit tests (vitest); warns if suite takes >60s"
-	@echo "  make lint        Type-check renderer + main; warns on files >500 LOC"
+	@echo "  make lint        Type-check renderer + main; runs oxlint; warns on files >500 LOC"
 	@echo "  make build       Build renderer + main for production"
 	@echo "  make pack        Build and package app dir (no installer, fast local check)"
 	@echo "  make dist        Build and package installers for the current platform"
@@ -68,9 +68,10 @@ test:
 	fi; \
 	exit $$status
 
-## Type-check code (renderer + main); also warns on source files over 500 LOC
+## Type-check code (renderer + main); runs oxlint; also warns on source files over 500 LOC
 lint:
 	npm run check
+	npm run lint:oxlint
 	@find src \( -name "*.ts" -o -name "*.tsx" \) | grep -Ev '\.test\.' | xargs wc -l | grep -v ' total$$' | awk '$$1>500{print "WARNING: " $$2 " has " $$1 " lines"}'
 
 ## Alias for lint (type-check), kept for convention parity
