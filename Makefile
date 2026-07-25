@@ -6,7 +6,7 @@ SHELL := /bin/bash
 # even within the same `make` invocation (e.g. `make release-patch`).
 VERSION = $(shell node -p "require('./package.json').version")
 
-.PHONY: help install run stop test lint check build build-renderer build-main clean \
+.PHONY: help install run stop test lint check audit build build-renderer build-main clean \
         dist dist-linux dist-win pack \
         run-bundled run-linux run-win \
         version-patch version-minor version-major release publish \
@@ -20,6 +20,7 @@ help:
 	@echo "  make stop        Kill any running dev/electron processes"
 	@echo "  make test        Run unit tests (vitest); warns if suite takes >60s"
 	@echo "  make lint        Type-check renderer + main; runs oxlint; warns on files >500 LOC and test:source LOC ratio >2:1; fails on coverage regression below .coverage-baseline"
+	@echo "  make audit       Audit dependencies for known vulnerabilities"
 	@echo "  make build       Build renderer + main for production"
 	@echo "  make pack        Build and package app dir (no installer, fast local check)"
 	@echo "  make dist        Build and package installers for the current platform"
@@ -80,6 +81,15 @@ lint:
 
 ## Alias for lint (type-check), kept for convention parity
 check: lint
+
+## Audit dependencies for known vulnerabilities
+## Scoped to production dependencies only (--omit=dev): devDependencies here
+## are build-time-only tooling (electron-builder and its transitive deps)
+## that is never bundled into the shipped app, so vulnerabilities in them
+## carry no runtime risk to end users. Auditing them anyway would fail the
+## build on issues nobody can act on without vendor upstream fixes.
+audit:
+	npm audit --audit-level=high --omit=dev
 
 ## Build renderer + main for production
 build:

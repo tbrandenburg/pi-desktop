@@ -32,5 +32,6 @@ jobs:
       # deps (@emnapi/*) differently depending on install context, so it produced
       # false drift on every run. `npm ci` is the robust check.
       - run: npm ci
+      - run: make audit
       - run: npm run check
       - run: npm test
