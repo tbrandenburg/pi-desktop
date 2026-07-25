@@ -2,6 +2,15 @@ name: CI
 
 "on": [push, pull_request]
 
+# Same-repo branches fire both a `push` and a `pull_request` (synchronize)
+# event for the identical commit, producing two duplicate `check-and-test`
+# entries in the PR's checks list (both green, but cosmetically looks like
+# an ambiguous/unstable merge status). Group by workflow+ref and cancel the
+# stale run so only the latest one for a given ref actually completes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check-and-test:
     runs-on: ubuntu-latest
