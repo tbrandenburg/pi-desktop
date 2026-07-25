@@ -11,11 +11,13 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.19-brightgreen)](.nvmrc)
 [![Electron](https://img.shields.io/badge/electron-43-9feaf9?logo=electron&logoColor=black)](package.json)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 [Getting Started](#getting-started) •
 [Features](#features) •
 [Architecture](#architecture) •
 [Scripts](#scripts) •
+[Contributing](#contributing) •
 [Releases](https://github.com/tbrandenburg/pi-desktop/releases)
 
 </div>
@@ -31,6 +33,10 @@ cancel.
 
 It ships with a strict security boundary — the renderer never touches Node
 or provider APIs directly, and credentials never leave the main process.
+
+<div align="center">
+<img src="assets/screenshot.png" alt="Pi Desktop: streaming chat with syntax-highlighted code" width="720" />
+</div>
 
 ## Features
 
@@ -125,6 +131,11 @@ make run-linux   # or: release/linux-unpacked/pi-desktop, or the .AppImage direc
 
 See [`AGENTS.md`](AGENTS.md) for detailed guidance on testing the packaged
 app and lessons learned while building this project.
+
+## Contributing
+
+Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
+dev setup, pre-PR checks, and code/testing guidelines.
 
 ## License
 
