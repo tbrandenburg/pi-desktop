@@ -9,8 +9,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: 'npm'
+      # `npm ci` is itself the lockfile-drift guard: it hard-fails (EUSAGE) when
+      # package.json and package-lock.json are out of sync, which is exactly the
+      # dev-vs-CI divergence that corrupted the lockfile in #40 (see issue #42).
+      # A separate `npm install --package-lock-only` + `git diff` guard was tried
+      # but is non-deterministic here: npm re-resolves the wasm-glue optional
+      # deps (@emnapi/*) differently depending on install context, so it produced
+      # false drift on every run. `npm ci` is the robust check.
       - run: npm ci
       - run: npm run check
       - run: npm test

@@ -7,6 +7,9 @@
   "license": "MIT",
   "main": "dist-main/main/index.js",
   "type": "commonjs",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "dev:renderer": "vite",
     "dev:main": "tsc -p tsconfig.main.json -w",

@@ -60,6 +60,40 @@ exists.
 8. Keep STATUS.md updated with completed milestones and blockers.
 9. Test the production package, not only dev mode, before declaring packaging done.
 
+## Node toolchain (build/CI Node vs Electron's bundled Node)
+
+The **build/CI/dev Node** and the **Node bundled inside Electron** are two
+independent things. Do not conflate them.
+
+- **Canonical build/CI Node is pinned to Node 24 (Active LTS, EOL 2028-04-30)**
+  in exactly one place — `.nvmrc` — and both `.github/workflows/ci.yml` and
+  `.github/workflows/mutation-weekly.yml` consume it via
+  `node-version-file: '.nvmrc'` so CI and local dev can never diverge again.
+  `package.json` `engines.node` (`>=22.19.0`) encodes the real transitive floor
+  (driven by `@earendil-works/pi-ai` / `pi-agent-core`), and `.npmrc`'s
+  `engine-strict=true` makes a wrong local Node fail install fast instead of
+  only printing an easy-to-miss `EBADENGINE` warning.
+- **Electron ships its own Node inside the binary** (Electron 33 bundles Node
+  20.18; Electron 41+ bundles Node 24.18). The packaged app's main process runs
+  against *that* bundled Node at runtime regardless of which Node built/packaged
+  it — end users need no Node installed. The build/CI Node has **zero** effect
+  on the shipped runtime. The only real coupling would be native C++ addons,
+  which are rebuilt against Electron's ABI via `electron-rebuild`, never against
+  the toolchain Node (and this app currently has no native addons).
+- **Therefore: never re-pin CI back to Electron's bundled Node major** (e.g. "CI
+  must be Node 20 to match Electron 33") — it is technically unfounded and
+  reintroduces the dev(24)-vs-CI(20) npm-major split that corrupted the lockfile
+  in #40. `optionalDependencies` (`@emnapi/*`, etc.) are resolved differently by
+  different npm majors, and `npm ci` hard-fails rather than re-resolving. `npm ci`
+  in CI is itself the lockfile-drift guard — it fails fast (EUSAGE) on any
+  package.json/lock mismatch. (A separate `npm install --package-lock-only` +
+  `git diff` guard was tried and removed: npm re-resolves the `@emnapi/*` wasm-
+  glue optional deps differently depending on install context, so it produced
+  false drift on every run.)
+- **Bumping Electron is a separate, higher-risk change** (Chromium/V8 breaking
+  changes + real packaged-app testing) — track it as its own issue; it must not
+  be conflated with the toolchain Node pin above.
+
 ## Testing Rules
 
 These rules govern how agents write tests in this repo. They are mandatory,
@@ -600,6 +634,64 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   coordinator's own tree — a subagent's green result inside its own
   worktree is not sufficient proof the combined result is green, and
   in-repo worktrees left on disk during integration are themselves a
-  contamination source for any tool (like coverage) that scans the whole
-  repo directory tree rather than just tracked/imported files.
+   contamination source for any tool (like coverage) that scans the whole
+   repo directory tree rather than just tracked/imported files.
+- 2026-07-25: A CI lockfile-drift guard using `npm install
+  --package-lock-only` + `git diff --exit-code package-lock.json` (issue #42)
+  is **non-deterministic and must not be used** — it was tried, passed every
+  local check, and then hard-failed CI. Root cause: npm re-resolves the wasm-
+  glue optional deps (`@emnapi/core`, `@emnapi/runtime`) differently depending
+  on install context. A *fresh* `npm install` (no `node_modules`, no lock)
+  writes them as real installable `node_modules/@emnapi/*` entries — which
+  `npm ci` REQUIRES (it reports `Missing: @emnapi/core ... from lock file` and
+  fails otherwise) — but `npm install --package-lock-only`, AND even a plain
+  in-place `npm install` when `node_modules` already exists, STRIP those
+  entries back out. So no local re-run reliably reproduces the lock `npm ci`
+  needs, and a `git diff` guard flags phantom drift on every CI run. Fixes:
+  (1) commit the lockfile from a genuinely clean slate
+  (`rm -rf node_modules package-lock.json && npm install`), and (2) let
+  `npm ci` itself be the drift guard — it already hard-fails (EUSAGE) on any
+  package.json/lock mismatch, which is exactly the #40 bug class. Do NOT layer
+  a `git diff` lockfile check on top. Prevention: never trust a lockfile change
+  until `git push` + real CI (`npm ci` on a clean runner) goes green — local
+  `npm ci` can pass on the same platform while the committed lock is still
+  wrong for a clean install, per the standing rule that a change can pass every
+  local check and still fail only in CI / the packaged artifact.
+- 2026-07-25: A mid-task `git checkout -- package.json` / `cp <backup>` used to
+  restore state after a *deliberate* drift test silently reverted an intended
+  edit (the new `engines` field) because the backup was taken before that edit
+  landed. Always re-grep for the intended change (`grep '"engines"'
+   package.json`) after any restore-to-pristine step in a destructive test, and
+   re-apply if lost — don't assume the working tree still holds earlier edits
+   once a `checkout`/`cp` restore has run.
+- 2026-07-25: `scripts/cdp-drive.ts`'s `send` action takes the message as its
+  own CLI **argument** and performs set-value + `Enter` keydown in a single
+  call (`cdp-drive.ts <port> send "the message"`). It is NOT a two-step
+  fill-then-submit like some browser harnesses. Two easy mistakes cost a wasted
+  round-trip here: (a) `text "msg"` silently *ignores* the extra arg — `text`
+  only ever dumps `document.body.innerText`, so it looked like the message was
+  typed when nothing happened; and (b) calling `send` with no arg errors with
+  `"send" requires a message argument`. Always pass the prompt directly to
+  `send`, then `wait-idle`, then `text` to read the reply — don't try to `text`
+  the prompt in first.
+- 2026-07-25: The #42 AGENTS.md claim that "build/CI Node is independent of
+  Electron's bundled Node" was **empirically confirmed end-to-end**: the app
+  built and packaged on Node 24 (`make dist-linux`), running Electron 33.4.11
+  (which bundles Node 20.18), launched and completed a real streamed chat reply
+  ("PONG") against a live provider with zero issues. Concrete evidence that
+  bumping the toolchain to Node 24 does not require also bumping Electron, and
+  that Electron 33 still packages cleanly on Node 24 — a useful de-risking data
+  point for the future #43 Electron bump.
+- 2026-07-25: `pkill -f "<AppImage filename>"` does NOT kill the actually-running
+  packaged Electron process. An AppImage mounts a squashfs at launch, so the
+  real running binary's cmdline is `/tmp/.mount_<random>/pi-desktop ...`, not the
+  `*.AppImage` path — the filename pattern matches only the transient launcher,
+  leaving the real process (and its `--remote-debugging-port` listener) alive.
+  Reliable cleanup: find the survivor via `ss -ltnp | grep :<debugport>` → get
+  its PID → confirm ownership with `readlink -f /proc/<pid>/cwd` (should be your
+  e2e worktree) + `ps -p <pid> -o cmd=` (should show your unique
+  `--user-data-dir`) → then `kill <pid>` directly. Re-check the port is released
+  afterward, and never kill an unrelated PID (e.g. a sibling project's `vite`)
+  found in the same sweep.
+
 
