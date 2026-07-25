@@ -60,6 +60,37 @@ exists.
 8. Keep STATUS.md updated with completed milestones and blockers.
 9. Test the production package, not only dev mode, before declaring packaging done.
 
+## Node toolchain (build/CI Node vs Electron's bundled Node)
+
+The **build/CI/dev Node** and the **Node bundled inside Electron** are two
+independent things. Do not conflate them.
+
+- **Canonical build/CI Node is pinned to Node 24 (Active LTS, EOL 2028-04-30)**
+  in exactly one place — `.nvmrc` — and both `.github/workflows/ci.yml` and
+  `.github/workflows/mutation-weekly.yml` consume it via
+  `node-version-file: '.nvmrc'` so CI and local dev can never diverge again.
+  `package.json` `engines.node` (`>=22.19.0`) encodes the real transitive floor
+  (driven by `@earendil-works/pi-ai` / `pi-agent-core`), and `.npmrc`'s
+  `engine-strict=true` makes a wrong local Node fail install fast instead of
+  only printing an easy-to-miss `EBADENGINE` warning.
+- **Electron ships its own Node inside the binary** (Electron 33 bundles Node
+  20.18; Electron 41+ bundles Node 24.18). The packaged app's main process runs
+  against *that* bundled Node at runtime regardless of which Node built/packaged
+  it — end users need no Node installed. The build/CI Node has **zero** effect
+  on the shipped runtime. The only real coupling would be native C++ addons,
+  which are rebuilt against Electron's ABI via `electron-rebuild`, never against
+  the toolchain Node (and this app currently has no native addons).
+- **Therefore: never re-pin CI back to Electron's bundled Node major** (e.g. "CI
+  must be Node 20 to match Electron 33") — it is technically unfounded and
+  reintroduces the dev(24)-vs-CI(20) npm-major split that corrupted the lockfile
+  in #40. `optionalDependencies` (`@emnapi/*`, etc.) are resolved differently by
+  different npm majors, and `npm ci` hard-fails rather than re-resolving. The CI
+  lockfile-drift guard (`npm install --package-lock-only` + `git diff
+  --exit-code package-lock.json`) exists to catch this class of bug fast.
+- **Bumping Electron is a separate, higher-risk change** (Chromium/V8 breaking
+  changes + real packaged-app testing) — track it as its own issue; it must not
+  be conflated with the toolchain Node pin above.
+
 ## Testing Rules
 
 These rules govern how agents write tests in this repo. They are mandatory,
@@ -600,6 +631,27 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   coordinator's own tree — a subagent's green result inside its own
   worktree is not sufficient proof the combined result is green, and
   in-repo worktrees left on disk during integration are themselves a
-  contamination source for any tool (like coverage) that scans the whole
-  repo directory tree rather than just tracked/imported files.
+   contamination source for any tool (like coverage) that scans the whole
+   repo directory tree rather than just tracked/imported files.
+- 2026-07-25: A CI lockfile-drift guard using `npm install
+  --package-lock-only` (issue #42) will FALSE-fail unless the *committed*
+  `package-lock.json` was itself generated the same way. A full `npm install`
+  writes extra `optionalDependencies` (`@emnapi/*`) and `peer` metadata that
+  `--package-lock-only` strips back out, so a full-install lockfile drifts by
+  ~90 lines against the guard on the very first CI run. Fix: after regenerating
+  the lockfile, run `npm install --package-lock-only` once and commit *that*
+  (the guard's own fixpoint), then verify it's stable under BOTH `npm install`
+  and `npm install --package-lock-only` (neither should re-fatten it) AND that
+  `npm ci` still installs cleanly (862 pkgs, no EBADENGINE, tests green)
+  against the lean file. Prevention: always commit the fixpoint of whatever
+  command the drift guard runs, and prove idempotency under both the
+  contributor command (`npm install`) and the guard command before pushing.
+- 2026-07-25: A mid-task `git checkout -- package.json` / `cp <backup>` used to
+  restore state after a *deliberate* drift test silently reverted an intended
+  edit (the new `engines` field) because the backup was taken before that edit
+  landed. Always re-grep for the intended change (`grep '"engines"'
+  package.json`) after any restore-to-pristine step in a destructive test, and
+  re-apply if lost — don't assume the working tree still holds earlier edits
+  once a `checkout`/`cp` restore has run.
+
 

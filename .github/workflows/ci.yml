@@ -9,8 +9,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: 'npm'
       - run: npm ci
+      # Lockfile-drift guard: re-resolving the lockfile on the canonical Node
+      # must produce no diff. Fails fast on the dev-vs-CI npm-major divergence
+      # that corrupted the lockfile in #40 (see issue #42).
+      - name: Check package-lock.json is in sync
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          git diff --exit-code package-lock.json
       - run: npm run check
       - run: npm test
