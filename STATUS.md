@@ -188,3 +188,51 @@ Real display, real IPC, real provider smoke test (CDP-driven, no OS input
   `nativeDynamicImport` path for `@earendil-works/pi-ai` still loads at
   runtime under Electron 43 / Node 24 in the packaged asar — a chat is
   impossible without it.
+
+## Milestone 9 — `@earendil-works/pi-agent-core` as the sole chat runtime (2026-07-25, issue #41)
+
+- Replaced `ChatService`'s direct, single-turn `registry.models.stream(...)`
+  call with `AgentRuntime`, a thin wrapper around `AgentHarness` (tool loop +
+  context compaction) from the already-installed `@earendil-works/pi-agent-core`
+  dependency. `AgentEvent`s (`message_update`/`tool_execution_start`/
+  `agent_end`) are translated into the existing `ChatEvent` union unchanged.
+- Replaced the bespoke, global, `electron-store`-backed `SessionStore` with
+  `JsonlSessionRepo` (cwd-scoped, on-disk session tree), fronted by a new
+  `SessionService` + `session-projection.ts` that derives `title`/`model`/
+  `updatedAt` (none of which exist on `JsonlSessionMetadata`) — title from
+  the latest `session_info` entry, else the first user message, else
+  "(untitled)"; `updatedAt` from the session file's own mtime. Compaction/
+  branch-summary entries project to a single system-role summary bubble.
+  `sessions:save`/`saveSession` were removed entirely — persistence is now
+  automatic via the harness's own session writes, so there is nothing to
+  save.
+- Added two read-only tools (`read_file`, `list_files`) built on the
+  harness's injected `ExecutionEnv`, never raw `node:fs` — confined to
+  whichever workspace directory is active.
+- Added a workspace/folder picker (`workspace:choose`/`workspace:get` IPC,
+  a `SettingsStore.workspaceDir` setting defaulting to the user's home
+  directory, and a Sidebar button) so a session tree is scoped per user-
+  chosen folder rather than a meaningless packaged-app launch cwd.
+- The identical ESM-only/`nativeDynamicImport` packaging workaround used for
+  `@earendil-works/pi-ai` (see Milestone 8's doc comments) was required
+  again for `@earendil-works/pi-agent-core` (`agent-core.ts`) — verified
+  post-build that `dist-main/main/llm/agent-core.js` still contains a
+  literal `import(...)`, not a downleveled `require(...)`.
+- `make lint` green: tsc (renderer + main) clean, oxlint clean, test-ratio
+  warn-only (pre-existing + one new file, no fails), **56/56 tests pass**
+  including 3 new real-disk/real-`AgentHarness` integration test files
+  (`tools.test.ts`, `agent-runtime.test.ts`, `session-projection.test.ts` —
+  all real `NodeExecutionEnv`/`JsonlSessionRepo`, only the network boundary
+  faked), coverage ratchet improved 46.06% -> 52.55%.
+- **Real packaged AppImage verified end-to-end via CDP**: built + launched
+  `Pi Desktop Demo-0.2.0-linux-x86_64.AppImage` with a real
+  `~/.pi/agent`-derived `llm7/minimax-m2.7` model, sent two prompts in the
+  same conversation ("reply PONG" then "reply PING") and got both correct
+  live streamed replies; the sidebar showed the session correctly titled
+  from the first user message and the active workspace path (`/home/tom`).
+  Confirmed a real on-disk JSONL session file was written under
+  `~/--home-tom--/*.jsonl`. Not separately re-verified live in this pass:
+  an explicit tool-call effect and a folder-switch producing two different
+  session lists (both are covered by real-disk automated tests instead --
+  `tools.test.ts` and the `workspace:choose` case in `ipc.test.ts` -- but
+  not re-demonstrated live in the packaged app in this milestone).

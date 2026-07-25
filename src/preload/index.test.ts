@@ -73,33 +73,30 @@ describe("preload bridge integration", () => {
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(5, "settings:get");
   });
 
-  it("exposes session channels matching the main-process session IPC handlers", async () => {
+  it("exposes session + workspace channels matching the main-process IPC handlers", async () => {
     const { ipcRenderer } = (await import("electron")) as unknown as {
       ipcRenderer: { invoke: (channel: string, ...args: unknown[]) => Promise<unknown> };
     };
     const api = exposed.get("desktopApi") as {
       listSessions: () => Promise<unknown>;
       getSession: (id: string) => Promise<unknown>;
-      saveSession: (s: unknown) => Promise<unknown>;
       deleteSession: (id: string) => Promise<unknown>;
+      getWorkspace: () => Promise<unknown>;
+      chooseWorkspace: () => Promise<unknown>;
     };
 
     (ipcRenderer.invoke as ReturnType<typeof vi.fn>).mockClear();
     await api.listSessions();
     await api.getSession("s1");
-    await api.saveSession({ id: "s1", title: "hi", model: "gpt-4o", updatedAt: 1, messages: [] });
     await api.deleteSession("s1");
+    await api.getWorkspace();
+    await api.chooseWorkspace();
 
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(1, "sessions:list");
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(2, "sessions:get", "s1");
-    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(3, "sessions:save", {
-      id: "s1",
-      title: "hi",
-      model: "gpt-4o",
-      updatedAt: 1,
-      messages: [],
-    });
-    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(4, "sessions:delete", "s1");
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(3, "sessions:delete", "s1");
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(4, "workspace:get");
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(5, "workspace:choose");
   });
 
   it("subscribes onChatEvent to the chat:event channel and forwards decoded events, then unsubscribes cleanly", async () => {

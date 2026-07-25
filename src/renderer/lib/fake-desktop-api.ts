@@ -22,6 +22,7 @@ function fakeModelsOverride(): "empty" | null {
 export function createFakeDesktopApi(): DesktopLLMApi {
   const sessions = new Map<string, SessionRecord>();
   let listener: ((event: import("../../shared/events").ChatEvent) => void) | null = null;
+  let workspaceDir = "/home/fake-user";
 
   return {
     async listModels() {
@@ -37,11 +38,24 @@ export function createFakeDesktopApi(): DesktopLLMApi {
       const reply = `Echo (${request.model}): ${request.messages.at(-1)?.content ?? ""}`;
       queueMicrotask(async () => {
         listener?.({ type: "started", requestId });
+        let content = "";
         for (const word of reply.split(" ")) {
           await new Promise((resolve) => setTimeout(resolve, 10));
+          content += `${word} `;
           listener?.({ type: "text-delta", requestId, text: `${word} ` });
         }
         listener?.({ type: "completed", requestId });
+        // Mimic the real AgentHarness's automatic on-disk session writes:
+        // the fake bridge persists the conversation itself instead of
+        // relying on a renderer-initiated save call (there is none anymore).
+        const firstUserMessage = request.messages.find((m) => m.role === "user");
+        sessions.set(request.conversationId, {
+          id: request.conversationId,
+          title: firstUserMessage?.content.slice(0, 60) || "New chat",
+          model: request.model,
+          updatedAt: Date.now(),
+          messages: [...request.messages, { role: "assistant", content: content.trim() }],
+        });
       });
       return { requestId };
     },
@@ -71,12 +85,21 @@ export function createFakeDesktopApi(): DesktopLLMApi {
       return sessions.get(id) ?? null;
     },
 
-    async saveSession(session) {
-      sessions.set(session.id, session);
-    },
-
     async deleteSession(id) {
       sessions.delete(id);
+    },
+
+    async getWorkspace() {
+      return { dir: workspaceDir };
+    },
+
+    async chooseWorkspace() {
+      // No native dialog in the browser dev harness; deterministically
+      // "choose" a different fake folder so Sidebar/session-list refresh
+      // behavior can still be exercised (see Milestone 6's scope decision).
+      workspaceDir = workspaceDir === "/home/fake-user" ? "/home/fake-user/other-workspace" : "/home/fake-user";
+      sessions.clear();
+      return { dir: workspaceDir };
     },
   };
 }

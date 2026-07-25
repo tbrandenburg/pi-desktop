@@ -9,12 +9,6 @@ export interface DisplayMessage extends ChatMessage {
   error?: string;
 }
 
-function makeTitle(messages: DisplayMessage[]): string {
-  const firstUserMessage = messages.find((message) => message.role === "user");
-  if (!firstUserMessage) return "New chat";
-  return firstUserMessage.content.slice(0, 60) || "New chat";
-}
-
 interface ChatState {
   conversationId: string;
   sessions: SessionSummary[];
@@ -24,6 +18,7 @@ interface ChatState {
   activeRequestId: string | null;
   status: "idle" | "thinking" | "streaming" | "error";
   errorMessage: string | null;
+  workspaceDir: string;
   loadModels: () => Promise<void>;
   selectModel: (modelId: string) => void;
   sendMessage: (text: string) => Promise<void>;
@@ -31,8 +26,9 @@ interface ChatState {
   resetConversation: () => void;
   loadSessions: () => Promise<void>;
   loadConversation: (id: string) => Promise<void>;
-  persistSession: () => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
+  loadWorkspace: () => Promise<void>;
+  chooseWorkspace: () => Promise<void>;
 }
 
 let unsubscribe: (() => void) | null = null;
@@ -46,6 +42,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
   activeRequestId: null,
   status: "idle",
   errorMessage: null,
+  workspaceDir: "",
 
   loadModels: async () => {
     const models = await desktopApi().listModels();
@@ -57,6 +54,20 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
   loadSessions: async () => {
     const sessions = await desktopApi().listSessions();
     set({ sessions });
+  },
+
+  loadWorkspace: async () => {
+    const { dir } = await desktopApi().getWorkspace();
+    set({ workspaceDir: dir });
+    await get().loadSessions();
+  },
+
+  chooseWorkspace: async () => {
+    const result = await desktopApi().chooseWorkspace();
+    if (!result) return;
+    set({ workspaceDir: result.dir });
+    get().resetConversation();
+    await get().loadSessions();
   },
 
   loadConversation: async (id: string) => {
@@ -74,19 +85,6 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
       activeRequestId: null,
       errorMessage: null,
     });
-  },
-
-  persistSession: async () => {
-    const { conversationId, messages, selectedModel } = get();
-    if (messages.length === 0) return;
-    await desktopApi().saveSession({
-      id: conversationId,
-      title: makeTitle(messages),
-      model: selectedModel,
-      updatedAt: Date.now(),
-      messages: messages.map(({ role, content }) => ({ role, content })),
-    });
-    await get().loadSessions();
   },
 
   sendMessage: async (text: string) => {
@@ -138,7 +136,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
           const message = draft.messages.find((m) => m.id === assistantMessage.id);
           if (message) message.streaming = false;
         });
-        void get().persistSession();
+        void get().loadSessions();
         return;
       }
 
@@ -153,7 +151,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
             message.error = event.message;
           }
         });
-        void get().persistSession();
+        void get().loadSessions();
       }
     });
 
@@ -196,7 +194,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
         if (message.streaming) message.streaming = false;
       }
     });
-    void get().persistSession();
+    void get().loadSessions();
   },
 
   resetConversation: () =>

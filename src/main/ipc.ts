@@ -1,19 +1,29 @@
-import { type BrowserWindow, ipcMain } from "electron";
-import {
-  startChatRequestSchema,
-  providerSettingsSchema,
-  sessionRecordSchema,
-} from "../shared/schemas";
-import type { ModelInfo } from "../shared/events";
+import { type BrowserWindow, dialog, ipcMain } from "electron";
+import { startChatRequestSchema, providerSettingsSchema, workspaceDirSchema } from "../shared/schemas";
+import type { ModelInfo, WorkspaceInfo } from "../shared/events";
 import { ChatService } from "./llm/chat-service";
 import { listConfiguredModels, resolvePiDefault } from "./llm/pi-config";
 import { SettingsStore } from "./storage/settings-store";
-import { SessionStore } from "./storage/session-store";
+import { SessionService } from "./llm/session-service";
+import type { AgentCoreLoaders } from "./llm/agent-core";
 
-export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
+export interface RegisterIpcHandlersDeps {
+  agentCoreLoaders?: AgentCoreLoaders;
+}
+
+export function registerIpcHandlers(
+  getWindow: () => BrowserWindow | null,
+  deps: RegisterIpcHandlersDeps = {},
+): void {
   const settingsStore = new SettingsStore();
-  const sessionStore = new SessionStore();
-  const chatService = new ChatService(settingsStore, getWindow);
+  let currentWorkspaceDir = "";
+  const getWorkspaceDir = () => currentWorkspaceDir;
+  void settingsStore.getWorkspaceDir().then((dir) => {
+    currentWorkspaceDir = dir;
+  });
+
+  const sessionService = new SessionService(getWorkspaceDir, deps.agentCoreLoaders);
+  const chatService = new ChatService(settingsStore, getWindow, undefined, getWorkspaceDir);
 
   ipcMain.handle("llm:list-models", async (): Promise<ModelInfo[]> => {
     // The model list is sourced entirely from the providers configured in
@@ -72,19 +82,33 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   });
 
   ipcMain.handle("sessions:list", async () => {
-    return sessionStore.list();
+    return sessionService.list();
   });
 
   ipcMain.handle("sessions:get", async (_event, id: string) => {
-    return sessionStore.get(id);
-  });
-
-  ipcMain.handle("sessions:save", async (_event, rawSession: unknown) => {
-    const session = sessionRecordSchema.parse(rawSession);
-    await sessionStore.save(session);
+    return sessionService.get(id);
   });
 
   ipcMain.handle("sessions:delete", async (_event, id: string) => {
-    await sessionStore.delete(id);
+    await sessionService.delete(id);
+  });
+
+  ipcMain.handle("workspace:get", async (): Promise<WorkspaceInfo> => {
+    const dir = await settingsStore.getWorkspaceDir();
+    currentWorkspaceDir = dir;
+    return { dir };
+  });
+
+  ipcMain.handle("workspace:choose", async (): Promise<WorkspaceInfo | null> => {
+    const win = getWindow();
+    const result = win
+      ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
+      : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+    if (result.canceled || result.filePaths.length === 0) return null;
+
+    const dir = workspaceDirSchema.parse(result.filePaths[0]);
+    await settingsStore.setWorkspaceDir(dir);
+    currentWorkspaceDir = dir;
+    return { dir };
   });
 }

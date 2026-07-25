@@ -1,4 +1,4 @@
-import { MessageSquarePlus, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { FolderOpen, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useChatStore } from "../state/chat-store";
 
@@ -6,14 +6,16 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(true);
   const conversationId = useChatStore((state) => state.conversationId);
   const sessions = useChatStore((state) => state.sessions);
-  const loadSessions = useChatStore((state) => state.loadSessions);
+  const workspaceDir = useChatStore((state) => state.workspaceDir);
+  const loadWorkspace = useChatStore((state) => state.loadWorkspace);
+  const chooseWorkspace = useChatStore((state) => state.chooseWorkspace);
   const loadConversation = useChatStore((state) => state.loadConversation);
   const resetConversation = useChatStore((state) => state.resetConversation);
   const deleteSession = useChatStore((state) => state.deleteSession);
 
   useEffect(() => {
-    void loadSessions();
-  }, [loadSessions]);
+    void loadWorkspace();
+  }, [loadWorkspace]);
 
   return (
     <aside
@@ -42,6 +44,18 @@ export function Sidebar() {
       >
         <MessageSquarePlus size={16} />
         {!collapsed && "New chat"}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => void chooseWorkspace()}
+        title={workspaceDir ? `Workspace: ${workspaceDir}` : "Choose workspace folder"}
+        className={`mt-2 flex items-center gap-2 rounded-lg border border-surface-border text-sm text-white/60 transition hover:border-accent/40 hover:text-white ${
+          collapsed ? "justify-center px-0 py-2" : "px-3 py-2"
+        }`}
+      >
+        <FolderOpen size={16} />
+        {!collapsed && <span className="truncate">{workspaceDir || "Choose workspace"}</span>}
       </button>
 
       {!collapsed && (
