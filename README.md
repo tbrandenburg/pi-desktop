@@ -1,33 +1,66 @@
+<div align="center">
+
+<img src="assets/icon.png" width="96" height="96" alt="Pi Desktop icon" />
+
 # Pi Desktop
 
-A polished Electron + React desktop chat app that streams responses from
-OpenAI-compatible LLM providers via [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai).
+**A native, secure desktop chat client for any OpenAI-compatible LLM.**
 
-Built as an overnight demo project: a native-feeling chat UI (sidebar with
-session history, model picker, streaming Markdown + syntax-highlighted code,
-stop/cancel generation) backed by a small, typed Electron main process that
-owns all provider credentials and networking — the React renderer never
-touches Node or provider APIs directly.
+[![CI](https://github.com/tbrandenburg/pi-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/tbrandenburg/pi-desktop/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tbrandenburg/pi-desktop)](https://github.com/tbrandenburg/pi-desktop/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.19-brightgreen)](.nvmrc)
+[![Electron](https://img.shields.io/badge/electron-43-9feaf9?logo=electron&logoColor=black)](package.json)
 
-## Highlights
+[Getting Started](#getting-started) •
+[Features](#features) •
+[Architecture](#architecture) •
+[Scripts](#scripts) •
+[Releases](https://github.com/tbrandenburg/pi-desktop/releases)
 
-- **Streaming chat** through any OpenAI-compatible endpoint (OpenAI,
-  OpenRouter, or any custom `openai-completions`-compatible gateway).
-- **Zero-config first launch**: if you already have a
-  [Pi CLI](https://github.com/earendil-works) config at `~/.pi/agent`
-  (`settings.json` / `auth.json` / `models.json`), the app resolves a
-  working default provider and model from it automatically — no manual API
-  key entry required to start chatting.
-- **Session browsing and recovery**: past conversations persist locally
-  (`electron-store`) and can be reopened, restoring both messages and the
-  model that was used.
-- **Secure-by-design IPC boundary**: `contextIsolation: true`,
-  `nodeIntegration: false`, `sandbox: true`. The renderer only ever talks to
-  the main process through a narrow, typed preload bridge
-  (`src/preload/api-types.ts`); the stored API key is never sent back to the
-  renderer after saving.
-- **Packaged for Linux and Windows** via `electron-builder` (AppImage;
-  NSIS installer + portable exe).
+</div>
+
+---
+
+Pi Desktop streams responses from any OpenAI-compatible provider (OpenAI,
+OpenRouter, or a custom gateway) through
+[`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai),
+wrapped in a fast, native-feeling Electron + React UI: session history,
+model picker, streaming Markdown with syntax-highlighted code, and one-click
+cancel.
+
+It ships with a strict security boundary — the renderer never touches Node
+or provider APIs directly, and credentials never leave the main process.
+
+## Features
+
+- **Stream from any OpenAI-compatible endpoint** — OpenAI, OpenRouter, or
+  your own `openai-completions`-compatible gateway.
+- **Zero-config first launch** — if you already have a
+  [Pi CLI](https://github.com/earendil-works) config at `~/.pi/agent`, Pi
+  Desktop resolves a working provider and model automatically. No API key
+  entry required to start chatting.
+- **Session history that survives restarts** — every conversation persists
+  locally and reopens with the exact model it was run with.
+- **Secure by design** — `contextIsolation: true`, `nodeIntegration: false`,
+  `sandbox: true`. The renderer talks to Node only through a narrow, typed
+  preload bridge; a saved API key is never sent back to the UI.
+- **Cross-platform packaging** — Linux AppImage today; Windows NSIS +
+  portable exe verified to build natively.
+
+## Getting started
+
+```bash
+npm install
+npm run dev     # renderer (Vite) + main (tsc -w) + Electron, hot-reloading
+```
+
+On first launch, open **Settings** to configure a provider API key, base
+URL, and model — unless you already have a `~/.pi/agent` config, in which
+case a working default is picked automatically.
+
+> Prefer `make`? `make install && make run` does the same thing — see
+> [Scripts](#scripts) for the full command surface.
 
 ## Architecture
 
@@ -41,22 +74,34 @@ src/
 └── shared/        Types and Zod schemas shared across processes
 ```
 
+The renderer speaks only to `window.desktopApi`
+(`src/preload/api-types.ts`) — there is no path from the UI to Node, the
+filesystem, or provider credentials.
+
 See [`docs/INITIAL.md`](docs/INITIAL.md) for the original design brief and
-[`STATUS.md`](STATUS.md) for a running log of completed milestones, bugs
-found and fixed, and verification evidence.
-
-## Getting started
-
-```bash
-npm install
-npm run dev     # renderer (Vite) + main (tsc -w) + Electron, hot-reloading
-```
-
-On first launch, open **Settings** to configure a provider API key, base URL,
-and model — unless you already have a `~/.pi/agent` config, in which case a
-working default is picked automatically.
+[`STATUS.md`](STATUS.md) for a running log of milestones, bugs found and
+fixed, and verification evidence.
 
 ## Scripts
+
+| Command | Description |
+| --- | --- |
+| `make install` | Install dependencies (`npm install`) |
+| `make run` / `make stop` | Start / stop dev mode (Vite + main + Electron) |
+| `make test` | Run unit tests (`vitest`) |
+| `make lint` / `make check` | Type-check renderer + main (`tsc --noEmit`) |
+| `make build` | Build renderer + main for production |
+| `make pack` | Build + package app dir only, no installer |
+| `make dist-linux` | Build + package the Linux AppImage |
+| `make dist-win` | Build + package Windows NSIS + portable installers |
+| `make clean` | Remove all build artifacts and `node_modules` |
+
+Run `make help` for the full, always-up-to-date list, including
+`run-bundled`/`run-linux`/`run-win` and the `version-*`/`release-*`/
+`publish` release workflow.
+
+<details>
+<summary>Equivalent plain npm scripts</summary>
 
 ```bash
 npm run check       # tsc --noEmit for both renderer and main
@@ -65,49 +110,7 @@ npm run build        # build renderer + main for production
 npm run dist:linux   # package a Linux AppImage (release/)
 ```
 
-Or via `make` (run `make help` for the full, current list):
-
-```bash
-make install         # npm install
-make run             # dev mode: renderer (Vite) + main (tsc -w) + Electron
-make stop            # kill any running dev/electron processes
-make test            # vitest
-make lint            # tsc --noEmit (alias: make check)
-make build           # build renderer + main for production
-make pack            # package app dir, no installer (fast local check)
-make dist            # package installers for the current host platform
-make dist-linux      # package the Linux AppImage
-make dist-win        # package the Windows installer + portable exe
-                      # (cross-building from Linux/macOS requires 'wine')
-make clean           # remove build artifacts (dist-*, release, node_modules)
-```
-
-### Running the bundled (packaged) app
-
-Best-effort convenience targets that run whatever was already built under
-`release/` — they never build anything themselves, so run `make dist-linux`
-/ `make dist-win` first:
-
-```bash
-make run-bundled     # auto-detects the host platform (Linux or Windows)
-make run-linux       # run the built .AppImage directly
-make run-win         # run the built Windows app: native .exe if already on
-                      # Windows, otherwise via 'wine' (best-effort)
-```
-
-### Versioning & releases
-
-```bash
-make version-patch   # bump 0.1.0 -> 0.1.1: runs check+test, then commits
-make version-minor   # bump 0.1.0 -> 0.2.0    "chore(release): vX.Y.Z" and
-make version-major   # bump 0.1.0 -> 1.0.0    tags it (all local, no push)
-make release         # push the release commit + tag to origin
-make publish         # create the GitHub release for the current tag
-                      # (release notes only; no build artifacts attached)
-make release-patch   # one-shot: bump -> push -> publish
-make release-minor
-make release-major
-```
+</details>
 
 ## Testing the packaged app
 
@@ -126,3 +129,4 @@ app and lessons learned while building this project.
 ## License
 
 [MIT](LICENSE)
+</content>
