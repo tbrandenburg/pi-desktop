@@ -34,6 +34,9 @@ coverage/
 # Misc local state
 .pi/
 
+# Local git worktrees for isolated agent/issue work
+.worktrees/
+
 # Playwright MCP scratch output
 .playwright-mcp/
 
