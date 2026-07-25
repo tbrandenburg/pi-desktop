@@ -11,13 +11,13 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
+      # `npm ci` is itself the lockfile-drift guard: it hard-fails (EUSAGE) when
+      # package.json and package-lock.json are out of sync, which is exactly the
+      # dev-vs-CI divergence that corrupted the lockfile in #40 (see issue #42).
+      # A separate `npm install --package-lock-only` + `git diff` guard was tried
+      # but is non-deterministic here: npm re-resolves the wasm-glue optional
+      # deps (@emnapi/*) differently depending on install context, so it produced
+      # false drift on every run. `npm ci` is the robust check.
       - run: npm ci
-      # Lockfile-drift guard: re-resolving the lockfile on the canonical Node
-      # must produce no diff. Fails fast on the dev-vs-CI npm-major divergence
-      # that corrupted the lockfile in #40 (see issue #42).
-      - name: Check package-lock.json is in sync
-        run: |
-          npm install --package-lock-only --ignore-scripts
-          git diff --exit-code package-lock.json
       - run: npm run check
       - run: npm test

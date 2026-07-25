@@ -84,9 +84,12 @@ independent things. Do not conflate them.
   must be Node 20 to match Electron 33") — it is technically unfounded and
   reintroduces the dev(24)-vs-CI(20) npm-major split that corrupted the lockfile
   in #40. `optionalDependencies` (`@emnapi/*`, etc.) are resolved differently by
-  different npm majors, and `npm ci` hard-fails rather than re-resolving. The CI
-  lockfile-drift guard (`npm install --package-lock-only` + `git diff
-  --exit-code package-lock.json`) exists to catch this class of bug fast.
+  different npm majors, and `npm ci` hard-fails rather than re-resolving. `npm ci`
+  in CI is itself the lockfile-drift guard — it fails fast (EUSAGE) on any
+  package.json/lock mismatch. (A separate `npm install --package-lock-only` +
+  `git diff` guard was tried and removed: npm re-resolves the `@emnapi/*` wasm-
+  glue optional deps differently depending on install context, so it produced
+  false drift on every run.)
 - **Bumping Electron is a separate, higher-risk change** (Chromium/V8 breaking
   changes + real packaged-app testing) — track it as its own issue; it must not
   be conflated with the toolchain Node pin above.
@@ -634,18 +637,26 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
    contamination source for any tool (like coverage) that scans the whole
    repo directory tree rather than just tracked/imported files.
 - 2026-07-25: A CI lockfile-drift guard using `npm install
-  --package-lock-only` (issue #42) will FALSE-fail unless the *committed*
-  `package-lock.json` was itself generated the same way. A full `npm install`
-  writes extra `optionalDependencies` (`@emnapi/*`) and `peer` metadata that
-  `--package-lock-only` strips back out, so a full-install lockfile drifts by
-  ~90 lines against the guard on the very first CI run. Fix: after regenerating
-  the lockfile, run `npm install --package-lock-only` once and commit *that*
-  (the guard's own fixpoint), then verify it's stable under BOTH `npm install`
-  and `npm install --package-lock-only` (neither should re-fatten it) AND that
-  `npm ci` still installs cleanly (862 pkgs, no EBADENGINE, tests green)
-  against the lean file. Prevention: always commit the fixpoint of whatever
-  command the drift guard runs, and prove idempotency under both the
-  contributor command (`npm install`) and the guard command before pushing.
+  --package-lock-only` + `git diff --exit-code package-lock.json` (issue #42)
+  is **non-deterministic and must not be used** — it was tried, passed every
+  local check, and then hard-failed CI. Root cause: npm re-resolves the wasm-
+  glue optional deps (`@emnapi/core`, `@emnapi/runtime`) differently depending
+  on install context. A *fresh* `npm install` (no `node_modules`, no lock)
+  writes them as real installable `node_modules/@emnapi/*` entries — which
+  `npm ci` REQUIRES (it reports `Missing: @emnapi/core ... from lock file` and
+  fails otherwise) — but `npm install --package-lock-only`, AND even a plain
+  in-place `npm install` when `node_modules` already exists, STRIP those
+  entries back out. So no local re-run reliably reproduces the lock `npm ci`
+  needs, and a `git diff` guard flags phantom drift on every CI run. Fixes:
+  (1) commit the lockfile from a genuinely clean slate
+  (`rm -rf node_modules package-lock.json && npm install`), and (2) let
+  `npm ci` itself be the drift guard — it already hard-fails (EUSAGE) on any
+  package.json/lock mismatch, which is exactly the #40 bug class. Do NOT layer
+  a `git diff` lockfile check on top. Prevention: never trust a lockfile change
+  until `git push` + real CI (`npm ci` on a clean runner) goes green — local
+  `npm ci` can pass on the same platform while the committed lock is still
+  wrong for a clean install, per the standing rule that a change can pass every
+  local check and still fail only in CI / the packaged artifact.
 - 2026-07-25: A mid-task `git checkout -- package.json` / `cp <backup>` used to
   restore state after a *deliberate* drift test silently reverted an intended
   edit (the new `engines` field) because the backup was taken before that edit
