@@ -158,3 +158,33 @@ Real display, real IPC, real provider smoke test (CDP-driven, no OS input
   app dir; only producing signed-style NSIS/portable installers needs an
   extra one-time host setting (Developer Mode) that wasn't available in
   this environment.
+
+## Milestone 8 — Electron bumped 33 (EOL) -> 43 (2026-07-25, issue #43)
+
+- Bumped `electron` `^33.3.1` -> `^43.2.0` (latest stable; Chromium 150,
+  bundles Node 24.18) and `electron-builder` `^25.1.8` -> `^26.15.3`
+  (25.x predates Electron 41-43; 26.x packages 43 cleanly). Regenerated
+  `package-lock.json` from a clean slate (`rm -rf node_modules
+  package-lock.json && npm install`) per the #40/#42 lockfile-drift rule.
+- **Zero application code changes required.** Reviewed Electron
+  `breaking-changes.md` for every major 34 -> 43 against this app's actual
+  API surface (`app`, `BrowserWindow`, `ipcMain.handle`, `webContents.send`,
+  `contextBridge`, `ipcRenderer`, standard `webPreferences`). None of the
+  breaking changes (clipboard-in-renderer, nativeImage, dialog defaults,
+  BrowserView, PDFs, OSR, protocol, extensions, macOS-only items) touch any
+  API this app uses. The one operationally-relevant change (Electron 42:
+  binary no longer downloaded via `postinstall`, fetched on first `electron`
+  bin run instead) does not affect the electron-builder packaging path,
+  which fetches its own cached Electron.
+- No native C++ addons -> `@electron/rebuild` ran with nothing to rebuild;
+  no ABI breakage (the single largest risk reducer, as predicted in #43).
+- `make check` green: tsc (renderer + main) clean, oxlint clean, test-ratio
+  clean, **50/50 tests pass**, coverage ratchet pass (47.46% >= 46.06%).
+- **Real packaged AppImage verified end-to-end via CDP** (zero mocks):
+  launched `Pi Desktop Demo-0.2.0-linux-x86_64.AppImage` (Chromium 150
+  confirmed), real provider catalogs loaded from `~/.pi/agent`, and a fresh
+  two-turn conversation returned correct live streamed replies
+  (`PONG` then `PING`) from a real provider HTTP call. This proves the ESM
+  `nativeDynamicImport` path for `@earendil-works/pi-ai` still loads at
+  runtime under Electron 43 / Node 24 in the packaged asar — a chat is
+  impossible without it.
