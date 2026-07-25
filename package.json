@@ -21,7 +21,8 @@
     "lint:oxlint": "oxlint .",
     "test": "vitest run",
     "cdp": "tsx scripts/cdp-drive.ts",
-    "check:test-ratio": "bash scripts/check-test-ratio.sh"
+    "check:test-ratio": "bash scripts/check-test-ratio.sh",
+    "test:mutation": "stryker run"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.81.1",
@@ -38,6 +39,8 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.10.7",
     "@types/react": "^18.3.18",
