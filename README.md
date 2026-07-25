@@ -15,6 +15,7 @@
 
 [Getting Started](#getting-started) •
 [Features](#features) •
+[Philosophy](#philosophy) •
 [Architecture](#architecture) •
 [Scripts](#scripts) •
 [Contributing](#contributing) •
@@ -50,7 +51,7 @@ or provider APIs directly, and credentials never leave the main process.
   built-in provider catalogs (OpenAI, Anthropic, Google Gemini, OpenRouter,
   GitHub Copilot, Cerebras, Fireworks, and more), or bring your own
   OpenAI-compatible endpoint. Credentials from an existing
-  [Pi CLI](https://github.com/earendil-works) `~/.pi/agent/auth.json` are
+  [Pi CLI](https://github.com/earendil-works/pi) `~/.pi/agent/auth.json` are
   picked up automatically.
 - **A real agent, not just chat.** Every turn runs through
   `pi-agent-core`'s `AgentHarness` — a genuine tool-calling loop (not a
@@ -117,6 +118,22 @@ See [`docs/INITIAL.md`](docs/INITIAL.md) for the original design brief and
 [`STATUS.md`](STATUS.md) for a running log of milestones, bugs found and
 fixed, and verification evidence.
 
+## Philosophy
+
+Following the same principle as the [Pi project](https://github.com/earendil-works/pi)
+it's built on: a small, deliberately-bounded feature set, made robust and
+stable, beats a sprawling one that's merely "done."
+
+- **Two tools, on purpose.** The agent ships with exactly `read_file` and
+  `list_files` — no shell, write, or edit tools. Read-only by design keeps
+  the trust boundary simple to reason about.
+- **One runtime path.** Every chat turn goes through the same
+  `pi-agent-core` `AgentHarness` loop — no parallel "simple mode"/"agent
+  mode" split to maintain.
+- **Grow by hardening, not by adding.** New surface area is added only when
+  it's proven necessary and can be tested end-to-end against the real
+  packaged app (see [`AGENTS.md`](AGENTS.md)) — not spec'd speculatively.
+
 ## Scripts
 
 | Command | Description |
@@ -165,6 +182,15 @@ app and lessons learned while building this project.
 
 Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
 dev setup, pre-PR checks, and code/testing guidelines.
+
+## Acknowledgments
+
+Pi Desktop is a thin UI shell around the [Pi project](https://github.com/earendil-works/pi)
+(**[`pi.dev`](https://pi.dev)**) — all model access, provider abstraction,
+and agent tool-calling in this app come from its `pi-ai` and `pi-agent-core`
+packages. All credit for the underlying agent runtime and multi-provider LLM
+API goes to the Pi maintainers; this repo only adds the desktop UI, IPC
+boundary, and packaging around it.
 
 ## License
 
