@@ -18,6 +18,7 @@
     "dist": "npm run build && electron-builder",
     "dist:linux": "npm run build && electron-builder --linux AppImage",
     "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json",
+    "lint:oxlint": "oxlint .",
     "test": "vitest run",
     "cdp": "tsx scripts/cdp-drive.ts"
   },
@@ -46,6 +47,7 @@
     "concurrently": "^9.1.2",
     "electron": "^33.3.1",
     "electron-builder": "^25.1.8",
+    "oxlint": "^0.15.0",
     "postcss": "^8.5.1",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.2",
