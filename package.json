@@ -46,7 +46,7 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@types/react-syntax-highlighter": "^15.5.13",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^5.2.0",
     "@vitest/coverage-v8": "^3.2.7",
     "concurrently": "^9.1.2",
     "electron": "^33.3.1",
@@ -55,7 +55,7 @@
     "tailwindcss": "^4.3.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vite": "^7.3.6",
+    "vite": "^8.1.5",
     "vitest": "^3.0.2"
   }
 }
