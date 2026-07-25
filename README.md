@@ -4,7 +4,7 @@
 
 # Pi Desktop
 
-**A native, secure desktop chat client for any OpenAI-compatible LLM.**
+**A portable AI agent desktop app for everyone — no vendor lock-in, no dev tools required.**
 
 [![CI](https://github.com/tbrandenburg/pi-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/tbrandenburg/pi-desktop/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/tbrandenburg/pi-desktop)](https://github.com/tbrandenburg/pi-desktop/releases/latest)
@@ -24,12 +24,18 @@
 
 ---
 
-Pi Desktop streams responses from any OpenAI-compatible provider (OpenAI,
-OpenRouter, or a custom gateway) through
-[`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai),
-wrapped in a fast, native-feeling Electron + React UI: session history,
-model picker, streaming Markdown with syntax-highlighted code, and one-click
-cancel.
+Pi Desktop is a downloadable, double-click desktop app that runs a real
+**agent** — not just a chat box — on top of
+[`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai)
+and [`@earendil-works/pi-agent-core`](https://www.npmjs.com/package/@earendil-works/pi-agent-core):
+a native-feeling Electron + React UI with session history, model picker,
+streaming Markdown with syntax-highlighted code, and one-click cancel.
+
+Because it's built on `pi-ai`, there is **no vendor lock-in**: it ships with
+[38 built-in provider catalogs](https://www.npmjs.com/package/@earendil-works/pi-ai)
+(OpenAI, Anthropic, Google Gemini, OpenRouter, GitHub Copilot, Cerebras,
+Fireworks, and more) plus any custom OpenAI-compatible gateway — pick a model,
+not a vendor.
 
 It ships with a strict security boundary — the renderer never touches Node
 or provider APIs directly, and credentials never leave the main process.
@@ -40,21 +46,42 @@ or provider APIs directly, and credentials never leave the main process.
 
 ## Features
 
-- **Stream from any OpenAI-compatible endpoint** — OpenAI, OpenRouter, or
-  your own `openai-completions`-compatible gateway.
-- **Zero-config first launch** — if you already have a
-  [Pi CLI](https://github.com/earendil-works) config at `~/.pi/agent`, Pi
-  Desktop resolves a working provider and model automatically. No API key
-  entry required to start chatting.
-- **Session history that survives restarts** — every conversation persists
-  locally and reopens with the exact model it was run with.
+- **Any model, any provider — no lock-in.** Powered by `pi-ai`'s 38
+  built-in provider catalogs (OpenAI, Anthropic, Google Gemini, OpenRouter,
+  GitHub Copilot, Cerebras, Fireworks, and more), or bring your own
+  OpenAI-compatible endpoint. Credentials from an existing
+  [Pi CLI](https://github.com/earendil-works) `~/.pi/agent/auth.json` are
+  picked up automatically.
+- **A real agent, not just chat.** Every turn runs through
+  `pi-agent-core`'s `AgentHarness` — a genuine tool-calling loop (not a
+  single request/response) that streams live `tool_execution_*` events to
+  the UI. Ships with `read_file` and `list_files` tools out of the box, so
+  the agent can actually look at your project instead of guessing.
+- **Real, resumable agent sessions.** Each conversation is a cwd-scoped
+  `JsonlSessionRepo` session from `pi-agent-core` — persisted to disk as
+  plain JSONL, not just app-local key/value storage — so history and tool
+  calls survive restarts and reopen with the exact model used.
+- **Zero-config first launch** — if you already have a Pi CLI config at
+  `~/.pi/agent`, Pi Desktop resolves a working provider and model
+  automatically. No manual API key entry required to start chatting.
 - **Secure by design** — `contextIsolation: true`, `nodeIntegration: false`,
   `sandbox: true`. The renderer talks to Node only through a narrow, typed
   preload bridge; a saved API key is never sent back to the UI.
-- **Cross-platform packaging** — Linux AppImage today; Windows NSIS +
-  portable exe verified to build natively.
+- **Built for everyone, not just developers.** The packaged app is a
+  double-click installer/AppImage — running it needs no Node, npm, or
+  terminal. Linux (AppImage) and Windows (NSIS installer + portable exe)
+  build and package today (`make dist-linux` / `make dist-win`); macOS
+  packaging is on the roadmap. Prebuilt binaries aren't attached to
+  releases yet, so building locally is currently required.
 
 ## Getting started
+
+**Just want to run the app?** Releases don't attach prebuilt binaries yet
+(see [Releases](https://github.com/tbrandenburg/pi-desktop/releases)) — for
+now, build your own portable installer locally with `make dist-linux` or
+`make dist-win` (see [Scripts](#scripts)), no code changes needed.
+
+**Want to build or hack on it?**
 
 ```bash
 npm install
@@ -73,8 +100,10 @@ case a working default is picked automatically.
 ```text
 src/
 ├── main/          Electron main process (owns Pi, credentials, IPC, storage)
-│   ├── llm/       ChatService (streaming), pi-config.ts (.pi/agent resolution)
-│   └── storage/   electron-store wrappers (settings, sessions)
+│   ├── llm/       AgentRuntime (pi-agent-core AgentHarness + tool loop),
+│   │              models.ts (38 built-in provider catalogs via pi-ai),
+│   │              tools/ (read_file, list_files), pi-config.ts (.pi/agent)
+│   └── storage/   electron-store wrappers (settings, session metadata)
 ├── preload/       Narrow, typed IPC bridge exposed to the renderer
 ├── renderer/      React + Zustand UI (never imports Node or Pi APIs)
 └── shared/        Types and Zod schemas shared across processes
