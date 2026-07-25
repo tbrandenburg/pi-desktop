@@ -112,9 +112,8 @@ npm install
 npm run dev     # renderer (Vite) + main (tsc -w) + Electron, hot-reloading
 ```
 
-On first launch, open **Settings** to configure a provider API key, base
-URL, and model — unless you already have a `~/.pi/agent` config, in which
-case a working default is picked automatically.
+On first launch, Pi Desktop resolves a working provider and model
+automatically from your `~/.pi/agent` config — no manual setup required.
 
 > Prefer `make`? `make install && make run` does the same thing — see
 > [Scripts](#scripts) for the full command surface.
@@ -125,8 +124,7 @@ Pi Desktop currently relies on the standard [Pi agent](https://pi.dev)
 configuration — see the [Pi documentation](https://pi.dev/docs/latest) for
 the full reference on providers, models, and `~/.pi/agent` credentials. If
 you already have a working Pi CLI setup, Pi Desktop picks it up
-automatically; otherwise, configure a provider API key, base URL, and model
-via **Settings**.
+automatically.
 
 > 🚧 **Under development:** built-in, zero-configuration model access
 > (bundled providers you can use out of the box, no API key setup required)

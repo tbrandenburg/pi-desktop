@@ -12,12 +12,10 @@ export function AppShell() {
   const loadModels = useChatStore((state) => state.loadModels);
   const errorMessage = useChatStore((state) => state.errorMessage);
   const openSettings = useSettingsStore((state) => state.open);
-  const refreshSettings = useSettingsStore((state) => state.refresh);
 
   useEffect(() => {
     void loadModels();
-    void refreshSettings();
-  }, [loadModels, refreshSettings]);
+  }, [loadModels]);
 
   return (
     <div className="flex h-screen w-screen bg-surface text-white">
