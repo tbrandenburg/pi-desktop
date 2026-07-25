@@ -534,6 +534,26 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
 
 ## Lessons learned (parallel issue resolution)
 
+- 2026-07-25: A CI job reporting green (`electron-builder --publish always`
+  exiting 0) is not proof an artifact was actually uploaded. The real first
+  test release (`v0.3.1`, issue #47's `release.yml`) completed both matrix
+  jobs successfully with zero errors, but `gh release view v0.3.1 --json
+  assets` showed an empty `assets` array — electron-builder's GitHub
+  publisher *silently skips* uploading (not a failure, no non-zero exit)
+  whenever the existing release's type doesn't match its own configured
+  `releaseType` (default `draft`), and `make publish` always creates a
+  normal non-draft release via `gh release create`. The mismatch is only
+  visible by grepping the electron-builder log line itself
+  (`"GitHub release not created  reason=existing type not compatible..."`)
+  or, more reliably, by checking the release's actual asset list after a
+  "successful" run — never trust the job's exit code alone as proof of a
+  real upload for any tool with `--publish`/similar silent-skip semantics.
+  Fixed by adding an explicit `publish: { releaseType: release }` to
+  `electron-builder.yml` to match `make publish`'s release type; re-verified
+  with a second real tag push (`v0.3.2`) that both the Linux AppImage and
+  Windows portable exe genuinely landed on the release page, then
+  downloaded and launched the real released AppImage via CDP to confirm it
+  wasn't just a valid-looking empty/corrupt upload.
 - 2026-07-25: Two of five "quick" quality-drift issues shortlisted for a
   parallel batch (#11 maxTokens default, #13 dynamic dev port) turned out to
   already be fixed by an earlier, unrelated commit (`7bb66e8`) whose message
