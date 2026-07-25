@@ -506,4 +506,26 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   of by file looks more "independent" on paper but risks a real merge
   conflict when two agents rewrite the same file concurrently; splitting by
   file ownership is the safer contract to give.
+- 2026-07-25: Confirmed most of a previously-filed quality-drift batch (#16,
+  #17, #18, #21) was already implemented by an earlier merged PR (#29) whose
+  scope description didn't line up 1:1 with the individual issue numbers —
+  again caught by reading the actual current `Makefile`/`vitest.config.ts`/
+  test-file layout before dispatching, not by trusting the issue tracker's
+  open/closed state. Also: when two genuinely-independent subagents both
+  need to append to the same shared target (`Makefile`'s `lint:`, for #20's
+  test-ratio check and #26's oxlint), give neither subagent write access to
+  that file at all — have them land their own new script/npm-script only,
+  then have the coordinator wire both into the shared target once both
+  branches are validated. This fully eliminated the merge conflict risk
+  instead of just reducing it. Additionally, running each subagent in its
+  own `git worktree` + branch (rather than the same working directory) was
+  what made true tool-parallel dispatch safe here — concurrent `npm install`
+  and file edits in one shared directory would have corrupted
+  `node_modules`/`package-lock.json` across unrelated subagents. Minor
+  follow-up: a coordinator-side `npm install` run purely for local
+  validation (not part of any subagent's commit) left harmless
+  `package-lock.json` metadata churn (e.g. a `"peer": true` flag) in the
+  worktree — always `git checkout -- package-lock.json` (or equivalent)
+  after coordinator-only validation installs, before opening the PR, so
+  unrelated lockfile noise doesn't get swept into a diff by accident.
 
