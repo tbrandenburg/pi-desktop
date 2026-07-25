@@ -213,13 +213,18 @@ version-minor: check test
 version-major: check test
 	npm version major -m "chore(release): v%s"
 
-## Push the current release commit and its version tag to origin
+## Push the current release commit and its version tag to origin.
+## Pushing the tag triggers .github/workflows/release.yml, which builds and
+## attaches the Linux AppImage and Windows portable exe to the release
+## (asynchronously, alongside/after `make publish` below).
 release:
 	git push origin HEAD
 	git push origin "v$(VERSION)"
 
-## Create the GitHub release for the current version's tag.
-## Notes-only for now: no build artifacts are attached (see dist-linux/dist-win).
+## Create the GitHub release for the current version's tag (notes only).
+## CI (.github/workflows/release.yml) attaches the Linux AppImage and
+## Windows portable exe build artifacts automatically once the matching
+## tag is pushed -- no local dist-linux/dist-win step is required for that.
 publish:
 	@command -v gh >/dev/null 2>&1 || { \
 		echo "error: 'gh' (GitHub CLI) is required to publish a release."; \
@@ -227,7 +232,8 @@ publish:
 	}
 	gh release create "v$(VERSION)" --title "v$(VERSION)" --generate-notes
 
-## One-shot release flows: bump -> push -> publish
+## One-shot release flows: bump -> push -> publish. The tag push triggers
+## CI to build and attach the AppImage/portable exe artifacts automatically.
 release-patch: version-patch release publish
 release-minor: version-minor release publish
 release-major: version-major release publish

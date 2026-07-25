@@ -1,0 +1,42 @@
+name: Release
+
+# Builds and attaches portable app bundles to the GitHub release matching a
+# pushed version tag (e.g. `v1.2.3`, created by `make version-patch/-minor/
+# -major`). NSIS installer is explicitly out of scope here -- it stays a
+# local/manual `make dist-win` concern (see issue #47).
+#
+# This is independent of `make publish`, which creates the release shell
+# (via `gh release create --generate-notes`) with notes but no artifacts.
+# electron-builder's own GitHub publisher (`--publish always`) will create
+# the release as a draft if it doesn't exist yet, or attach to the existing
+# one if `make publish` already ran -- either order works.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            build-cmd: npx electron-builder --linux AppImage --publish always
+          - os: windows-latest
+            build-cmd: npx electron-builder --win portable --publish always
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - run: ${{ matrix.build-cmd }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
