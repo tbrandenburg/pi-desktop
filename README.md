@@ -15,6 +15,7 @@
 
 [Getting Started](#getting-started) •
 [Features](#features) •
+[Configuration](#configuration) •
 [Philosophy](#philosophy) •
 [Architecture](#architecture) •
 [Scripts](#scripts) •
@@ -24,6 +25,13 @@
 </div>
 
 ---
+
+> [!NOTE]
+> 🧪 **Young project, moving fast.** Pi Desktop is under active, early-stage
+> development — expect rough edges and breaking changes between releases
+> while things settle. We're optimistic about where this is headed (and
+> having a lot of geeky fun building it) — feedback and issues are very
+> welcome, just don't wire it into anything mission-critical yet.
 
 Pi Desktop is a downloadable, double-click desktop app that runs a real
 **agent** — not just a chat box — on top of
@@ -95,6 +103,20 @@ case a working default is picked automatically.
 
 > Prefer `make`? `make install && make run` does the same thing — see
 > [Scripts](#scripts) for the full command surface.
+
+## Configuration
+
+Pi Desktop currently relies on the standard [Pi agent](https://pi.dev)
+configuration — see the [Pi documentation](https://pi.dev/docs/latest) for
+the full reference on providers, models, and `~/.pi/agent` credentials. If
+you already have a working Pi CLI setup, Pi Desktop picks it up
+automatically; otherwise, configure a provider API key, base URL, and model
+via **Settings**.
+
+> 🚧 **Under development:** built-in, zero-configuration model access
+> (bundled providers you can use out of the box, no API key setup required)
+> is planned but not shipped yet — for now, basic Pi agent configuration is
+> the supported path.
 
 ## Architecture
 
