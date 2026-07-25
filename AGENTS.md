@@ -231,6 +231,14 @@ than catch it after the fact.
     credentials, e.g. a free-tier provider) is usually a perfectly valid
     "actually configured model" to demo with instead of chasing a specific
     provider that isn't wired up as expected.
+18. **2026-07-25**: `scripts/cdp-drive.ts`'s `screenshot` action only ever
+    writes base64 PNG data to stdout — it takes no filename argument (unlike
+    Playwright's `browser_take_screenshot`), despite its own docstring
+    suggesting `> shot-b64.txt` redirection. Passing a filename as a second
+    CLI arg is silently ignored (parsed as the unused `arg` param). Always
+    pipe/redirect stdout yourself and `base64 -d` it into a file
+    (`npm run cdp -- <port> screenshot | tail -1 | base64 -d > out.png`)
+    when verifying a real packaged-app E2E run this way.
 
 `npm test` and dev mode (`npm run dev`) both run through Vite/Node module
 resolution directly from `.ts` source or a live dev server. Neither one
