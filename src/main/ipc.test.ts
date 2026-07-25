@@ -1,6 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import { registerIpcHandlers } from "./ipc";
+import { realAgentCoreLoaders } from "./llm/test-support/real-agent-core-loaders";
 
 // This suite must be hermetic regardless of what the machine's real
 // ~/.pi/agent config happens to contain, so .pi resolution is mocked and
@@ -47,6 +51,9 @@ vi.mock("electron", () => {
       // test-only accessor, not part of the real electron API
       __handlers: handlers,
     },
+    dialog: {
+      showOpenDialog: vi.fn(),
+    },
   };
 });
 
@@ -65,9 +72,19 @@ async function invoke(channel: string, ...args: unknown[]) {
 }
 
 describe("IPC settings round-trip integration", () => {
+  let workspaceDir: string;
+
   beforeEach(() => {
     memoryStore.clear();
-    registerIpcHandlers(() => null as unknown as BrowserWindow);
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ipc-workspace-"));
+    memoryStore.set("workspaceDir", workspaceDir);
+    registerIpcHandlers(() => null as unknown as BrowserWindow, {
+      agentCoreLoaders: realAgentCoreLoaders,
+    });
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspaceDir, { recursive: true, force: true });
   });
 
   it("persists provider settings and never leaks the raw API key back to the renderer", async () => {
@@ -184,34 +201,51 @@ describe("IPC settings round-trip integration", () => {
     await expect(invoke("llm:cancel-chat", "no-such-request")).resolves.toBeUndefined();
   });
 
-  it("saves, lists, gets, and deletes sessions through the IPC boundary", async () => {
-    await invoke("sessions:save", {
-      id: "s1",
-      title: "Hello",
-      model: "gpt-4o",
-      updatedAt: 1,
-      messages: [{ role: "user", content: "Hello" }],
-    });
+  it("lists, gets, and deletes real cwd-scoped sessions through the IPC boundary", async () => {
+    // Ensure `currentWorkspaceDir` inside ipc.ts has resolved from settings
+    // before writing a real session directly through JsonlSessionRepo.
+    expect(await invoke("workspace:get")).toEqual({ dir: workspaceDir });
 
-    expect(await invoke("sessions:list")).toEqual([
-      { id: "s1", title: "Hello", model: "gpt-4o", updatedAt: 1 },
+    const { JsonlSessionRepo, Session } = await realAgentCoreLoaders.loadAgentCore!();
+    const { NodeExecutionEnv } = await realAgentCoreLoaders.loadAgentCoreNode!();
+    void Session;
+    const env = new NodeExecutionEnv({ cwd: workspaceDir });
+    const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: workspaceDir });
+    const session = await repo.create({ cwd: workspaceDir, id: "s1" });
+    await session.appendMessage({ role: "user", content: "Hello", timestamp: Date.now() });
+
+    const sessions = await invoke("sessions:list");
+    expect(sessions).toEqual([
+      expect.objectContaining({ id: "s1", title: "Hello" }),
     ]);
-    expect(await invoke("sessions:get", "s1")).toEqual({
-      id: "s1",
-      title: "Hello",
-      model: "gpt-4o",
-      updatedAt: 1,
-      messages: [{ role: "user", content: "Hello" }],
-    });
+
+    const record = (await invoke("sessions:get", "s1")) as { id: string; messages: unknown[] };
+    expect(record.id).toBe("s1");
+    expect(record.messages).toEqual([{ role: "user", content: "Hello" }]);
 
     await invoke("sessions:delete", "s1");
     expect(await invoke("sessions:get", "s1")).toBeNull();
     expect(await invoke("sessions:list")).toEqual([]);
   });
 
-  it("rejects a malformed session payload at the schema boundary", async () => {
-    await expect(
-      invoke("sessions:save", { id: "", title: "x", model: "gpt-4o", updatedAt: 1, messages: [] }),
-    ).rejects.toThrow();
+  it("returns the persisted workspace directory and switches it via workspace:choose", async () => {
+    expect(await invoke("workspace:get")).toEqual({ dir: workspaceDir });
+
+    const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ipc-workspace-other-"));
+    try {
+      const { dialog } = (await import("electron")) as unknown as {
+        dialog: { showOpenDialog: ReturnType<typeof vi.fn> };
+      };
+      dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [otherDir] });
+
+      const result = await invoke("workspace:choose");
+      expect(result).toEqual({ dir: otherDir });
+      expect(await invoke("workspace:get")).toEqual({ dir: otherDir });
+
+      dialog.showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] });
+      expect(await invoke("workspace:choose")).toBeNull();
+    } finally {
+      fs.rmSync(otherDir, { recursive: true, force: true });
+    }
   });
 });

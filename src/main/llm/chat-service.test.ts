@@ -5,13 +5,15 @@ import { ChatService } from "./chat-service";
 import type { ModelsRegistry } from "./models";
 import type { SettingsStore } from "../storage/settings-store";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
+import type { AgentRuntime, AgentRuntimeRunArgs } from "./agent-runtime";
 
-// The real loader dynamically imports pi-ai (see `nativeDynamicImport` in
-// models.ts, hidden from tsc/vi.mock the same way as the original
-// openai-completions loader was). ChatService takes the registry loader as
-// an injectable constructor dependency instead, so tests provide a fake
-// registry directly rather than mocking pi-ai modules.
-function makeRegistryLoader(stream: MutableModels["stream"]) {
+// AgentRuntime wraps AgentHarness, which cannot run under Vitest's vm-based
+// pool (see AGENTS.md / agent-core.ts doc comments). ChatService takes it as
+// an injectable constructor dependency, so tests provide a fake runtime that
+// exercises the exact same `emit` callback contract instead of a real
+// harness -- this proves ChatService's own wiring (settings/model resolution,
+// error paths, cancellation forwarding) without needing a real provider.
+function makeRegistryLoader() {
   const model = {
     id: "gpt-4o-mini",
     name: "gpt-4o-mini",
@@ -28,7 +30,6 @@ function makeRegistryLoader(stream: MutableModels["stream"]) {
   const models = {
     getProvider: (id: string) => (id === "app-settings" ? provider : undefined),
     getProviders: () => [provider],
-    stream,
   } as unknown as MutableModels;
   return async (): Promise<ModelsRegistry> => ({ models });
 }
@@ -52,28 +53,22 @@ function makeRequest(): StartChatRequest {
   };
 }
 
+function makeFakeRuntime(run: (args: AgentRuntimeRunArgs) => Promise<void>): AgentRuntime {
+  return { run } as unknown as AgentRuntime;
+}
+
 describe("ChatService integration", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("streams pi-ai events end-to-end and translates them into the correct ChatEvent sequence", async () => {
-    const stream = vi.fn().mockReturnValue(
-      (async function* () {
-        yield { type: "text_delta", delta: "Hel" };
-        yield { type: "text_delta", delta: "lo" };
-        yield { type: "thinking_delta", delta: "pondering" };
-        yield {
-          type: "toolcall_end",
-          toolCall: { name: "search", arguments: { q: "x" } },
-        };
-        yield {
-          type: "done",
-          message: { usage: { input: 12, output: 34 } },
-        };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      })() as any,
-    );
+  it("delegates a configured request to AgentRuntime.run with the resolved model + cwd", async () => {
+    const run = vi.fn(async ({ requestId, emit }: AgentRuntimeRunArgs) => {
+      emit({ type: "started", requestId });
+      emit({ type: "text-delta", requestId, text: "Hello" });
+      emit({ type: "usage", requestId, inputTokens: 12, outputTokens: 34 });
+      emit({ type: "completed", requestId });
+    });
 
     const settingsStore = {
       get: vi.fn().mockResolvedValue({
@@ -87,28 +82,23 @@ describe("ChatService integration", () => {
     const service = new ChatService(
       settingsStore,
       () => makeFakeWindow(sent),
-      makeRegistryLoader(stream),
+      makeRegistryLoader(),
+      () => "/tmp/pi-desktop-workspace",
+      makeFakeRuntime(run),
     );
 
     await service.startChat(makeRequest());
-    // allow the fire-and-forget async stream loop to fully drain
     await vi.waitFor(() => expect(sent.some((e) => e.type === "completed")).toBe(true));
 
-    expect(sent.map((e) => e.type)).toEqual([
-      "started",
-      "text-delta",
-      "text-delta",
-      "reasoning-delta",
-      "tool-call",
-      "usage",
-      "completed",
-    ]);
-    const usageEvent = sent.find((e) => e.type === "usage");
-    expect(usageEvent).toMatchObject({ inputTokens: 12, outputTokens: 34 });
+    expect(sent.map((e) => e.type)).toEqual(["started", "text-delta", "usage", "completed"]);
+    expect(run).toHaveBeenCalledTimes(1);
+    const runArgs = run.mock.calls[0][0] as AgentRuntimeRunArgs;
+    expect(runArgs.model.id).toBe("gpt-4o-mini");
+    expect(runArgs.cwd).toBe("/tmp/pi-desktop-workspace");
   });
 
-  it("emits a single error event and never calls the provider when no API key is configured", async () => {
-    const stream = vi.fn();
+  it("emits a single error event and never calls AgentRuntime when no API key is configured", async () => {
+    const run = vi.fn();
 
     const settingsStore = {
       get: vi.fn().mockResolvedValue({
@@ -122,7 +112,9 @@ describe("ChatService integration", () => {
     const service = new ChatService(
       settingsStore,
       () => makeFakeWindow(sent),
-      makeRegistryLoader(stream),
+      makeRegistryLoader(),
+      () => "/tmp/pi-desktop-workspace",
+      makeFakeRuntime(run),
     );
 
     await service.startChat(makeRequest());
@@ -135,25 +127,22 @@ describe("ChatService integration", () => {
         message: "No API key configured. Open settings and add a provider API key first.",
       },
     ]);
-    expect(stream).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
   });
 
-  it("aborts the underlying stream on cancel and surfaces the failure as an error event", async () => {
-    const stream = vi
-      .fn()
-      .mockImplementation((_model: unknown, _context: unknown, options: { signal?: AbortSignal }) => {
-        return (async function* () {
-          await new Promise((_resolve, reject) => {
-            const signal = options?.signal;
-            if (signal?.aborted) {
-              reject(new Error("Aborted"));
-              return;
-            }
-            signal?.addEventListener("abort", () => reject(new Error("Aborted")));
-          });
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        })() as any;
+  it("aborts AgentRuntime.run's signal on cancel", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const run = vi.fn(({ requestId, signal, emit }: AgentRuntimeRunArgs) => {
+      capturedSignal = signal;
+      return new Promise<void>((resolve) => {
+        const onAbort = () => {
+          emit({ type: "error", requestId, message: "Aborted" });
+          resolve();
+        };
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
       });
+    });
 
     const settingsStore = {
       get: vi.fn().mockResolvedValue({
@@ -167,13 +156,16 @@ describe("ChatService integration", () => {
     const service = new ChatService(
       settingsStore,
       () => makeFakeWindow(sent),
-      makeRegistryLoader(stream),
+      makeRegistryLoader(),
+      () => "/tmp/pi-desktop-workspace",
+      makeFakeRuntime(run),
     );
 
     const requestId = await service.startChat(makeRequest());
     service.cancel(requestId);
 
     await vi.waitFor(() => expect(sent.some((e) => e.type === "error")).toBe(true));
+    expect(capturedSignal?.aborted).toBe(true);
     const errorEvent = sent.find((e) => e.type === "error");
     expect(errorEvent).toMatchObject({ requestId, message: "Aborted" });
 
@@ -181,8 +173,8 @@ describe("ChatService integration", () => {
     expect(() => service.cancel(requestId)).not.toThrow();
   });
 
-  it("emits a single error event and never calls the provider when no model is selected", async () => {
-    const stream = vi.fn();
+  it("emits a single error event and never calls AgentRuntime when no model is selected", async () => {
+    const run = vi.fn();
 
     const settingsStore = {
       get: vi.fn().mockResolvedValue({
@@ -196,7 +188,9 @@ describe("ChatService integration", () => {
     const service = new ChatService(
       settingsStore,
       () => makeFakeWindow(sent),
-      makeRegistryLoader(stream),
+      makeRegistryLoader(),
+      () => "/tmp/pi-desktop-workspace",
+      makeFakeRuntime(run),
     );
 
     await service.startChat({ ...makeRequest(), model: "" });
@@ -209,20 +203,14 @@ describe("ChatService integration", () => {
         message: "No model selected. Choose a model before sending a message.",
       },
     ]);
-    expect(stream).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
   });
 
-  it("translates a native provider error event into a ChatEvent error without throwing", async () => {
-    const stream = vi.fn().mockReturnValue(
-      (async function* () {
-        yield { type: "text_delta", delta: "partial" };
-        yield {
-          type: "error",
-          error: { errorMessage: "rate limit exceeded" },
-        };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      })() as any,
-    );
+  it("translates an AgentRuntime.run rejection into a ChatEvent error without throwing", async () => {
+    const run = vi.fn(async ({ requestId, emit }: AgentRuntimeRunArgs) => {
+      emit({ type: "started", requestId });
+      throw new Error("rate limit exceeded");
+    });
 
     const settingsStore = {
       get: vi.fn().mockResolvedValue({
@@ -236,17 +224,17 @@ describe("ChatService integration", () => {
     const service = new ChatService(
       settingsStore,
       () => makeFakeWindow(sent),
-      makeRegistryLoader(stream),
+      makeRegistryLoader(),
+      () => "/tmp/pi-desktop-workspace",
+      makeFakeRuntime(run),
     );
 
     await service.startChat(makeRequest());
     await vi.waitFor(() => expect(sent.some((e) => e.type === "error")).toBe(true));
 
-    expect(sent.map((e) => e.type)).toEqual(["started", "text-delta", "error"]);
+    expect(sent.map((e) => e.type)).toEqual(["started", "error"]);
     const errorEvent = sent.find((e) => e.type === "error");
     expect(errorEvent).toMatchObject({ message: "rate limit exceeded" });
-    // no "completed" event should follow a mid-stream provider error
     expect(sent.some((e) => e.type === "completed")).toBe(false);
   });
 });
-

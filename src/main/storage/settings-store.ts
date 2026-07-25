@@ -1,3 +1,4 @@
+import os from "node:os";
 import type StoreType from "electron-store";
 import type {
   ChatMessage,
@@ -19,10 +20,21 @@ export interface StoredSettings {
   model: string;
 }
 
-const DEFAULT_SETTINGS: StoredSettings = {
+interface SettingsSchema extends StoredSettings {
+  /**
+   * Absolute path of the cwd-scoped folder chat sessions are persisted
+   * under (`JsonlSessionRepo`'s `sessionsRoot`). Defaults to the user's
+   * home directory the first time it's read -- deliberately never
+   * `process.cwd()`, which is meaningless once packaged (see AGENTS.md).
+   */
+  workspaceDir: string;
+}
+
+const DEFAULT_SETTINGS: SettingsSchema = {
   apiKey: "",
   baseUrl: "",
   model: "",
+  workspaceDir: "",
 };
 
 /**
@@ -30,12 +42,12 @@ const DEFAULT_SETTINGS: StoredSettings = {
  * process does not depend on the storage implementation directly.
  */
 export class SettingsStore {
-  private store: StoreType<StoredSettings> | null = null;
+  private store: StoreType<SettingsSchema> | null = null;
 
   private async load() {
     if (this.store) return this.store;
     const { default: Store } = await import("electron-store");
-    this.store = new Store<StoredSettings>({
+    this.store = new Store<SettingsSchema>({
       name: "provider-settings",
       defaults: DEFAULT_SETTINGS,
     });
@@ -95,6 +107,26 @@ export class SettingsStore {
     }
     store.set("baseUrl", settings.baseUrl);
     store.set("model", settings.model);
+  }
+
+  /**
+   * Returns the persisted workspace directory, defaulting to (and
+   * persisting) the user's home directory on first read. Never
+   * `process.cwd()` -- a packaged AppImage's launch cwd is meaningless
+   * (see AGENTS.md).
+   */
+  async getWorkspaceDir(): Promise<string> {
+    const store = await this.load();
+    const saved = store.get("workspaceDir");
+    if (saved) return saved;
+    const fallback = os.homedir();
+    store.set("workspaceDir", fallback);
+    return fallback;
+  }
+
+  async setWorkspaceDir(dir: string): Promise<void> {
+    const store = await this.load();
+    store.set("workspaceDir", dir);
   }
 }
 

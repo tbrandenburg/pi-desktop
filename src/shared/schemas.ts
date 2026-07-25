@@ -17,15 +17,4 @@ export const startChatRequestSchema = z.object({
   ),
 });
 
-export const sessionRecordSchema = z.object({
-  id: z.string().min(1),
-  title: z.string(),
-  model: z.string(),
-  updatedAt: z.number(),
-  messages: z.array(
-    z.object({
-      role: z.enum(["user", "assistant", "system"]),
-      content: z.string(),
-    }),
-  ),
-});
+export const workspaceDirSchema = z.string().min(1);

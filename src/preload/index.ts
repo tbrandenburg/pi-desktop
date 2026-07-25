@@ -8,6 +8,7 @@ import type {
   SessionRecord,
   SessionSummary,
   StartChatRequest,
+  WorkspaceInfo,
 } from "../shared/events";
 
 const api: DesktopLLMApi = {
@@ -46,12 +47,16 @@ const api: DesktopLLMApi = {
     return ipcRenderer.invoke("sessions:get", id);
   },
 
-  saveSession(session: SessionRecord): Promise<void> {
-    return ipcRenderer.invoke("sessions:save", session);
-  },
-
   deleteSession(id: string): Promise<void> {
     return ipcRenderer.invoke("sessions:delete", id);
+  },
+
+  getWorkspace(): Promise<WorkspaceInfo> {
+    return ipcRenderer.invoke("workspace:get");
+  },
+
+  chooseWorkspace(): Promise<WorkspaceInfo | null> {
+    return ipcRenderer.invoke("workspace:choose");
   },
 };
 

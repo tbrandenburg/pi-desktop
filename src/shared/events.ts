@@ -37,6 +37,11 @@ export interface SessionRecord extends SessionSummary {
   messages: ChatMessage[];
 }
 
+export interface WorkspaceInfo {
+  /** Absolute path to the currently active, cwd-scoped session workspace. */
+  dir: string;
+}
+
 export type ChatEvent =
   | { type: "started"; requestId: string }
   | { type: "text-delta"; requestId: string; text: string }
@@ -65,6 +70,7 @@ export interface DesktopLLMApi {
   onChatEvent(listener: (event: ChatEvent) => void): () => void;
   listSessions(): Promise<SessionSummary[]>;
   getSession(id: string): Promise<SessionRecord | null>;
-  saveSession(session: SessionRecord): Promise<void>;
   deleteSession(id: string): Promise<void>;
+  getWorkspace(): Promise<WorkspaceInfo>;
+  chooseWorkspace(): Promise<WorkspaceInfo | null>;
 }

@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { Api, AssistantMessageEvent, Context, Message } from "@earendil-works/pi-ai";
+import path from "node:path";
 import type { BrowserWindow } from "electron";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
 import { buildModelsRegistry, findModelById, qualifyModelId, APP_SETTINGS_PROVIDER_ID, type ModelsRegistry } from "./models";
 import type { SettingsStore } from "../storage/settings-store";
+import { AgentRuntime } from "./agent-runtime";
 
 async function loadModelsRegistryForChat(
   settings: { apiKey: string; baseUrl: string; model: string },
@@ -11,38 +12,17 @@ async function loadModelsRegistryForChat(
   return buildModelsRegistry(undefined, undefined, settings);
 }
 
-function toContext(request: StartChatRequest, api: Api, provider: string): Context {
-  const messages: Message[] = request.messages.map((message) => {
-    if (message.role === "user") {
-      return { role: "user", content: message.content, timestamp: Date.now() };
-    }
-    return {
-      role: "assistant",
-      content: [{ type: "text", text: message.content }],
-      api,
-      provider,
-      model: request.model,
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      },
-      stopReason: "stop",
-      timestamp: Date.now(),
-    };
-  });
-  return { messages };
-}
-
 /**
  * Owns all active streaming requests. Runs entirely in the Electron main
  * process; the renderer only ever sees `ChatEvent` objects via IPC.
+ *
+ * Chat turns are delegated to `AgentRuntime` (an `AgentHarness` wrapper),
+ * which owns the tool-execution loop, context compaction, and cwd-scoped
+ * session persistence (`JsonlSessionRepo`) -- this class no longer talks
+ * directly to pi-ai's low-level `Models.stream()`.
  */
 export class ChatService {
-  private activeRequests = new Map<string, AbortController>();
+  private activeAborts = new Map<string, AbortController>();
 
   constructor(
     private readonly settingsStore: SettingsStore,
@@ -50,12 +30,14 @@ export class ChatService {
     private readonly loadModelsRegistry: (
       settings: { apiKey: string; baseUrl: string; model: string },
     ) => Promise<ModelsRegistry> = loadModelsRegistryForChat,
+    private readonly getWorkspaceDir: () => string = () => process.cwd(),
+    private readonly agentRuntime: AgentRuntime = new AgentRuntime(),
   ) {}
 
   async startChat(request: StartChatRequest): Promise<string> {
     const requestId = randomUUID();
     const controller = new AbortController();
-    this.activeRequests.set(requestId, controller);
+    this.activeAborts.set(requestId, controller);
 
     void this.runChat(requestId, request, controller.signal);
 
@@ -63,7 +45,7 @@ export class ChatService {
   }
 
   cancel(requestId: string): void {
-    this.activeRequests.get(requestId)?.abort();
+    this.activeAborts.get(requestId)?.abort();
   }
 
   private emit(event: ChatEvent): void {
@@ -117,15 +99,15 @@ export class ChatService {
         return;
       }
 
-      const context = toContext(request, found.model.api, found.providerId);
-
-      this.emit({ type: "started", requestId });
-
-      const events = registry.models.stream(found.model, context, { signal });
-
-      for await (const event of events as AsyncIterable<AssistantMessageEvent>) {
-        this.forward(requestId, event);
-      }
+      await this.agentRuntime.run({
+        requestId,
+        request,
+        cwd: path.resolve(this.getWorkspaceDir()),
+        models: registry.models,
+        model: found.model,
+        signal,
+        emit: (event) => this.emit(event),
+      });
     } catch (error) {
       this.emit({
         type: "error",
@@ -133,44 +115,7 @@ export class ChatService {
         message: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      this.activeRequests.delete(requestId);
-    }
-  }
-
-  private forward(requestId: string, event: AssistantMessageEvent): void {
-    switch (event.type) {
-      case "text_delta":
-        this.emit({ type: "text-delta", requestId, text: event.delta });
-        return;
-      case "thinking_delta":
-        this.emit({ type: "reasoning-delta", requestId, text: event.delta });
-        return;
-      case "toolcall_end":
-        this.emit({
-          type: "tool-call",
-          requestId,
-          toolName: event.toolCall.name,
-          arguments: event.toolCall.arguments,
-        });
-        return;
-      case "done":
-        this.emit({
-          type: "usage",
-          requestId,
-          inputTokens: event.message.usage.input,
-          outputTokens: event.message.usage.output,
-        });
-        this.emit({ type: "completed", requestId });
-        return;
-      case "error":
-        this.emit({
-          type: "error",
-          requestId,
-          message: event.error.errorMessage ?? "Unknown streaming error",
-        });
-        return;
-      default:
-        return;
+      this.activeAborts.delete(requestId);
     }
   }
 }

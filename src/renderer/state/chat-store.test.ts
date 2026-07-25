@@ -12,9 +12,10 @@ vi.mock("../lib/desktop-api", () => ({
     listModels,
     listSessions,
     getSession: vi.fn(),
-    saveSession: vi.fn(),
     deleteSession: vi.fn(),
     cancelChat: vi.fn(),
+    getWorkspace: vi.fn().mockResolvedValue({ dir: "/home/test" }),
+    chooseWorkspace: vi.fn(),
   }),
 }));
 
