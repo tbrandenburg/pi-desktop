@@ -8,7 +8,7 @@ name: CI
 # an ambiguous/unstable merge status). Group by workflow+ref and cancel the
 # stale run so only the latest one for a given ref actually completes.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
