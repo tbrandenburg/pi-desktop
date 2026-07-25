@@ -528,4 +528,36 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   worktree — always `git checkout -- package-lock.json` (or equivalent)
   after coordinator-only validation installs, before opening the PR, so
   unrelated lockfile noise doesn't get swept into a diff by accident.
+- 2026-07-25: Verifying a "no visual change" claim (Tailwind v4 migration,
+  #27/PR #34) for real, rather than trusting the subagent's own build-only
+  validation, required checking out both `main` and the feature branch into
+  two separate worktrees, launching each one's `npx vite --port <free-port>
+  --strictPort` dev server (ports pre-checked free via `ss -ltnp`, per the
+  port-safety rule), driving both through the existing `fake-desktop-api.ts`
+  browser harness, and diffing full-page screenshots pixel-by-pixel with
+  Pillow (`ImageChops.difference` + a `sum(axis=2) > 10` threshold to ignore
+  sub-pixel antialiasing noise) rather than eyeballing two screenshots side
+  by side — this caught that the only real diff (0.03%) was AA noise around
+  a masked "•••• (saved)" field, not an actual regression, which a visual
+  eyeball check alone couldn't have quantified with confidence.
+- 2026-07-25: Playwright's `browser_take_screenshot` silently writes outside
+  the repo (into some other default location, not returned/discoverable via
+  a normal `find`) if the `filename` parameter is a bare name like
+  `before.png` — even though the tool's own error message for a rejected
+  absolute path lists the allowed roots as `<repo>/.playwright-mcp` and
+  `<repo>`, a bare filename does not reliably land in either. Always pass
+  the filename as an explicit repo-relative path with the `.playwright-mcp/`
+  prefix (e.g. `.playwright-mcp/before.png`), then verify with `ls` before
+  relying on the file for a diff — don't assume a screenshot call that
+  returned success actually wrote where expected.
+- 2026-07-25: A `pkill -f "vite --port 5180"` intended to stop a
+  self-launched dev server can silently miss the real process if `pkill`'s
+  pattern doesn't match the actual resolved command line (e.g. it launched
+  as `node .../node_modules/.bin/vite --port 5181 ...` while a different,
+  differently-invoked process on another port matched and died first). After
+  any bulk `pkill`, always re-check `ss -ltnp | grep <port>` for each port
+  you meant to free, and for any still-listening PID, confirm via
+  `readlink -f /proc/<pid>/cwd` + `ps -p <pid> -o cmd` that it's really your
+  own process before `kill`-ing it directly by PID — never assume a pattern-
+  based pkill got everything just because the command itself exited 0.
 
