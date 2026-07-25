@@ -571,4 +571,27 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   `.git-worktrees/`-style community convention, and is fully supported by
   `git worktree add <path>` (no restriction on nesting under the repo root
   per the official git-worktree docs).
+- 2026-07-25: Two parallel subagents (#36 Vite 7→8, #24 coverage ratchet)
+  each reported all-green validation from inside their own isolated
+  `.worktrees/` checkout, but the coordinator's own from-scratch
+  integration run caught two real bugs neither subagent could have seen:
+  (1) `npm install` hard-failed with `ERESOLVE` on a clean `node_modules`
+  because `@vitejs/plugin-react@^4.3.4`'s peer range didn't include vite 8
+  — the subagent's own worktree had a stale/partial `node_modules` that
+  silently tolerated the conflict, so its "success" was an artifact of
+  install order, not a real green install; and (2) Vitest's `coverage
+  .exclude` (added by #24) didn't cover `.worktrees/**`, so once both
+  worktrees still had their own `dist-main`/`dist-renderer` build output
+  on disk, the coordinator's coverage run picked up 100+ extra 0%-covered
+  files from sibling worktrees and reported 6.86% instead of the real
+  46.06% baseline. Neither subagent's own isolated run could have
+  surfaced this because their sibling worktree didn't exist yet when they
+  ran their own validation. Rule: after merging parallel subagent work,
+  always re-run `rm -rf node_modules && npm install` (not just `npm
+  install`) and the full validation suite from a clean state in the
+  coordinator's own tree — a subagent's green result inside its own
+  worktree is not sufficient proof the combined result is green, and
+  in-repo worktrees left on disk during integration are themselves a
+  contamination source for any tool (like coverage) that scans the whole
+  repo directory tree rather than just tracked/imported files.
 
