@@ -23,6 +23,20 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
+      // Only measure real application source. Without this, the v8
+      // provider's default "everything touched by a loaded module" scope
+      // pulls in compiled build output (dist-main/**, when it happens to
+      // exist on disk from a prior `npm run build`) and dev-only tooling
+      // scripts (scripts/**, stryker.config.mjs) that have no unit tests
+      // and aren't application logic - both silently dilute the "All
+      // files" aggregate into a meaningless number. See issue #24.
+      exclude: [
+        "dist-main/**",
+        "dist-renderer/**",
+        "scripts/**",
+        "*.config.*",
+        "**/*.d.ts",
+      ],
       // Intentionally no `thresholds` yet: Vitest's coverage.thresholds has
       // no warn-only mode (setting it always sets exit code 1 on failure,
       // see vitest-dev/vitest packages/vitest/src/node/coverage.ts
