@@ -19,7 +19,7 @@ help:
 	@echo "  make run         Start app in dev mode (renderer + main + electron)"
 	@echo "  make stop        Kill any running dev/electron processes"
 	@echo "  make test        Run unit tests (vitest); warns if suite takes >60s"
-	@echo "  make lint        Type-check renderer + main; warns on files >500 LOC and test:source LOC ratio >2:1"
+	@echo "  make lint        Type-check renderer + main; runs oxlint; warns on files >500 LOC and test:source LOC ratio >2:1"
 	@echo "  make build       Build renderer + main for production"
 	@echo "  make pack        Build and package app dir (no installer, fast local check)"
 	@echo "  make dist        Build and package installers for the current platform"
@@ -68,10 +68,11 @@ test:
 	fi; \
 	exit $$status
 
-## Type-check code (renderer + main); also warns on source files over 500 LOC
-## and on test files that exceed 500 LOC or a 2:1 test:source LOC ratio
+## Type-check code (renderer + main); runs oxlint; also warns on source files
+## over 500 LOC and on test files that exceed 500 LOC or a 2:1 test:source LOC ratio
 lint:
 	npm run check
+	npm run lint:oxlint
 	@find src \( -name "*.ts" -o -name "*.tsx" \) | grep -Ev '\.test\.' | xargs wc -l | grep -v ' total$$' | awk '$$1>500{print "WARNING: " $$2 " has " $$1 " lines"}'
 	npm run check:test-ratio
 
