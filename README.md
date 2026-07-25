@@ -87,8 +87,23 @@ or provider APIs directly, and credentials never leave the main process.
 
 **Just want to run the app?** Releases don't attach prebuilt binaries yet
 (see [Releases](https://github.com/tbrandenburg/pi-desktop/releases)) — for
-now, build your own portable installer locally with `make dist-linux` or
-`make dist-win` (see [Scripts](#scripts)), no code changes needed.
+now, build your own portable installer locally, no code changes needed:
+
+```bash
+npm install
+
+# Linux — builds an AppImage under release/
+make dist-linux
+make run-linux      # launches it directly (or run the .AppImage yourself)
+
+# Windows — builds an NSIS installer + portable exe under release/
+make dist-win
+make run-win        # launches the built .exe (via wine when cross-building from Linux)
+```
+
+`make run-bundled` picks the right one automatically for your current host
+platform once it's been built. See [Scripts](#scripts) for the full command
+surface.
 
 **Want to build or hack on it?**
 
