@@ -53,7 +53,7 @@ describe("read-only tools (real NodeExecutionEnv, real disk)", () => {
     );
   });
 
-  it("read_file follows a path-traversal attempt outside the workspace root (documents real env behavior)", async () => {
+  it("read_file rejects a relative path-traversal attempt outside the workspace root", async () => {
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-outside-"));
     fs.writeFileSync(path.join(outsideDir, "secret.txt"), "top secret");
     const traversal = path.relative(cwd, path.join(outsideDir, "secret.txt"));
@@ -61,11 +61,35 @@ describe("read-only tools (real NodeExecutionEnv, real disk)", () => {
     const env = new NodeExecutionEnv({ cwd });
     const tool = createReadFileTool(env);
 
-    const result = await tool.execute("call-traversal", { path: traversal });
-
-    expect(result.content).toEqual([{ type: "text", text: "top secret" }]);
-    expect(result.details).toEqual({ path: traversal });
+    await expect(tool.execute("call-traversal", { path: traversal })).rejects.toThrow(
+      /escapes the workspace root/i,
+    );
     fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
+  it("read_file rejects an absolute path outside the workspace root", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-outside-"));
+    const secretPath = path.join(outsideDir, "secret.txt");
+    fs.writeFileSync(secretPath, "top secret");
+    const { NodeExecutionEnv } = await realAgentCoreLoaders.loadAgentCoreNode!();
+    const env = new NodeExecutionEnv({ cwd });
+    const tool = createReadFileTool(env);
+
+    await expect(tool.execute("call-absolute", { path: secretPath })).rejects.toThrow(
+      /escapes the workspace root/i,
+    );
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
+  it("read_file still reads a legitimate nested in-workspace path", async () => {
+    const { NodeExecutionEnv } = await realAgentCoreLoaders.loadAgentCoreNode!();
+    const env = new NodeExecutionEnv({ cwd });
+    const tool = createReadFileTool(env);
+
+    const result = await tool.execute("call-nested", { path: path.join("sub", "nested.txt") });
+
+    expect(result.content).toEqual([{ type: "text", text: "nested" }]);
+    expect(result.details).toEqual({ path: path.join("sub", "nested.txt") });
   });
 
   it("list_files returns the exact real directory entries with exact `kind`-prefixed, newline-joined formatting", async () => {
@@ -115,7 +139,7 @@ describe("read-only tools (real NodeExecutionEnv, real disk)", () => {
     );
   });
 
-  it("list_files follows a path-traversal attempt outside the workspace root (documents real env behavior)", async () => {
+  it("list_files rejects a relative path-traversal attempt outside the workspace root", async () => {
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-outside-"));
     fs.writeFileSync(path.join(outsideDir, "secret.txt"), "top secret");
     const traversal = path.relative(cwd, outsideDir);
@@ -123,12 +147,33 @@ describe("read-only tools (real NodeExecutionEnv, real disk)", () => {
     const env = new NodeExecutionEnv({ cwd });
     const tool = createListFilesTool(env);
 
-    const result = await tool.execute("call-traversal", { path: traversal });
-
-    const details = result.details as { entries: { name: string; kind: string }[] };
-    expect(details.entries.map((e) => e.name)).toContain("secret.txt");
-    expect(result.content[0]).toMatchObject({ text: expect.stringContaining("secret.txt") });
+    await expect(tool.execute("call-traversal", { path: traversal })).rejects.toThrow(
+      /escapes the workspace root/i,
+    );
     fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
+  it("list_files rejects an absolute path outside the workspace root", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-outside-"));
+    fs.writeFileSync(path.join(outsideDir, "secret.txt"), "top secret");
+    const { NodeExecutionEnv } = await realAgentCoreLoaders.loadAgentCoreNode!();
+    const env = new NodeExecutionEnv({ cwd });
+    const tool = createListFilesTool(env);
+
+    await expect(tool.execute("call-absolute", { path: outsideDir })).rejects.toThrow(
+      /escapes the workspace root/i,
+    );
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
+  it("list_files still lists a legitimate nested in-workspace path", async () => {
+    const { NodeExecutionEnv } = await realAgentCoreLoaders.loadAgentCoreNode!();
+    const env = new NodeExecutionEnv({ cwd });
+    const tool = createListFilesTool(env);
+
+    const result = await tool.execute("call-nested", { path: "sub" });
+
+    expect(result.content).toEqual([{ type: "text", text: "- nested.txt" }]);
   });
 });
 

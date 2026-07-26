@@ -1,3 +1,7 @@
+// Electron app-bootstrap glue (low logic density). Intentionally excluded
+// from unit-test coverage/mutation targets - verified via real packaged-app
+// CDP checks (scripts/cdp-drive.ts) instead. See AGENTS.md lessons #16/#17
+// and issue #70.
 import { BrowserWindow, app } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { createMainWindow } from "./windows";
