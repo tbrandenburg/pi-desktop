@@ -9,5 +9,31 @@
     "dist-main",
     "dist-renderer",
     "release"
+  ],
+  "overrides": [
+    {
+      "files": ["src/renderer/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/main/**", "**/src/main/**"],
+                "message": "The renderer must never import from src/main directly (AGENTS.md rule #4). Use the typed preload bridge (src/preload) instead."
+              },
+              {
+                "group": ["@earendil-works/pi-ai", "@earendil-works/pi-ai/*", "@earendil-works/pi-agent-core", "@earendil-works/pi-agent-core/*"],
+                "message": "The renderer must never import Pi APIs directly (AGENTS.md rule #4). Pi imports must stay inside src/main/llm."
+              },
+              {
+                "group": ["node:*", "fs", "path", "os", "child_process", "electron"],
+                "message": "The renderer must never import Node APIs directly (AGENTS.md rule #4). Use the typed preload bridge (src/preload) instead."
+              }
+            ]
+          }
+        ]
+      }
+    }
   ]
 }
