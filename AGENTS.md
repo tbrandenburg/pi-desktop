@@ -121,9 +121,11 @@ than catch it after the fact.
 1. **Session browsing/recovery was a UI placeholder, not a real feature.**
    The sidebar only ever showed "Current conversation" text; there was no
    persistence, no way to switch between past conversations, and no
-   per-session model. This is now backed by a `SessionStore`
-   (`src/main/storage/session-store.ts`, same thin `electron-store` wrapper
-   pattern as `SettingsStore`) plus 4 IPC channels
+   per-session model. This is now backed by a `SessionService`
+   (`src/main/llm/session-service.ts` + `src/main/llm/session-projection.ts`;
+   superseded the originally-planned `SessionStore`/`storage/session-store.ts`
+   thin `electron-store` wrapper pattern used by `SettingsStore`) plus 4 IPC
+   channels
    (`sessions:list|get|save|delete`). Persist on `completed`/`error`/stop —
    never on every keystroke — to avoid needless disk writes.
 2. **Renderer state needs a `conversationId`, not just message history.**
@@ -150,7 +152,7 @@ than catch it after the fact.
    continues with the wrong model.
 5. **Persistence unit tests must hit real `electron-store` on a throwaway
    disk directory** (not a full in-memory mock) to prove data genuinely
-   survives an app restart — see `session-store.test.ts`, following the
+   survives an app restart — see `session-projection.test.ts`, following the
    existing pattern in `settings-store.test.ts`. A pure in-memory mock would
    pass even if the on-disk serialization were broken.
 6. **electron-builder AppImages launch fine under Xvfb/X11 with
@@ -159,7 +161,7 @@ than catch it after the fact.
    detached (`setsid nohup ... &disown`) so the process survives the calling
    shell command's timeout.
 7. **Fully-wired backend plumbing with no UI entry point is a bug, not a
-   feature to leave alone.** `sessions:delete` had a real `SessionStore`
+   feature to leave alone.** `sessions:delete` had a real `SessionService`
    method, IPC handler, and preload binding, but the Sidebar never called
    it — so there was no way to remove old sessions in normal usage. Session
    browsing without deletion breaks a real-world usage pattern (any user who
