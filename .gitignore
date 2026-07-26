@@ -52,3 +52,7 @@ reports/
 
 # dev
 dev/
+
+# factory
+.factory/
+factory*.sh
