@@ -24,8 +24,16 @@
  * native value setter + `input` event, then dispatches a real `Enter`
  * `keydown` — this is required: a raw `.value = ...` assignment does not
  * trigger React's change detection, and a synthetic Enter without the native
- * setter first won't submit either (see AGENTS.md lesson 12). `wait-idle`
- * polls for the "Stop generation" button to disappear, i.e. streaming
+ * setter first won't submit either (see AGENTS.md lesson 12). It also yields
+ * one animation frame + a macrotask between the `input` event and the Enter
+ * keydown: dispatching both synchronously in the same tick fires `onKeyDown`
+ * before React has flushed the `onChange`-driven state update, so the
+ * submit handler's closure still sees the stale (empty) value and silently
+ * no-ops — the DOM textarea shows the typed text (set directly via the
+ * native setter) but the message was never actually sent. If the value
+ * still doesn't match after yielding, `send` returns `VALUE_NOT_COMMITTED`
+ * instead of a false-positive `SENT`. `wait-idle` polls for the "Stop
+ * generation" button to disappear, i.e. streaming
  * finished — give real (non-fake) providers up to 60s, some free-tier models
  * are slow (see AGENTS.md's packaged-app testing section, point 5).
  *
@@ -123,7 +131,7 @@ async function main() {
     } else if (action === "send") {
       if (!arg) throw new Error('"send" requires a message argument');
       const result = await client.evaluate(`
-        (function() {
+        (async function() {
           const textarea = document.querySelector('textarea[placeholder="Send a message…"]');
           if (!textarea) return "NO_TEXTAREA";
           const nativeSetter = Object.getOwnPropertyDescriptor(
@@ -131,6 +139,15 @@ async function main() {
           ).set;
           nativeSetter.call(textarea, ${JSON.stringify(arg)});
           textarea.dispatchEvent(new Event("input", { bubbles: true }));
+          // Yield to let React flush the onChange-driven state update before
+          // the Enter keydown fires — otherwise onKeyDown's submit() closure
+          // still reads the stale (empty) value from the prior render and
+          // silently no-ops, leaving the typed text sitting in the composer
+          // with no visible error. A real user's keystrokes are never
+          // dispatched in the same synchronous tick, so this only bites
+          // synthetic same-tick automation.
+          await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+          if (textarea.value !== ${JSON.stringify(arg)}) return "VALUE_NOT_COMMITTED";
           textarea.dispatchEvent(new KeyboardEvent("keydown", {
             key: "Enter", code: "Enter", bubbles: true, cancelable: true
           }));
