@@ -1,6 +1,6 @@
 import { AgentHarness, JsonlSessionRepo, Session } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { AgentCoreLoaders } from "../agent-core";
+import type { AgentCoreLoaders } from "../core";
 
 // Real @earendil-works/pi-agent-core code, imported the normal static way so
 // Vitest's own ESM-aware transform loads it directly -- unlike the

@@ -4,7 +4,7 @@
 #   2. Test:source LOC ratio exceeding 2:1 for the source file(s) a test
 #      corresponds to.
 #
-# Source-file matching convention (see src/main/llm/ for the real pattern):
+# Source-file matching convention (see src/main/model/ for the real pattern):
 #   foo.test.ts                              -> foo.ts
 #   foo.bar-baz.test.ts                       -> foo.ts (split-file convention:
 #     progressively strip trailing dot-segments from the test file's base

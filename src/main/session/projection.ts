@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { Session, SessionTreeEntry } from "@earendil-works/pi-agent-core";
-import { qualifyModelId } from "./models";
+import { qualifyModelId } from "../model/registry";
 import type { ChatMessage, SessionRecord, SessionSummary } from "../../shared/events";
 
 /**

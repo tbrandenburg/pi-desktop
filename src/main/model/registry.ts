@@ -9,7 +9,7 @@ import type {
   ProviderStreams,
 } from "@earendil-works/pi-ai";
 
-import { nativeDynamicImport } from "./native-import";
+import { nativeDynamicImport } from "../native-import";
 import {
   AuthJsonCredentialStore,
   placeholderModel,

@@ -24,7 +24,7 @@
               },
               {
                 "group": ["@earendil-works/pi-ai", "@earendil-works/pi-ai/*", "@earendil-works/pi-agent-core", "@earendil-works/pi-agent-core/*"],
-                "message": "The renderer must never import Pi APIs directly (AGENTS.md rule #4). Pi imports must stay inside src/main/llm."
+                "message": "The renderer must never import Pi APIs directly (AGENTS.md rule #4). Pi imports must stay inside src/main/agent and src/main/model."
               },
               {
                 "group": ["node:*", "fs", "path", "os", "child_process", "electron"],

@@ -59,13 +59,13 @@ describe("preload bridge integration", () => {
     await api.saveProviderSettings({ baseUrl: "https://api.openai.com/v1", model: "gpt-4o" });
     await api.getProviderSettings();
 
-    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(1, "llm:list-models");
-    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(2, "llm:start-chat", {
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(1, "model:list");
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(2, "chat:start", {
       conversationId: "c1",
       model: "gpt-4o",
       messages: [],
     });
-    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(3, "llm:cancel-chat", "req-1");
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(3, "chat:cancel", "req-1");
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(4, "settings:save", {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4o",

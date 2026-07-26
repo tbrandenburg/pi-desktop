@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { projectSessionRecord, projectSessionSummary } from "./session-projection";
-import { realAgentCoreLoaders } from "./test-support/real-agent-core-loaders";
+import { projectSessionRecord, projectSessionSummary } from "./projection";
+import { realAgentCoreLoaders } from "../agent/test-support/real-agent-core-loaders";
 
 describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   let cwd: string;

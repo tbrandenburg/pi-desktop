@@ -7,7 +7,7 @@ import {
   findModelById,
   qualifyModelId,
   APP_SETTINGS_PROVIDER_ID,
-} from "./models";
+} from "./registry";
 import { realModelsLoaders } from "./test-support/real-models-loaders";
 
 describe("buildModelsRegistry", () => {

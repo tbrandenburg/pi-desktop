@@ -1,7 +1,7 @@
 import type { AgentEvent, AgentHarnessEvent } from "@earendil-works/pi-agent-core";
 import type { Api, Model, MutableModels } from "@earendil-works/pi-ai";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
-import { loadAgentCore, loadAgentCoreNode, type AgentCoreLoaders } from "./agent-core";
+import { loadAgentCore, loadAgentCoreNode, type AgentCoreLoaders } from "./core";
 import { createReadOnlyTools } from "./tools";
 
 type SessionMetadataLike = { id: string };

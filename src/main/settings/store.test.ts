@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { SettingsStore } from "./settings-store";
-import { resolvePiDefault } from "../llm/pi-config";
+import { SettingsStore } from "./store";
+import { resolvePiDefault } from "../model/pi-config";
 
-vi.mock("../llm/pi-config", () => ({
+vi.mock("../model/pi-config", () => ({
   resolvePiDefault: vi.fn(() => Promise.resolve(null)),
 }));
 

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { BrowserWindow } from "electron";
 import type { MutableModels } from "@earendil-works/pi-ai";
-import { ChatService } from "./chat-service";
-import type { ModelsRegistry } from "./models";
-import type { SettingsStore } from "../storage/settings-store";
+import { ChatService } from "./service";
+import type { ModelsRegistry } from "../model/registry";
+import type { SettingsStore } from "../settings/store";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
-import type { AgentRuntime, AgentRuntimeRunArgs } from "./agent-runtime";
+import type { AgentRuntime, AgentRuntimeRunArgs } from "../agent/runtime";
 
 // AgentRuntime wraps AgentHarness, which cannot run under Vitest's vm-based
 // pool (see AGENTS.md / agent-core.ts doc comments). ChatService takes it as

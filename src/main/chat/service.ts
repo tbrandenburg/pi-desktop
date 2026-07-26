@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { BrowserWindow } from "electron";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
-import { buildModelsRegistry, findModelById, qualifyModelId, APP_SETTINGS_PROVIDER_ID, type ModelsRegistry } from "./models";
-import type { SettingsStore } from "../storage/settings-store";
-import { AgentRuntime } from "./agent-runtime";
+import { buildModelsRegistry, findModelById, qualifyModelId, APP_SETTINGS_PROVIDER_ID, type ModelsRegistry } from "../model/registry";
+import type { SettingsStore } from "../settings/store";
+import { AgentRuntime } from "../agent/runtime";
 
 async function loadModelsRegistryForChat(
   settings: { apiKey: string; baseUrl: string; model: string },
