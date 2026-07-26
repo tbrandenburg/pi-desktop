@@ -6,17 +6,13 @@ import { createReadOnlyTools } from "./tools";
 
 type SessionMetadataLike = { id: string };
 
+// Only lists the event types `AgentRuntime.forward`'s switch statement
+// actually handles below -- everything else falls through to `default: return`
+// regardless of filter membership, so keep this set in sync with that switch.
 const AGENT_EVENT_TYPES = new Set<AgentEvent["type"]>([
-  "agent_start",
-  "agent_end",
-  "turn_start",
-  "turn_end",
-  "message_start",
   "message_update",
-  "message_end",
   "tool_execution_start",
-  "tool_execution_update",
-  "tool_execution_end",
+  "agent_end",
 ]);
 
 function isAgentEvent(event: AgentHarnessEvent): event is AgentEvent {
