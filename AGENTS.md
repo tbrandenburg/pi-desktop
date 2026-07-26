@@ -779,6 +779,27 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   linking actually fires on merge — verify with `gh issue view <n> --json
   state` right after merging, don't assume a merged PR closed its issues
   just because the body mentioned them.
-
-
+- 2026-07-26: A 5-way parallel mutation-hardening batch (#65-#69, all
+  test-only changes across fully disjoint files) merged with zero conflicts
+  as expected, but two integration lessons still surfaced: (1) backgrounding
+  a long-running `stryker run` with `nohup ... &` inside a bash tool call
+  does not survive that same tool call's own timeout — the tool kills the
+  whole process group on timeout, taking the "detached" background job with
+  it, so a full ~26-minute combined mutation run silently died at 5%
+  progress with no error. Since the 5 issues' files were fully disjoint, the
+  already-recorded per-issue Stryker scores (collected inside each isolated
+  subagent worktree) remained valid evidence without a redundant combined
+  re-run — for genuinely disjoint parallel test-hardening work, per-branch
+  mutation scores are sufficient integration proof; only re-run combined
+  mutation testing when file sets actually overlap. If a full combined run
+  is ever required, use the `detach` skill/pattern (a real `setsid`+`disown`
+  outside the tool's own timeout window) instead of `nohup &` inside a
+  single bash call. (2) One subagent's task was interrupted mid-run by a
+  tool-execution error before it made any file changes or commits; the
+  worktree's only diff was an incidental `package-lock.json` touch (reverted
+  before re-dispatch). Always check `git status`/`git log` in a suspect
+  worktree before concluding a subagent silently failed — an interrupted
+  tool call can be safely resumed by re-dispatching the exact same task
+  prompt against the same (already-clean) worktree/branch with zero risk of
+  duplicated or lost work.
 

@@ -6,17 +6,15 @@ import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { realAgentCoreLoaders } from "./agent/test-support/real-agent-core-loaders";
 
-// This suite must be hermetic regardless of what the machine's real
-// ~/.pi/agent config happens to contain, so .pi resolution is mocked and
-// tested separately in pi-config.test.ts.
+// This suite must be hermetic regardless of the machine's real ~/.pi/agent
+// config, so .pi resolution is mocked here (tested separately in pi-config.test.ts).
 vi.mock("./model/pi-config", () => ({
   resolvePiDefault: vi.fn(() => Promise.resolve(null)),
   listConfiguredModels: vi.fn(() => Promise.resolve([])),
 }));
 
 // In-memory fake replacing electron-store, so SettingsStore is exercised
-// exactly as in production while avoiding any dependency on a real
-// userData directory / Electron app instance.
+// as in production without a real userData directory / Electron instance.
 const memoryStore = new Map<string, unknown>();
 vi.mock("electron-store", () => {
   return {
@@ -90,7 +88,7 @@ describe("IPC settings round-trip integration", () => {
     fs.rmSync(workspaceDir, { recursive: true, force: true });
   });
 
-  it("persists provider settings and never leaks the raw API key back to the renderer", async () => {
+  it("persists provider settings, never leaks the raw API key back, and preserves it across a re-save without one", async () => {
     await invoke("settings:save", {
       apiKey: "sk-super-secret",
       baseUrl: "https://api.openai.com/v1",
@@ -105,22 +103,14 @@ describe("IPC settings round-trip integration", () => {
       hasApiKey: true,
     });
     expect(JSON.stringify(summary)).not.toContain("sk-super-secret");
-  });
-
-  it("preserves the previously stored API key when settings are re-saved without one", async () => {
-    await invoke("settings:save", {
-      apiKey: "sk-original",
-      baseUrl: "https://api.openai.com/v1",
-      model: "gpt-4o",
-    });
 
     await invoke("settings:save", {
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4o-mini",
     });
 
-    const summary = await invoke("settings:get");
-    expect(summary).toEqual({
+    const updated = await invoke("settings:get");
+    expect(updated).toEqual({
       baseUrl: "https://api.openai.com/v1",
       model: "gpt-4o-mini",
       hasApiKey: true,
@@ -145,42 +135,37 @@ describe("IPC settings round-trip integration", () => {
     ).rejects.toThrow();
   });
 
-  it("returns the real Electron app version through the app:get-version handler", async () => {
+  it("cancels an unknown request id through the IPC boundary without throwing", async () => {
+    // ChatService.cancel() is a no-op for unknown ids; verifies wiring.
+    await expect(invoke("chat:cancel", "no-such-request")).resolves.toBeUndefined();
+  });
+
+  it("returns the real Electron app version, and an empty model list when nothing is configured", async () => {
     const version = await invoke("app:get-version");
     expect(version).toBe("9.9.9-test");
     expect(typeof version).toBe("string");
-  });
 
-  it("returns an empty model list when nothing is configured, rather than a fake placeholder model", async () => {
     const models = await invoke("model:list");
     expect(models).toEqual([]);
   });
 
-  it("returns models sourced from configured .pi providers, with the resolved default first", async () => {
-    const { listConfiguredModels } = await import("./model/pi-config");
+  it("lists configured models, and reorders the resolved .pi/agent default to the front using its fully-qualified id", async () => {
+    const { listConfiguredModels, resolvePiDefault } = await import("./model/pi-config");
     vi.mocked(listConfiguredModels).mockResolvedValue([
       { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
       { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
     ]);
 
-    const models = await invoke("model:list");
-
-    expect(models).toEqual([
+    const plain = await invoke("model:list");
+    expect(plain).toEqual([
       { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
       { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
     ]);
 
-    vi.mocked(listConfiguredModels).mockResolvedValue([]);
-  });
-
-  it("reorders the resolved .pi/agent default to the front using its fully-qualified id (not the bare model id)", async () => {
-    // Regression coverage: ResolvedPiDefault.model is a *bare* id (matched
-    // against StoredSettings.model, itself bare), while ModelInfo.id from
-    // listConfiguredModels is always fully-qualified ("provider/modelId").
-    // The reordering must match against `piDefault.label` (qualified), not
-    // `piDefault.model` (bare) -- a bare-vs-qualified mismatch here would
-    // silently disable the "put the current default first" behavior.
-    const { listConfiguredModels, resolvePiDefault } = await import("./model/pi-config");
+    // Regression: ResolvedPiDefault.model is a *bare* id, matched against
+    // StoredSettings.model (also bare), while ModelInfo.id is always
+    // fully-qualified ("provider/modelId"). Reordering must match against
+    // `piDefault.label` (qualified), not `piDefault.model` (bare).
     vi.mocked(listConfiguredModels).mockResolvedValue([
       { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
       { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
@@ -192,9 +177,8 @@ describe("IPC settings round-trip integration", () => {
       label: "llm7/minimax-m2.7",
     });
 
-    const models = await invoke("model:list");
-
-    expect(models).toEqual([
+    const reordered = await invoke("model:list");
+    expect(reordered).toEqual([
       { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
       { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
     ]);
@@ -203,16 +187,8 @@ describe("IPC settings round-trip integration", () => {
     vi.mocked(resolvePiDefault).mockResolvedValue(null);
   });
 
-  it("cancels an unknown request id through the IPC boundary without throwing", async () => {
-    // ChatService.cancel() is a no-op for unknown/completed request ids; this
-    // verifies the chat:cancel handler wires through to it correctly
-    // instead of only testing ChatService directly (see chat-service.test.ts).
-    await expect(invoke("chat:cancel", "no-such-request")).resolves.toBeUndefined();
-  });
-
   it("lists, gets, and deletes real cwd-scoped sessions through the IPC boundary", async () => {
-    // Ensure `currentWorkspaceDir` inside ipc.ts has resolved from settings
-    // before writing a real session directly through JsonlSessionRepo.
+    // Ensure currentWorkspaceDir resolved before writing directly via JsonlSessionRepo.
     expect(await invoke("workspace:get")).toEqual({ dir: workspaceDir });
 
     const { JsonlSessionRepo, Session } = await realAgentCoreLoaders.loadAgentCore!();
