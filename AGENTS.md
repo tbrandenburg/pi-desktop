@@ -763,6 +763,22 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   round-trip (Chromium 150, live `PONG`/`PING` replies), not `make check`
   alone — no native addons meant `@electron/rebuild` had nothing to break,
   which was the single biggest de-risker.
+- 2026-07-26: Merging PR #62 (issues #51/#55/#56/#57/#59) left all five
+  issues open even though the PR fully resolved them. Root cause: the PR
+  body used a plain `## Issues fixed` bullet list (`- #51 — Display app
+  version...`) instead of GitHub's auto-close keyword syntax (`Closes #51`,
+  `Fixes #55`, etc.) immediately preceding each issue reference — GitHub
+  only auto-closes on merge when it recognizes one of those specific
+  keywords directly next to a `#N`, and a squash-merge commit message (PR
+  title only) doesn't retroactively add them either. Confirmed via `gh issue
+  view <n> --json state,closedAt` showing `OPEN`/`null` on all five after
+  the merge. Fixed by manually `gh issue close <n> --comment "Resolved via
+  #62 ..."` for each. Prevention: any PR body listing issues it resolves
+  must use `Closes #N` / `Fixes #N` / `Resolves #N` (one keyword per issue,
+  not a shared "Issues fixed:" heading with bare `#N` bullets) so GitHub's
+  linking actually fires on merge — verify with `gh issue view <n> --json
+  state` right after merging, don't assume a merged PR closed its issues
+  just because the body mentioned them.
 
 
 
