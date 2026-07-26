@@ -78,4 +78,156 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
       { role: "user", content: "turn two" },
     ]);
   });
+
+  it("projects a branch_summary entry as a system bubble", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s4b" });
+    const entryId = await session.appendMessage({ role: "user", content: "turn one", timestamp: Date.now() });
+    await session.moveTo(entryId, { summary: "Branch summary text" });
+
+    const metadata = await session.getMetadata();
+    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+
+    expect(record.messages).toEqual([
+      { role: "user", content: "turn one" },
+      { role: "system", content: "Branch summary text" },
+    ]);
+  });
+
+  it("prefers the most recently appended session_info entry when multiple exist", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s5" });
+    await session.appendSessionName("First Title");
+    await session.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
+    await session.appendSessionName("Second Title");
+
+    const metadata = await session.getMetadata();
+    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+
+    expect(summary.title).toBe("Second Title");
+    expect(summary.title).not.toBe("First Title");
+  });
+
+  it("prefers the most recently appended model_change entry when multiple exist", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s6" });
+    await session.appendModelChange("openai", "gpt-4o-mini");
+    await session.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
+    await session.appendModelChange("anthropic", "claude-3");
+
+    const metadata = await session.getMetadata();
+    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+
+    expect(summary.model).toBe("anthropic/claude-3");
+    expect(summary.model).not.toBe("openai/gpt-4o-mini");
+  });
+
+  it("skips a leading assistant message and titles from the first real user message", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s7" });
+    await session.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "assistant said this first" }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    });
+    await session.appendMessage({ role: "user", content: "the real user message", timestamp: Date.now() });
+
+    const metadata = await session.getMetadata();
+    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+
+    expect(summary.title).toBe("the real user message");
+    expect(summary.title).not.toContain("assistant said this first");
+  });
+
+  it("derives the title from a user message whose content is content blocks, not a plain string", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s8" });
+    await session.appendMessage({
+      role: "user",
+      content: [
+        { type: "text", text: "block one" },
+        { type: "text", text: "block two" },
+      ],
+      timestamp: Date.now(),
+    });
+
+    const metadata = await session.getMetadata();
+    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+
+    expect(summary.title).toBe("block one block two");
+  });
+
+  it("falls back to '(untitled)' when the only user message trims to an empty string", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s9" });
+    await session.appendMessage({ role: "user", content: "   ", timestamp: Date.now() });
+
+    const metadata = await session.getMetadata();
+    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+
+    expect(summary.title).toBe("(untitled)");
+  });
+
+  it("does not truncate or add ellipsis to a title exactly at the max length boundary", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s10" });
+    const exact = "y".repeat(80);
+    await session.appendMessage({ role: "user", content: exact, timestamp: Date.now() });
+
+    const metadata = await session.getMetadata();
+    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+
+    expect(summary.title).toBe(exact);
+    expect(summary.title.endsWith("...")).toBe(false);
+  });
+
+  it("projects an assistant message's text content blocks joined into a single message", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s11" });
+    await session.appendMessage({ role: "user", content: "question", timestamp: Date.now() });
+    await session.appendMessage({
+      role: "assistant",
+      content: [
+        { type: "text", text: "part one" },
+        { type: "text", text: "part two" },
+      ],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    });
+
+    const metadata = await session.getMetadata();
+    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+
+    expect(record.messages).toEqual([
+      { role: "user", content: "question" },
+      { role: "assistant", content: "part onepart two" },
+    ]);
+  });
+
+  it("projects a user message whose content is content blocks (not a string) into joined text", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s12" });
+    await session.appendMessage({
+      role: "user",
+      content: [
+        { type: "text", text: "hello" },
+        { type: "text", text: "world" },
+      ],
+      timestamp: Date.now(),
+    });
+
+    const metadata = await session.getMetadata();
+    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+
+    expect(record.messages).toEqual([{ role: "user", content: "hello world" }]);
+  });
 });

@@ -279,3 +279,81 @@ describe("buildModelsRegistry source precedence", () => {
     expect(auth?.auth.apiKey).toBe("sk-global-override");
   });
 });
+
+describe("findModelById edge cases", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-findmodel-home-"));
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-findmodel-cwd-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("returns null for an id with no '/' separator at all", async () => {
+    const registry = await buildModelsRegistry(
+      home,
+      cwd,
+      { apiKey: "sk-app-only", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+      realModelsLoaders,
+    );
+    expect(findModelById(registry.models, "no-separator-here")).toBeNull();
+    expect(findModelById(registry.models, "")).toBeNull();
+  });
+
+  it("returns null when the provider segment does not correspond to any registered provider", async () => {
+    const registry = await buildModelsRegistry(
+      home,
+      cwd,
+      { apiKey: "sk-app-only", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+      realModelsLoaders,
+    );
+    expect(findModelById(registry.models, "nonexistent-provider/gpt-4o-mini")).toBeNull();
+  });
+
+  it("returns null when the provider exists but the model id segment does not match any of its models", async () => {
+    const registry = await buildModelsRegistry(
+      home,
+      cwd,
+      { apiKey: "sk-app-only", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+      realModelsLoaders,
+    );
+    const found = findModelById(registry.models, qualifyModelId(APP_SETTINGS_PROVIDER_ID, "no-such-model"));
+    expect(found).toBeNull();
+  });
+
+  it("returns null for a slash-less id, even when the id's prefix coincidentally names a real provider and the full id coincidentally names one of its models", async () => {
+    // Regression-style edge case: without the `separatorIndex === -1` guard,
+    // slicing a slash-less id would still produce a "providerId" (all but
+    // the last char) and "modelId" (the full string) that can, by pure
+    // coincidence, both resolve to real registered entries. This proves the
+    // guard is load-bearing, not redundant with the later lookups failing
+    // naturally.
+    const agentDir = path.join(home, ".pi", "agent");
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(agentDir, "models.json"),
+      JSON.stringify({
+        providers: {
+          myprov: {
+            api: "openai-completions",
+            baseUrl: "https://x.example/v1",
+            apiKey: "sk-x",
+            models: [{ id: "myprovX" }],
+          },
+        },
+      }),
+    );
+    const registry = await buildModelsRegistry(home, cwd, undefined, realModelsLoaders);
+
+    // Sanity check the coincidental setup actually exists as described.
+    expect(registry.models.getProvider("myprov")).toBeDefined();
+    expect(registry.models.getProvider("myprov")!.getModels().some((m) => m.id === "myprovX")).toBe(true);
+
+    expect(findModelById(registry.models, "myprovX")).toBeNull();
+  });
+});
