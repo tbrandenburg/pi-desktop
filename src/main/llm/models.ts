@@ -13,18 +13,7 @@ import type {
   ProviderStreams,
 } from "@earendil-works/pi-ai";
 
-// pi-ai ships ESM-only and only exposes its subpaths through an "import"
-// condition (no "require" condition). Under tsconfig.main.json's
-// "module": "CommonJS", tsc silently downlevels a literal `await import(x)`
-// into `require(x)`, which throws only once the app is packaged (never in
-// plain-TS unit tests or `npm run dev`). Hiding the call from tsc's static
-// downlevel transform via `new Function(...)` forces a genuine native
-// `import()` at runtime. See chat-service.ts for the original instance of
-// this workaround.
-const nativeDynamicImport: (specifier: string) => Promise<unknown> = new Function(
-  "specifier",
-  "return import(specifier);",
-) as (specifier: string) => Promise<unknown>;
+import { nativeDynamicImport } from "./native-import";
 
 export interface PiAiModule {
   createModels: (...args: Parameters<typeof import("@earendil-works/pi-ai").createModels>) => MutableModels;
