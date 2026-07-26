@@ -340,26 +340,85 @@ export interface ModelsRegistry {
 }
 
 /**
- * Builds a `pi-ai` `MutableModels` registry from every configured model
- * source, in precedence order (lowest first, since `setProvider` upserts
- * by id -- last one wins):
- *
- *   1. every pi-ai built-in provider (37 known providers, e.g. "openrouter",
- *      "anthropic", "google", "github-copilot", ...), credentialed from
- *      `.pi/agent/auth.json` (project overriding global) -- this is what
- *      surfaces a provider's full real model catalog (e.g. OpenRouter's
- *      ~270 models with real cost/context-window metadata) as soon as the
- *      user has a credential for it, with zero `models.json` entry needed,
- *   2. the app's own `settings.json` (via `SettingsStore`), if provided,
- *   3. the global `~/.pi/agent` custom providers (`models.json`),
- *   4. the project-local `<cwd>/.pi/agent` custom providers (highest
- *      precedence) -- a custom `models.json` entry with the same id as a
- *      built-in provider fully overrides it.
- *
- * `models.json` is optional at every level -- a source that has none simply
- * contributes no custom providers, and built-ins still work off `auth.json`
- * alone.
+ * Shared context passed to every `ProviderSource.load()` call -- everything
+ * a source might need to resolve its own `CreateProviderOptions[]`.
  */
+interface ProviderSourceContext {
+  globalDir: string;
+  projectDir: string;
+  appSettings?: AppSettingsProviderInput;
+  loadApiModule: (api: string) => Promise<ProviderStreams>;
+  loadBuiltinProviders: () => Promise<BuiltinProvidersModule>;
+}
+
+/**
+ * What a `ProviderSource` contributes: either a fully pre-built pi-ai
+ * `Provider` (the built-in catalogs, which are registered directly via
+ * `models.setProvider`) or `CreateProviderOptions` to be built via
+ * `createProvider` first. Kept as a discriminated union rather than a
+ * lossy cast so `buildModelsRegistry`'s loop stays fully typed.
+ */
+type RegistryEntry = { kind: "provider"; provider: Provider } | { kind: "options"; options: CreateProviderOptions };
+
+/**
+ * A single model/provider source. Each source resolves to zero or more
+ * `RegistryEntry`s, later upserted into the registry via
+ * `models.setProvider` -- last one wins on a given provider id. Precedence
+ * across sources is therefore just their position in the `SOURCES` array
+ * below (see `buildModelsRegistry`), not hand-written statement order.
+ */
+interface ProviderSource {
+  load(ctx: ProviderSourceContext): Promise<RegistryEntry[]>;
+}
+
+/**
+ * Every pi-ai built-in provider (37 known providers, e.g. "openrouter",
+ * "anthropic", "google", "github-copilot", ...), credentialed from
+ * `.pi/agent/auth.json` via the registry's shared `CredentialStore` (set up
+ * separately in `buildModelsRegistry`, not per-source). This surfaces a
+ * provider's full real model catalog (e.g. OpenRouter's ~270 models with
+ * real cost/context-window metadata) as soon as the user has a credential
+ * for it, with zero `models.json` entry needed.
+ */
+const builtinProviderSource: ProviderSource = {
+  async load(ctx) {
+    const { builtinProviders } = await ctx.loadBuiltinProviders();
+    return builtinProviders().map((provider) => ({ kind: "provider", provider }) as const);
+  },
+};
+
+/** The app's own single-slot `settings.json` config (via `SettingsStore`). */
+const appSettingsSource: ProviderSource = {
+  async load(ctx) {
+    if (!ctx.appSettings) return [];
+    const options = await appSettingsProviderOptions(ctx.appSettings, ctx.loadApiModule);
+    return options ? [{ kind: "options", options }] : [];
+  },
+};
+
+/** Custom providers from a `.pi/agent/models.json` at a given directory. */
+function agentDirSource(dirKey: "globalDir" | "projectDir"): ProviderSource {
+  return {
+    async load(ctx) {
+      const options = await readProvidersFromAgentDir(ctx[dirKey], ctx.loadApiModule);
+      return options.map((o) => ({ kind: "options", options: o }) as const);
+    },
+  };
+}
+
+/**
+ * Lowest precedence first, since `setProvider` upserts by id -- last one
+ * wins. See each source above for what it contributes. `models.json`/
+ * `auth.json` are optional at every level -- a source that has none simply
+ * contributes no providers, and built-ins still work off `auth.json` alone.
+ */
+const SOURCES: ProviderSource[] = [
+  builtinProviderSource,
+  appSettingsSource,
+  agentDirSource("globalDir"),
+  agentDirSource("projectDir"),
+];
+
 export async function buildModelsRegistry(
   homeDir: string = os.homedir(),
   cwd: string = process.cwd(),
@@ -378,21 +437,18 @@ export async function buildModelsRegistry(
   const credentials = new AuthJsonCredentialStore(globalDir, projectDir);
   const models = createModels({ credentials });
 
-  const { builtinProviders } = await loadBuiltinProviders();
-  for (const provider of builtinProviders()) {
-    models.setProvider(provider);
-  }
+  const ctx: ProviderSourceContext = {
+    globalDir,
+    projectDir,
+    appSettings,
+    loadApiModule,
+    loadBuiltinProviders,
+  };
 
-  if (appSettings) {
-    const opts = await appSettingsProviderOptions(appSettings, loadApiModule);
-    if (opts) models.setProvider(createProvider(opts));
-  }
-
-  for (const opts of await readProvidersFromAgentDir(globalDir, loadApiModule)) {
-    models.setProvider(createProvider(opts));
-  }
-  for (const opts of await readProvidersFromAgentDir(projectDir, loadApiModule)) {
-    models.setProvider(createProvider(opts));
+  for (const source of SOURCES) {
+    for (const entry of await source.load(ctx)) {
+      models.setProvider(entry.kind === "provider" ? entry.provider : createProvider(entry.options));
+    }
   }
 
   const globalSettings = readJson<AgentSettingsFile>(path.join(globalDir, "settings.json"));

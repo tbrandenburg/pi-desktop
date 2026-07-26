@@ -222,3 +222,60 @@ describe("buildModelsRegistry with pi-ai built-in providers (auth.json)", () => 
     expect(builtinMatch?.providerId).toBe("openai");
   });
 });
+
+describe("buildModelsRegistry source precedence", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-precedence-home-"));
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-precedence-cwd-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("lets a global .pi/agent models.json entry override an app-settings provider registered under the same id, proving precedence is array-order-driven, not just non-colliding", async () => {
+    // Deliberately reuse APP_SETTINGS_PROVIDER_ID as the models.json provider
+    // id, so both sources register under the *exact same* provider id --
+    // last source in the array wins via `setProvider`'s upsert-by-id
+    // semantics. `agentDirSource("globalDir")` is ordered after
+    // `appSettingsSource` in `SOURCES`, so its model must win.
+    const agentDir = path.join(home, ".pi", "agent");
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(agentDir, "models.json"),
+      JSON.stringify({
+        providers: {
+          [APP_SETTINGS_PROVIDER_ID]: {
+            api: "openai-completions",
+            baseUrl: "https://global.example.com/v1",
+            apiKey: "sk-global-override",
+            models: [{ id: "global-model" }],
+          },
+        },
+      }),
+    );
+
+    const registry = await buildModelsRegistry(
+      home,
+      cwd,
+      {
+        apiKey: "sk-app-only",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      },
+      realModelsLoaders,
+    );
+
+    const available = await registry.models.getAvailable(APP_SETTINGS_PROVIDER_ID);
+    expect(available).toEqual([
+      expect.objectContaining({ id: "global-model", provider: APP_SETTINGS_PROVIDER_ID }),
+    ]);
+
+    const auth = await registry.models.getAuth(APP_SETTINGS_PROVIDER_ID);
+    expect(auth?.auth.apiKey).toBe("sk-global-override");
+  });
+});
