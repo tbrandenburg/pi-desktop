@@ -38,9 +38,12 @@ help:
 	@echo "                   commit 'chore(release): vX.Y.Z' and git tag it"
 	@echo "  make release     Push the release commit + tag to origin"
 	@echo "  make publish     Create the GitHub release for the current tag"
-	@echo "                   (release notes only; no build artifacts attached)"
+	@echo "                   (release notes only; the Release Actions workflow"
+	@echo "                   attaches the Linux AppImage + Windows portable exe"
+	@echo "                   once 'make release' pushes the tag)"
 	@echo "  make release-patch/-minor/-major"
-	@echo "                   One-shot: bump + push + publish"
+	@echo "                   One-shot: bump + push + publish (tag push also"
+	@echo "                   triggers the Release Actions workflow's builds)"
 
 ## Install all dependencies
 install:

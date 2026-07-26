@@ -34,8 +34,10 @@ exists.
 - `make release` — Push the current release commit + its version tag to
   `origin`.
 - `make publish` — Create the GitHub release for the current tag via `gh`
-  (release notes only; no build artifacts attached — run `dist-linux`/
-  `dist-win` separately and attach manually if needed).
+  (release notes only). Pushing the tag (via `make release`) triggers
+  `.github/workflows/release.yml`, which builds and attaches the Linux
+  AppImage and Windows portable exe automatically — no local `dist-linux`/
+  `dist-win` step is required for a normal release.
 - `make release-patch` / `release-minor` / `release-major` — One-shot:
   version bump → push → publish, in that order.
 
