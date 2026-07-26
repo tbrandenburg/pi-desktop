@@ -802,4 +802,22 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   tool call can be safely resumed by re-dispatching the exact same task
   prompt against the same (already-clean) worktree/branch with zero risk of
   duplicated or lost work.
+- 2026-07-26: PR #76 (#75's jsdom/testing-library work) passed the
+  subagent's own worktree validation (`npm install && npm test`) but failed
+  real CI with `npm error Missing: @emnapi/core@1.11.3 from lock file` —
+  the exact `@emnapi/*` drift class already documented in the 2026-07-25
+  lockfile lesson above. The gap was that the *task prompt* given to the
+  subagent only said "run `npm install`", not the clean-slate + `npm ci`
+  sequence the existing lesson prescribes — a lesson recorded in AGENTS.md
+  is not self-enforcing; it must be restated as an explicit instruction in
+  every subagent dispatch that touches `package.json`/`package-lock.json`.
+  Prevention (now mandatory in any such task prompt and before any
+  package-lock.json commit, subagent or coordinator): run, in this exact
+  order, `rm -rf node_modules && npm install` (clean-slate, never a plain
+  in-place `npm install`) followed by a separate `rm -rf node_modules &&
+  npm ci` as the real pre-merge gate, since `npm ci` is the literal command
+  CI runs and a local pass is a near-guarantee of a green CI lockfile step.
+  Do not rely on `npm test`/`npm run check` passing after `npm install`
+  alone as proof the lockfile is CI-safe — those commands never exercise
+  `npm ci`'s stricter lock-must-match-exactly behavior.
 
