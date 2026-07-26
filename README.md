@@ -55,33 +55,35 @@ or provider APIs directly, and credentials never leave the main process.
 
 ## Features
 
-- **Any model, any provider — no lock-in.** Powered by `pi-ai`'s 38
-  built-in provider catalogs (OpenAI, Anthropic, Google Gemini, OpenRouter,
-  GitHub Copilot, Cerebras, Fireworks, and more), or bring your own
-  OpenAI-compatible endpoint. Credentials from an existing
-  [Pi CLI](https://github.com/earendil-works/pi) `~/.pi/agent/auth.json` are
-  picked up automatically.
-- **A real agent, not just chat.** Every turn runs through
-  `pi-agent-core`'s `AgentHarness` — a genuine tool-calling loop (not a
-  single request/response) that streams live `tool_execution_*` events to
-  the UI. Ships with `read_file` and `list_files` tools out of the box, so
-  the agent can actually look at your project instead of guessing.
-- **Real, resumable agent sessions.** Each conversation is a cwd-scoped
-  `JsonlSessionRepo` session from `pi-agent-core` — persisted to disk as
-  plain JSONL, not just app-local key/value storage — so history and tool
-  calls survive restarts and reopen with the exact model used.
-- **Zero-config first launch** — if you already have a Pi CLI config at
-  `~/.pi/agent`, Pi Desktop resolves a working provider and model
-  automatically. No manual API key entry required to start chatting.
-- **Secure by design** — `contextIsolation: true`, `nodeIntegration: false`,
-  `sandbox: true`. The renderer talks to Node only through a narrow, typed
-  preload bridge; a saved API key is never sent back to the UI.
-- **Built for everyone, not just developers.** The packaged app is a
-  double-click installer/AppImage — running it needs no Node, npm, or
-  terminal. Linux (AppImage) and Windows (NSIS installer + portable exe)
-  build and package today (`make dist-linux` / `make dist-win`); macOS
-  packaging is on the roadmap. Prebuilt binaries aren't attached to
-  releases yet, so building locally is currently required.
+### Present
+
+- **Any model, any provider** 🌐 — 38 built-in `pi-ai` provider catalogs
+  plus custom OpenAI-compatible endpoints. Auto-picks up existing
+  [Pi CLI](https://github.com/earendil-works/pi) credentials from
+  `~/.pi/agent/auth.json`.
+- **Real agent, not just chat** 🤖 — `pi-agent-core`'s `AgentHarness`
+  tool-calling loop, streamed live. Ships with `read_file`/`list_files`.
+- **Resumable sessions** 💾 — Plain JSONL on disk per workspace, not
+  app-local storage. Survives restarts with the right model restored.
+- **Zero-config first launch** ⚡ — Detects an existing `~/.pi/agent` setup
+  and starts chatting with no manual API key entry.
+- **Secure by design** 🔒 — Sandboxed renderer, no direct Node/API access;
+  credentials never leave the main process.
+- **No dev tools required** 📦 — Double-click installer/AppImage for Linux
+  and Windows.
+
+### Planned
+
+- **Write tools** ✍️ — Let the agent edit/create files, not just read them.
+- **Skills, the Pi CLI way** 🧩 — Reuse `pi-agent-core`'s existing
+  `SKILL.md` loader so skills you already wrote for Pi CLI work here
+  unchanged.
+- **Extension system** 🔌 — Same plugin model as Pi CLI, once confirmed
+  feasible upstream.
+- **Agent definitions** 🧠 — Reusable named agent presets (prompt + tools +
+  model), matching Pi CLI.
+- **Enterprise-grade hardening** 🏛️ — Audit logging, policy controls, and
+  compliance prep for regulated environments.
 
 ## Getting started
 
