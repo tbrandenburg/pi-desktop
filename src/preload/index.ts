@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   ChatEvent,
-  DesktopLLMApi,
+  DesktopAgentApi,
   ModelInfo,
   ProviderSettings,
   ProviderSettingsSummary,
@@ -11,7 +11,7 @@ import type {
   WorkspaceInfo,
 } from "../shared/events";
 
-const api: DesktopLLMApi = {
+const api: DesktopAgentApi = {
   listModels(): Promise<ModelInfo[]> {
     return ipcRenderer.invoke("model:list");
   },
