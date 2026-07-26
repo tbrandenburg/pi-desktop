@@ -101,5 +101,9 @@ export function createFakeDesktopApi(): DesktopLLMApi {
       sessions.clear();
       return { dir: workspaceDir };
     },
+
+    async getVersion() {
+      return "0.0.0-dev";
+    },
   };
 }

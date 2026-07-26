@@ -1,4 +1,4 @@
-import { type BrowserWindow, dialog, ipcMain } from "electron";
+import { app, type BrowserWindow, dialog, ipcMain } from "electron";
 import { startChatRequestSchema, providerSettingsSchema, workspaceDirSchema } from "../shared/schemas";
 import type { ModelInfo, WorkspaceInfo } from "../shared/events";
 import { ChatService } from "./llm/chat-service";
@@ -24,6 +24,10 @@ export function registerIpcHandlers(
 
   const sessionService = new SessionService(getWorkspaceDir, deps.agentCoreLoaders);
   const chatService = new ChatService(settingsStore, getWindow, undefined, getWorkspaceDir);
+
+  ipcMain.handle("app:get-version", (): string => {
+    return app.getVersion();
+  });
 
   ipcMain.handle("llm:list-models", async (): Promise<ModelInfo[]> => {
     // The model list is sourced entirely from the providers configured in
