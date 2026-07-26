@@ -206,6 +206,70 @@ describe("ChatService integration", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it("emits a single error event and never calls AgentRuntime when the resolved model is not configured", async () => {
+    const run = vi.fn();
+
+    const settingsStore = {
+      get: vi.fn().mockResolvedValue({
+        apiKey: "sk-test",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      }),
+    } as unknown as SettingsStore;
+
+    const sent: ChatEvent[] = [];
+    const service = new ChatService(
+      settingsStore,
+      () => makeFakeWindow(sent),
+      makeRegistryLoader(),
+      () => "/tmp/pi-desktop-workspace",
+      makeFakeRuntime(run),
+    );
+
+    await service.startChat({ ...makeRequest(), model: "unknown-provider/does-not-exist" });
+    await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+
+    expect(sent).toEqual([
+      {
+        type: "error",
+        requestId: expect.any(String),
+        message:
+          'Model "unknown-provider/does-not-exist" is not configured. Open settings and select a configured model.',
+      },
+    ]);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the qualified settings.model when request.model is empty", async () => {
+    const run = vi.fn(async ({ requestId, emit }: AgentRuntimeRunArgs) => {
+      emit({ type: "completed", requestId });
+    });
+
+    const settingsStore = {
+      get: vi.fn().mockResolvedValue({
+        apiKey: "sk-test",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      }),
+    } as unknown as SettingsStore;
+
+    const sent: ChatEvent[] = [];
+    const service = new ChatService(
+      settingsStore,
+      () => makeFakeWindow(sent),
+      makeRegistryLoader(),
+      () => "/tmp/pi-desktop-workspace",
+      makeFakeRuntime(run),
+    );
+
+    await service.startChat({ ...makeRequest(), model: "" });
+    await vi.waitFor(() => expect(sent.some((e) => e.type === "completed")).toBe(true));
+
+    expect(run).toHaveBeenCalledTimes(1);
+    const runArgs = run.mock.calls[0][0] as AgentRuntimeRunArgs;
+    expect(runArgs.model.id).toBe("gpt-4o-mini");
+  });
+
   it("translates an AgentRuntime.run rejection into a ChatEvent error without throwing", async () => {
     const run = vi.fn(async ({ requestId, emit }: AgentRuntimeRunArgs) => {
       emit({ type: "started", requestId });

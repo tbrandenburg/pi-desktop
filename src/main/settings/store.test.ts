@@ -147,4 +147,61 @@ describe("SettingsStore persistence (real electron-store)", () => {
 
     vi.mocked(resolvePiDefault).mockResolvedValue(null);
   });
+
+  it("hasSavedApiKey is false before any save and true after saving a real key", async () => {
+    const store = newStoreAt(cwd);
+    expect(await store.hasSavedApiKey()).toBe(false);
+
+    await store.save({
+      apiKey: "sk-real-secret",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+    });
+
+    expect(await store.hasSavedApiKey()).toBe(true);
+  });
+
+  it("hasSavedApiKey stays false when saving with an empty apiKey field", async () => {
+    const store = newStoreAt(cwd);
+    await store.save({
+      apiKey: "",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+    });
+
+    expect(await store.hasSavedApiKey()).toBe(false);
+  });
+
+  it("getSummary reports hasApiKey false when no key has been saved or resolved", async () => {
+    const store = newStoreAt(cwd);
+    const summary = await store.getSummary();
+
+    expect(summary.hasApiKey).toBe(false);
+    expect(summary).toEqual({
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+      hasApiKey: false,
+    });
+  });
+
+  it("getWorkspaceDir defaults to and persists the home directory on first read", async () => {
+    const first = newStoreAt(cwd);
+    const dir = await first.getWorkspaceDir();
+    expect(dir).toBe(os.homedir());
+
+    // A fresh instance backed by the same disk cwd must read back the
+    // persisted default rather than re-deriving it.
+    const second = newStoreAt(cwd);
+    const dirAgain = await second.getWorkspaceDir();
+    expect(dirAgain).toBe(os.homedir());
+  });
+
+  it("setWorkspaceDir persists a custom directory that getWorkspaceDir then returns", async () => {
+    const first = newStoreAt(cwd);
+    await first.setWorkspaceDir("/tmp/my-custom-workspace");
+
+    const second = newStoreAt(cwd);
+    const dir = await second.getWorkspaceDir();
+    expect(dir).toBe("/tmp/my-custom-workspace");
+  });
 });
