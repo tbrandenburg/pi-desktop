@@ -58,6 +58,10 @@ const api: DesktopLLMApi = {
   chooseWorkspace(): Promise<WorkspaceInfo | null> {
     return ipcRenderer.invoke("workspace:choose");
   },
+
+  getVersion(): Promise<string> {
+    return ipcRenderer.invoke("app:get-version");
+  },
 };
 
 contextBridge.exposeInMainWorld("desktopApi", api);

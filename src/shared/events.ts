@@ -73,4 +73,5 @@ export interface DesktopLLMApi {
   deleteSession(id: string): Promise<void>;
   getWorkspace(): Promise<WorkspaceInfo>;
   chooseWorkspace(): Promise<WorkspaceInfo | null>;
+  getVersion(): Promise<string>;
 }

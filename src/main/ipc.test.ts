@@ -41,6 +41,9 @@ vi.mock("electron", () => {
     (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
   >();
   return {
+    app: {
+      getVersion: () => "9.9.9-test",
+    },
     ipcMain: {
       handle: (
         channel: string,
@@ -140,6 +143,12 @@ describe("IPC settings round-trip integration", () => {
         messages: [],
       }),
     ).rejects.toThrow();
+  });
+
+  it("returns the real Electron app version through the app:get-version handler", async () => {
+    const version = await invoke("app:get-version");
+    expect(version).toBe("9.9.9-test");
+    expect(typeof version).toBe("string");
   });
 
   it("returns an empty model list when nothing is configured, rather than a fake placeholder model", async () => {
