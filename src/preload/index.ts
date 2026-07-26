@@ -13,15 +13,15 @@ import type {
 
 const api: DesktopLLMApi = {
   listModels(): Promise<ModelInfo[]> {
-    return ipcRenderer.invoke("llm:list-models");
+    return ipcRenderer.invoke("model:list");
   },
 
   startChat(request: StartChatRequest): Promise<{ requestId: string }> {
-    return ipcRenderer.invoke("llm:start-chat", request);
+    return ipcRenderer.invoke("chat:start", request);
   },
 
   cancelChat(requestId: string): Promise<void> {
-    return ipcRenderer.invoke("llm:cancel-chat", requestId);
+    return ipcRenderer.invoke("chat:cancel", requestId);
   },
 
   saveProviderSettings(settings: ProviderSettings): Promise<void> {
@@ -57,6 +57,10 @@ const api: DesktopLLMApi = {
 
   chooseWorkspace(): Promise<WorkspaceInfo | null> {
     return ipcRenderer.invoke("workspace:choose");
+  },
+
+  getVersion(): Promise<string> {
+    return ipcRenderer.invoke("app:get-version");
   },
 };
 

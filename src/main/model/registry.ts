@@ -1,0 +1,286 @@
+import os from "node:os";
+import path from "node:path";
+import type {
+  Api,
+  CreateProviderOptions,
+  Model,
+  MutableModels,
+  Provider,
+  ProviderStreams,
+} from "@earendil-works/pi-ai";
+
+import { nativeDynamicImport } from "../native-import";
+import {
+  AuthJsonCredentialStore,
+  placeholderModel,
+  readJson,
+  readProvidersFromAgentDir,
+  type AgentSettingsFile,
+} from "./pi-agent-dir";
+
+export interface PiAiModule {
+  createModels: (...args: Parameters<typeof import("@earendil-works/pi-ai").createModels>) => MutableModels;
+  createProvider: typeof import("@earendil-works/pi-ai").createProvider;
+}
+
+let piAiModule: PiAiModule | null = null;
+async function defaultLoadPiAi(): Promise<PiAiModule> {
+  if (!piAiModule) {
+    piAiModule = (await nativeDynamicImport("@earendil-works/pi-ai")) as unknown as PiAiModule;
+  }
+  return piAiModule;
+}
+
+// Every pi-ai API implementation module exports exactly `stream`/`streamSimple`
+// (the `ProviderStreams` shape), keyed here by the `api` string used in
+// models.json / our own settings. Extend this map to support more APIs.
+const API_MODULE_SPECIFIERS: Record<string, string> = {
+  "openai-completions": "@earendil-works/pi-ai/api/openai-completions",
+  "anthropic-messages": "@earendil-works/pi-ai/api/anthropic-messages",
+  "google-generative-ai": "@earendil-works/pi-ai/api/google-generative-ai",
+};
+
+const apiModuleCache = new Map<string, Promise<ProviderStreams>>();
+function defaultLoadApiModule(api: string): Promise<ProviderStreams> {
+  const specifier = API_MODULE_SPECIFIERS[api];
+  if (!specifier) {
+    return Promise.reject(new Error(`Unsupported pi-ai API: "${api}"`));
+  }
+  let modulePromise = apiModuleCache.get(api);
+  if (!modulePromise) {
+    modulePromise = nativeDynamicImport(specifier) as Promise<ProviderStreams>;
+    apiModuleCache.set(api, modulePromise);
+  }
+  return modulePromise;
+}
+
+export interface BuiltinProvidersModule {
+  builtinProviders: () => Provider[];
+}
+
+const builtinProvidersSpecifier = "@earendil-works/pi-ai/providers/all";
+let builtinProvidersModule: Promise<BuiltinProvidersModule> | null = null;
+function defaultLoadBuiltinProviders(): Promise<BuiltinProvidersModule> {
+  if (!builtinProvidersModule) {
+    builtinProvidersModule = nativeDynamicImport(
+      builtinProvidersSpecifier,
+    ) as Promise<BuiltinProvidersModule>;
+  }
+  return builtinProvidersModule;
+}
+
+/**
+ * Injectable pi-ai loaders. Production code relies on the defaults above
+ * (real dynamic import). Because that import is deliberately hidden from
+ * static analysis (see `nativeDynamicImport`), it is also invisible to
+ * vi.mock's module interception -- and Vitest's default vm-based pool
+ * additionally has no `importModuleDynamically` callback wired for
+ * `new Function(...)`-constructed code, so the real loader cannot run
+ * inside unit tests at all. Tests inject these directly instead, importing
+ * the real `@earendil-works/pi-ai` package the normal (static) way at the
+ * top of the test file, which Vitest's own ESM-aware transform handles
+ * fine.
+ */
+export interface ModelsLoaders {
+  loadPiAi?: () => Promise<PiAiModule>;
+  loadApiModule?: (api: string) => Promise<ProviderStreams>;
+  loadBuiltinProviders?: () => Promise<BuiltinProvidersModule>;
+}
+
+/** The app's own single-slot `settings.json` config (via SettingsStore). */
+export interface AppSettingsProviderInput {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
+
+export const APP_SETTINGS_PROVIDER_ID = "app-settings";
+
+async function appSettingsProviderOptions(
+  settings: AppSettingsProviderInput,
+  loadApiModule: (api: string) => Promise<ProviderStreams>,
+): Promise<CreateProviderOptions | null> {
+  if (!settings.apiKey || !settings.baseUrl || !settings.model) return null;
+  const api = "openai-completions";
+  const streams = await loadApiModule(api);
+  return {
+    id: APP_SETTINGS_PROVIDER_ID,
+    baseUrl: settings.baseUrl,
+    auth: {
+      apiKey: {
+        name: APP_SETTINGS_PROVIDER_ID,
+        resolve: async () => ({ auth: { apiKey: settings.apiKey } }),
+      },
+    },
+    models: [placeholderModel(settings.model, APP_SETTINGS_PROVIDER_ID, api, settings.baseUrl)],
+    api: streams,
+  };
+}
+
+export interface ModelsRegistry {
+  models: MutableModels;
+  defaultProviderId?: string;
+  defaultModelId?: string;
+}
+
+/**
+ * Shared context passed to every `ProviderSource.load()` call -- everything
+ * a source might need to resolve its own `CreateProviderOptions[]`.
+ */
+interface ProviderSourceContext {
+  globalDir: string;
+  projectDir: string;
+  appSettings?: AppSettingsProviderInput;
+  loadApiModule: (api: string) => Promise<ProviderStreams>;
+  loadBuiltinProviders: () => Promise<BuiltinProvidersModule>;
+}
+
+/**
+ * What a `ProviderSource` contributes: either a fully pre-built pi-ai
+ * `Provider` (the built-in catalogs, which are registered directly via
+ * `models.setProvider`) or `CreateProviderOptions` to be built via
+ * `createProvider` first. Kept as a discriminated union rather than a
+ * lossy cast so `buildModelsRegistry`'s loop stays fully typed.
+ */
+type RegistryEntry = { kind: "provider"; provider: Provider } | { kind: "options"; options: CreateProviderOptions };
+
+/**
+ * A single model/provider source. Each source resolves to zero or more
+ * `RegistryEntry`s, later upserted into the registry via
+ * `models.setProvider` -- last one wins on a given provider id. Precedence
+ * across sources is therefore just their position in the `SOURCES` array
+ * below (see `buildModelsRegistry`), not hand-written statement order.
+ */
+interface ProviderSource {
+  load(ctx: ProviderSourceContext): Promise<RegistryEntry[]>;
+}
+
+/**
+ * Every pi-ai built-in provider (37 known providers, e.g. "openrouter",
+ * "anthropic", "google", "github-copilot", ...), credentialed from
+ * `.pi/agent/auth.json` via the registry's shared `CredentialStore` (set up
+ * separately in `buildModelsRegistry`, not per-source). This surfaces a
+ * provider's full real model catalog (e.g. OpenRouter's ~270 models with
+ * real cost/context-window metadata) as soon as the user has a credential
+ * for it, with zero `models.json` entry needed.
+ */
+const builtinProviderSource: ProviderSource = {
+  async load(ctx) {
+    const { builtinProviders } = await ctx.loadBuiltinProviders();
+    return builtinProviders().map((provider) => ({ kind: "provider", provider }) as const);
+  },
+};
+
+/** The app's own single-slot `settings.json` config (via `SettingsStore`). */
+const appSettingsSource: ProviderSource = {
+  async load(ctx) {
+    if (!ctx.appSettings) return [];
+    const options = await appSettingsProviderOptions(ctx.appSettings, ctx.loadApiModule);
+    return options ? [{ kind: "options", options }] : [];
+  },
+};
+
+/** Custom providers from a `.pi/agent/models.json` at a given directory. */
+function agentDirSource(dirKey: "globalDir" | "projectDir"): ProviderSource {
+  return {
+    async load(ctx) {
+      const options = await readProvidersFromAgentDir(ctx[dirKey], ctx.loadApiModule);
+      return options.map((o) => ({ kind: "options", options: o }) as const);
+    },
+  };
+}
+
+/**
+ * Lowest precedence first, since `setProvider` upserts by id -- last one
+ * wins. See each source above for what it contributes. `models.json`/
+ * `auth.json` are optional at every level -- a source that has none simply
+ * contributes no providers, and built-ins still work off `auth.json` alone.
+ */
+const SOURCES: ProviderSource[] = [
+  builtinProviderSource,
+  appSettingsSource,
+  agentDirSource("globalDir"),
+  agentDirSource("projectDir"),
+];
+
+export async function buildModelsRegistry(
+  homeDir: string = os.homedir(),
+  cwd: string = process.cwd(),
+  appSettings?: AppSettingsProviderInput,
+  loaders: ModelsLoaders = {},
+): Promise<ModelsRegistry> {
+  const loadPiAi = loaders.loadPiAi ?? defaultLoadPiAi;
+  const loadApiModule = loaders.loadApiModule ?? defaultLoadApiModule;
+  const loadBuiltinProviders = loaders.loadBuiltinProviders ?? defaultLoadBuiltinProviders;
+
+  const { createModels, createProvider } = await loadPiAi();
+
+  const globalDir = path.join(homeDir, ".pi", "agent");
+  const projectDir = path.join(cwd, ".pi", "agent");
+
+  const credentials = new AuthJsonCredentialStore(globalDir, projectDir);
+  const models = createModels({ credentials });
+
+  const ctx: ProviderSourceContext = {
+    globalDir,
+    projectDir,
+    appSettings,
+    loadApiModule,
+    loadBuiltinProviders,
+  };
+
+  for (const source of SOURCES) {
+    for (const entry of await source.load(ctx)) {
+      models.setProvider(entry.kind === "provider" ? entry.provider : createProvider(entry.options));
+    }
+  }
+
+  const globalSettings = readJson<AgentSettingsFile>(path.join(globalDir, "settings.json"));
+  const projectSettings = readJson<AgentSettingsFile>(path.join(projectDir, "settings.json"));
+
+  return {
+    models,
+    defaultProviderId: projectSettings?.defaultProvider ?? globalSettings?.defaultProvider,
+    defaultModelId: projectSettings?.defaultModel ?? globalSettings?.defaultModel,
+  };
+}
+
+/**
+ * Builds the fully-qualified, globally-unique id for a model: `provider/modelId`.
+ * This -- not the bare model id -- is what's ever handed to the renderer as
+ * `ModelInfo.id` and round-tripped back as `StartChatRequest.model`.
+ *
+ * This is necessary because bare model ids are *not* unique once pi-ai's
+ * built-in catalogs are registered: e.g. "gpt-5.6-luna" ships identically
+ * from six different built-in providers (azure-openai-responses,
+ * cloudflare-ai-gateway, github-copilot, openai, openai-codex, opencode).
+ * A flat `id` string can never disambiguate which one the user picked.
+ */
+export function qualifyModelId(providerId: string, modelId: string): string {
+  return `${providerId}/${modelId}`;
+}
+
+/**
+ * Resolves a fully-qualified `provider/modelId` id (as produced by
+ * `qualifyModelId`) back to its exact model + provider -- an O(1), fully
+ * deterministic lookup with no cross-provider ambiguity, since the
+ * provider id is encoded directly in the string. The model id itself may
+ * contain further "/" characters (e.g. OpenRouter's own "openai/gpt-4o"
+ * naming), so only the *first* segment is treated as the provider id.
+ */
+export function findModelById(
+  models: MutableModels,
+  qualifiedId: string,
+): { model: Model<Api>; providerId: string } | null {
+  const separatorIndex = qualifiedId.indexOf("/");
+  if (separatorIndex === -1) return null;
+
+  const providerId = qualifiedId.slice(0, separatorIndex);
+  const modelId = qualifiedId.slice(separatorIndex + 1);
+
+  const provider = models.getProvider(providerId);
+  if (!provider) return null;
+
+  const match = provider.getModels().find((m) => m.id === modelId);
+  return match ? { model: match, providerId } : null;
+}

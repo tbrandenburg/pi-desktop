@@ -3,7 +3,7 @@ import * as openAICompletions from "@earendil-works/pi-ai/api/openai-completions
 import * as anthropicMessages from "@earendil-works/pi-ai/api/anthropic-messages";
 import * as googleGenerativeAi from "@earendil-works/pi-ai/api/google-generative-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
-import type { ModelsLoaders } from "../models";
+import type { ModelsLoaders } from "../registry";
 
 // Real `@earendil-works/pi-ai` code (createModels/createProvider + every API
 // implementation module), imported the normal static way so Vitest's own

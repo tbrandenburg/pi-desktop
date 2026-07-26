@@ -43,7 +43,7 @@ exists.
 
 1. Do not change the architecture: Electron + React + Vite + pi-ai (+ optional pi-agent-core).
 2. Do not introduce Tauri, Rust, Next.js, or a separate server process.
-3. Keep all Pi imports (`@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`) inside `src/main/llm`.
+3. Keep all Pi imports (`@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`) inside `src/main/agent` and `src/main/model` (formerly `src/main/llm`, re-homed by domain in #59).
 4. The React renderer must never import Node or Pi APIs directly. It talks only through
    the typed preload bridge (`src/preload`).
 5. Never place API keys in renderer state after saving. Settings round-trip through the
@@ -59,6 +59,36 @@ exists.
    works end-to-end in dev mode.
 8. Keep STATUS.md updated with completed milestones and blockers.
 9. Test the production package, not only dev mode, before declaring packaging done.
+
+## How to add X (copy-the-sibling recipes)
+
+### Adding an IPC channel
+
+Touch exactly these three files, in this order, copying the shape of the
+existing `sessions:list` channel:
+
+1. `src/shared/events.ts` — add the method signature to `DesktopLLMApi` (and
+   any new payload/return types it needs).
+2. `src/preload/index.ts` — add one `ipcRenderer.invoke("your:channel", ...)`
+   body to the exported `api` object, matching the new `DesktopLLMApi`
+   method.
+3. `src/main/ipc.ts` — add one `ipcMain.handle("your:channel", async (...) =>
+   { ... })` in `registerIpcHandlers`.
+
+Also update `src/renderer/lib/fake-desktop-api.ts`'s in-memory fake so the
+browser-based dev harness (see "Lessons learned" #3 below) keeps working.
+Name the channel `<domain>:<verb>` (e.g. `sessions:list`, `chat:start`,
+`model:list`) — domain-named, not mechanism-named (see #59).
+
+### Adding a renderer component
+
+Add one flat file directly under `src/renderer/components/` (no per-component
+subfolder), following `Sidebar.tsx` as the reference sibling: a single
+named-exported function component, styled via the single shared
+`src/renderer/styles.css` (imported once at `main.tsx`, not a co-located
+per-component CSS file), with no per-component test file — this repo
+deliberately tests renderer behavior via the `fake-desktop-api.ts` browser
+harness (see "Lessons learned" #3) rather than per-component unit tests.
 
 ## Node toolchain (build/CI Node vs Electron's bundled Node)
 

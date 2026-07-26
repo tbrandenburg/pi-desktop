@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { createModels, createProvider, createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { AssistantMessageEventStream } from "@earendil-works/pi-ai";
-import { AgentRuntime } from "./agent-runtime";
+import { AgentRuntime } from "./runtime";
 import { realAgentCoreLoaders } from "./test-support/real-agent-core-loaders";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
 

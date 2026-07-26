@@ -1,9 +1,11 @@
 import { FolderOpen, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { desktopApi } from "../lib/desktop-api";
 import { useChatStore } from "../state/chat-store";
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(true);
+  const [version, setVersion] = useState("");
   const conversationId = useChatStore((state) => state.conversationId);
   const sessions = useChatStore((state) => state.sessions);
   const workspaceDir = useChatStore((state) => state.workspaceDir);
@@ -16,6 +18,10 @@ export function Sidebar() {
   useEffect(() => {
     void loadWorkspace();
   }, [loadWorkspace]);
+
+  useEffect(() => {
+    void desktopApi().getVersion().then(setVersion);
+  }, []);
 
   return (
     <aside
@@ -92,6 +98,10 @@ export function Sidebar() {
             <p className="px-3 py-2 text-xs text-white/30">No conversations yet.</p>
           )}
         </div>
+      )}
+
+      {!collapsed && version && (
+        <p className="mt-auto pb-2 text-center text-[10px] text-white/30">v{version}</p>
       )}
     </aside>
   );

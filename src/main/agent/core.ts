@@ -5,7 +5,7 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import type { NodeExecutionEnv as NodeExecutionEnvType } from "@earendil-works/pi-agent-core/node";
 
-import { nativeDynamicImport } from "./native-import";
+import { nativeDynamicImport } from "../native-import";
 
 // @earendil-works/pi-agent-core ships ESM-only and only exposes its "." and
 // "./node" subpaths through an "import" condition (no "require" condition) --

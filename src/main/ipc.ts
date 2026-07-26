@@ -1,11 +1,11 @@
-import { type BrowserWindow, dialog, ipcMain } from "electron";
+import { app, type BrowserWindow, dialog, ipcMain } from "electron";
 import { startChatRequestSchema, providerSettingsSchema, workspaceDirSchema } from "../shared/schemas";
 import type { ModelInfo, WorkspaceInfo } from "../shared/events";
-import { ChatService } from "./llm/chat-service";
-import { listConfiguredModels, resolvePiDefault } from "./llm/pi-config";
-import { SettingsStore } from "./storage/settings-store";
-import { SessionService } from "./llm/session-service";
-import type { AgentCoreLoaders } from "./llm/agent-core";
+import { ChatService } from "./chat/service";
+import { listConfiguredModels, resolvePiDefault } from "./model/pi-config";
+import { SettingsStore } from "./settings/store";
+import { SessionService } from "./session/service";
+import type { AgentCoreLoaders } from "./agent/core";
 
 export interface RegisterIpcHandlersDeps {
   agentCoreLoaders?: AgentCoreLoaders;
@@ -25,7 +25,11 @@ export function registerIpcHandlers(
   const sessionService = new SessionService(getWorkspaceDir, deps.agentCoreLoaders);
   const chatService = new ChatService(settingsStore, getWindow, undefined, getWorkspaceDir);
 
-  ipcMain.handle("llm:list-models", async (): Promise<ModelInfo[]> => {
+  ipcMain.handle("app:get-version", (): string => {
+    return app.getVersion();
+  });
+
+  ipcMain.handle("model:list", async (): Promise<ModelInfo[]> => {
     // The model list is sourced entirely from the providers configured in
     // `.pi/agent` (project-local, then global) -- no hardcoded placeholder
     // models. If the user hasn't saved their own settings yet, the model
@@ -62,13 +66,13 @@ export function registerIpcHandlers(
     return models;
   });
 
-  ipcMain.handle("llm:start-chat", async (_event, rawRequest: unknown) => {
+  ipcMain.handle("chat:start", async (_event, rawRequest: unknown) => {
     const request = startChatRequestSchema.parse(rawRequest);
     const requestId = await chatService.startChat(request);
     return { requestId };
   });
 
-  ipcMain.handle("llm:cancel-chat", async (_event, requestId: string) => {
+  ipcMain.handle("chat:cancel", async (_event, requestId: string) => {
     chatService.cancel(requestId);
   });
 

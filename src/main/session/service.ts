@@ -1,5 +1,5 @@
-import { loadAgentCore, loadAgentCoreNode, type AgentCoreLoaders } from "./agent-core";
-import { projectSessionRecord, projectSessionSummary } from "./session-projection";
+import { loadAgentCore, loadAgentCoreNode, type AgentCoreLoaders } from "../agent/core";
+import { projectSessionRecord, projectSessionSummary } from "./projection";
 import type { SessionRecord, SessionSummary } from "../../shared/events";
 
 /**

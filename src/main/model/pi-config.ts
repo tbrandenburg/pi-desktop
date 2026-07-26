@@ -6,7 +6,7 @@ import {
   type AppSettingsProviderInput,
   type ModelsLoaders,
   type ModelsRegistry,
-} from "./models";
+} from "./registry";
 
 export interface ResolvedPiDefault {
   apiKey: string;

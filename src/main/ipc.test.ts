@@ -4,12 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import { registerIpcHandlers } from "./ipc";
-import { realAgentCoreLoaders } from "./llm/test-support/real-agent-core-loaders";
+import { realAgentCoreLoaders } from "./agent/test-support/real-agent-core-loaders";
 
 // This suite must be hermetic regardless of what the machine's real
 // ~/.pi/agent config happens to contain, so .pi resolution is mocked and
 // tested separately in pi-config.test.ts.
-vi.mock("./llm/pi-config", () => ({
+vi.mock("./model/pi-config", () => ({
   resolvePiDefault: vi.fn(() => Promise.resolve(null)),
   listConfiguredModels: vi.fn(() => Promise.resolve([])),
 }));
@@ -41,6 +41,9 @@ vi.mock("electron", () => {
     (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
   >();
   return {
+    app: {
+      getVersion: () => "9.9.9-test",
+    },
     ipcMain: {
       handle: (
         channel: string,
@@ -134,7 +137,7 @@ describe("IPC settings round-trip integration", () => {
     ).rejects.toThrow();
 
     await expect(
-      invoke("llm:start-chat", {
+      invoke("chat:start", {
         conversationId: "",
         model: "gpt-4o",
         messages: [],
@@ -142,19 +145,25 @@ describe("IPC settings round-trip integration", () => {
     ).rejects.toThrow();
   });
 
+  it("returns the real Electron app version through the app:get-version handler", async () => {
+    const version = await invoke("app:get-version");
+    expect(version).toBe("9.9.9-test");
+    expect(typeof version).toBe("string");
+  });
+
   it("returns an empty model list when nothing is configured, rather than a fake placeholder model", async () => {
-    const models = await invoke("llm:list-models");
+    const models = await invoke("model:list");
     expect(models).toEqual([]);
   });
 
   it("returns models sourced from configured .pi providers, with the resolved default first", async () => {
-    const { listConfiguredModels } = await import("./llm/pi-config");
+    const { listConfiguredModels } = await import("./model/pi-config");
     vi.mocked(listConfiguredModels).mockResolvedValue([
       { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
       { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
     ]);
 
-    const models = await invoke("llm:list-models");
+    const models = await invoke("model:list");
 
     expect(models).toEqual([
       { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
@@ -171,7 +180,7 @@ describe("IPC settings round-trip integration", () => {
     // The reordering must match against `piDefault.label` (qualified), not
     // `piDefault.model` (bare) -- a bare-vs-qualified mismatch here would
     // silently disable the "put the current default first" behavior.
-    const { listConfiguredModels, resolvePiDefault } = await import("./llm/pi-config");
+    const { listConfiguredModels, resolvePiDefault } = await import("./model/pi-config");
     vi.mocked(listConfiguredModels).mockResolvedValue([
       { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
       { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
@@ -183,7 +192,7 @@ describe("IPC settings round-trip integration", () => {
       label: "llm7/minimax-m2.7",
     });
 
-    const models = await invoke("llm:list-models");
+    const models = await invoke("model:list");
 
     expect(models).toEqual([
       { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
@@ -196,9 +205,9 @@ describe("IPC settings round-trip integration", () => {
 
   it("cancels an unknown request id through the IPC boundary without throwing", async () => {
     // ChatService.cancel() is a no-op for unknown/completed request ids; this
-    // verifies the llm:cancel-chat handler wires through to it correctly
+    // verifies the chat:cancel handler wires through to it correctly
     // instead of only testing ChatService directly (see chat-service.test.ts).
-    await expect(invoke("llm:cancel-chat", "no-such-request")).resolves.toBeUndefined();
+    await expect(invoke("chat:cancel", "no-such-request")).resolves.toBeUndefined();
   });
 
   it("lists, gets, and deletes real cwd-scoped sessions through the IPC boundary", async () => {
