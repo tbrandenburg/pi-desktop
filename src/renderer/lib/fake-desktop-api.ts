@@ -1,4 +1,4 @@
-import type { DesktopLLMApi, SessionRecord } from "../../shared/events";
+import type { DesktopAgentApi, SessionRecord } from "../../shared/events";
 
 /**
  * Reads the `?fakeModels=` query param from the current browser URL to force
@@ -19,7 +19,7 @@ function fakeModelsOverride(): "empty" | null {
  * Never used inside the packaged app: Electron's preload script always
  * injects the real `window.desktopApi` before any renderer script runs.
  */
-export function createFakeDesktopApi(): DesktopLLMApi {
+export function createFakeDesktopApi(): DesktopAgentApi {
   const sessions = new Map<string, SessionRecord>();
   let listener: ((event: import("../../shared/events").ChatEvent) => void) | null = null;
   let workspaceDir = "/home/fake-user";

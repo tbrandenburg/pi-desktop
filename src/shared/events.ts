@@ -61,7 +61,7 @@ export type ChatEvent =
   | { type: "completed"; requestId: string }
   | { type: "error"; requestId: string; message: string };
 
-export interface DesktopLLMApi {
+export interface DesktopAgentApi {
   listModels(): Promise<ModelInfo[]>;
   startChat(request: StartChatRequest): Promise<{ requestId: string }>;
   cancelChat(requestId: string): Promise<void>;

@@ -1,8 +1,8 @@
-import type { DesktopLLMApi } from "../shared/events";
+import type { DesktopAgentApi } from "../shared/events";
 
 declare global {
   interface Window {
-    desktopApi: DesktopLLMApi;
+    desktopApi: DesktopAgentApi;
   }
 }
 
