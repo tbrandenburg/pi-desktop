@@ -27,6 +27,13 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
   );
 }
 
+const MARKDOWN_CLASSNAME = [
+  "prose prose-sm prose-invert max-w-none",
+  "prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold",
+  "first:prose-headings:mt-0 prose-p:my-2 prose-ul:my-2 prose-ol:my-2",
+  "prose-pre:bg-transparent prose-pre:p-0",
+].join(" ");
+
 function CodeBlock({ language, value }: { language: string; value: string }) {
   return (
     <div className="my-2 overflow-hidden rounded-lg border border-surface-border">
@@ -66,7 +73,7 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
       >
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
-          className="prose prose-sm prose-invert max-w-none prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold first:prose-headings:mt-0 prose-ul:my-2 prose-ol:my-2 prose-pre:bg-transparent prose-pre:p-0"
+          className={MARKDOWN_CLASSNAME}
           components={{
             code(props) {
               const { className, children } = props;
