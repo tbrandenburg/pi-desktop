@@ -32,6 +32,11 @@
 > while things settle. We're optimistic about where this is headed (and
 > having a lot of geeky fun building it) — feedback and issues are very
 > welcome, just don't wire it into anything mission-critical yet.
+>
+> 💬 **Feedback very welcome.** Drop rough edges, missing pieces, or "this
+> almost worked for me" moments in the
+> [feedback thread](https://github.com/tbrandenburg/pi-desktop/discussions/80) —
+> no need for a formal bug report if it's not quite one yet.
 
 Pi Desktop is a downloadable, double-click desktop app that runs a real
 **agent** — not just a chat box — on top of
