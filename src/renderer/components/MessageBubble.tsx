@@ -28,7 +28,10 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 }
 
 const MARKDOWN_CLASSNAME = [
-  "prose prose-sm prose-invert max-w-none",
+  // prose-invert only in dark mode — the `dark:` variant is wired to our
+  // data-theme attribute in styles.css, so prose (code/links/headings)
+  // follows the theme toggle instead of forcing the dark palette everywhere.
+  "prose prose-sm dark:prose-invert max-w-none",
   "prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-semibold",
   "first:prose-headings:mt-0 prose-p:my-2 prose-ul:my-2 prose-ol:my-2",
   "prose-pre:bg-transparent prose-pre:p-0",
@@ -83,7 +86,7 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
                 return <CodeBlock language={match[1]} value={value} />;
               }
               return (
-                <code className="rounded bg-white/10 px-1 py-0.5 text-[13px]">
+                <code className="rounded bg-surface-hover px-1 py-0.5 text-[13px]">
                   {value}
                 </code>
               );

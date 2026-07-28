@@ -1,19 +1,73 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
 
-@theme {
-  --color-surface: #0f0f11;
-  --color-surface-panel: #17171b;
+/* Drive Tailwind's `dark:` variant (and thus `dark:prose-invert`) off our
+ * data-theme attribute instead of prefers-color-scheme, so markdown/prose
+ * text follows the in-app toggle. Dark is the implicit default (no attribute
+ * or data-theme="dark"); light is the explicit opt-out. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *, :root:not([data-theme]) *));
+
+/* Theme tokens live on :root (dark is the default so it doubles as the
+ * fallback when no data-theme is set) and are overridden under
+ * [data-theme="light"]. `@theme inline` below maps them to Tailwind
+ * color utilities, so every existing bg-surface / border-surface-border
+ * class re-resolves automatically when the attribute flips — no
+ * per-component className changes needed. */
+:root,
+:root[data-theme='dark'] {
+  --surface: #0f0f11;
+  --surface-panel: #17171b;
+  --surface-border: rgba(255, 255, 255, 0.08);
+  --surface-border-strong: rgba(255, 255, 255, 0.16);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --surface-hover-strong: rgba(255, 255, 255, 0.12);
+  --accent: #7c9cff;
+  --body-bg: #0f0f11;
+  --body-text: #f3f3f1;
+  --foreground: #ffffff;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+}
+
+:root[data-theme='light'] {
+  --surface: #fafafa;
+  --surface-panel: #ffffff;
+  --surface-border: rgba(0, 0, 0, 0.1);
+  --surface-border-strong: rgba(0, 0, 0, 0.18);
+  --surface-hover: rgba(0, 0, 0, 0.05);
+  --surface-hover-strong: rgba(0, 0, 0, 0.1);
+  --accent: #4560d8;
+  --body-bg: #fafafa;
+  --body-text: #1a1a1c;
+  --foreground: #1a1a1c;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.18);
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-panel: var(--surface-panel);
   /* Stronger divider for higher-contrast outlines/active states
    * (mirrors omnigent's --border-strong two-tier border system). */
-  --color-surface-border: rgba(255, 255, 255, 0.08);
-  --color-surface-border-strong: rgba(255, 255, 255, 0.16);
+  --color-surface-border: var(--surface-border);
+  --color-surface-border-strong: var(--surface-border-strong);
   /* One shared hover/active wash instead of ad-hoc bg-white/5,
-   * bg-white/8, bg-white/10 scattered per component. */
-  --color-surface-hover: rgba(255, 255, 255, 0.06);
+   * bg-white/8, bg-white/10 scattered per component. surface-hover-strong
+   * is the pressed/active-row variant (formerly bg-white/10..20). */
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-hover-strong: var(--surface-hover-strong);
 
-  --color-accent: #7c9cff;
+  --color-accent: var(--accent);
+  --color-foreground: var(--foreground);
+  /* The renderer expresses foreground *text* as text-white / text-white/NN,
+   * so we redefine what "white" resolves to per-theme: it stays #fff in dark
+   * and becomes the near-black foreground in light, flipping every text-white*
+   * utility with zero component changes. NOTE: this ONLY works because the
+   * three former background misuses of white (bg-white/10..20 washes in
+   * Composer/Sidebar/MessageBubble) were migrated to surface-hover[-strong];
+   * a bg-white/* here would otherwise invert into a dark blob on light. */
+  --color-white: var(--foreground);
+}
 
+@theme {
   /* Single base radius, everything else derived — swap one value to
    * restyle every rounded corner in the app (omnigent's --radius-*
    * scale pattern). */
@@ -41,8 +95,9 @@ body,
 
 body {
   margin: 0;
-  background-color: #0f0f11;
-  color: #f3f3f1;
+  background-color: var(--body-bg);
+  color: var(--body-text);
+  transition: background-color 0.2s var(--ease-brand), color 0.2s var(--ease-brand);
   /* Native OS UI font, no webfont load — matches the sans stack in
    * tailwind.config.js so body text and Tailwind's font-sans utility
    * always agree. */
@@ -54,7 +109,7 @@ body {
   width: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
@@ -72,7 +127,7 @@ body {
   display: inline-block;
   width: 0.5em;
   height: 1em;
-  background-color: #7c9cff;
+  background-color: var(--accent);
   vertical-align: text-bottom;
   animation: blink-cursor 1s steps(1) infinite;
 }

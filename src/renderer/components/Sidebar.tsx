@@ -72,7 +72,7 @@ export function Sidebar() {
                 key={session.id}
                 className={`group flex items-center rounded-lg text-xs transition ${
                   session.id === conversationId
-                    ? "bg-white/10 text-white"
+                    ? "bg-surface-hover-strong text-white"
                     : "text-white/60 hover:bg-surface-hover hover:text-white/80"
                 }`}
               >

@@ -38,7 +38,7 @@ export function Composer() {
           <button
             type="button"
             onClick={() => void stopGeneration()}
-            className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+            className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-surface-hover text-white transition hover:bg-surface-hover-strong"
             title="Stop generation"
           >
             <Square size={14} />
