@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an idea or improvement for Pi Desktop.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Pi Desktop deliberately favors a small, bounded feature set — see
+        the "Philosophy" section in the README ("grow by hardening, not by
+        adding"). Please explain the underlying problem, not just the
+        solution, so it can be weighed against that.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What can't you do today, or what's painful right now?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Your idea for how this could work. Alternatives you considered are welcome too.
+    validations:
+      required: true
+  - type: checkboxes
+    id: philosophy
+    attributes:
+      label: Scope check
+      options:
+        - label: >
+            I've read the README's "Philosophy" section and believe this
+            fits the project's deliberately small, hardened scope (rather
+            than adding a large new surface area).
+          required: true
+</content>

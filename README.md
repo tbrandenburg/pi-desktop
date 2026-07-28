@@ -218,7 +218,9 @@ app and lessons learned while building this project.
 ## Contributing
 
 Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
-dev setup, pre-PR checks, and code/testing guidelines.
+dev setup, pre-PR checks, and code/testing guidelines. Found a bug or have an
+idea? [Open an issue](https://github.com/tbrandenburg/pi-desktop/issues/new/choose)
+using the bug report or feature request template.
 
 ## Acknowledgments
 

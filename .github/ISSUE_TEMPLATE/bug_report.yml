@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in Pi Desktop isn't working as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Pi Desktop is a young,
+        fast-moving project — the more precise the report, the faster it
+        gets fixed.
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, exactly?
+      placeholder: |
+        1. Launch the app
+        2. Select model X
+        3. Send message "..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include any error text, stack traces, or screenshots.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did this happen?
+      description: >
+        This matters a lot for this project — `npm run dev` and `vitest`
+        both skip Node/Electron's real module resolution and asar
+        packaging, so some bugs only reproduce in the packaged app.
+      options:
+        - "npm run dev (dev mode)"
+        - "Packaged app (AppImage / installer)"
+        - "Both"
+        - "Not sure"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Pi Desktop version
+      description: From the app, or the release/AppImage filename.
+    validations:
+      required: false
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      placeholder: e.g. Ubuntu 24.04, Windows 11 23H2
+    validations:
+      required: true
+</content>

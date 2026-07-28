@@ -70,7 +70,14 @@ Use concise, conventional-commit-style messages (`feat: …`, `fix: …`,
 
 ## Reporting issues
 
-Open a [GitHub issue](https://github.com/tbrandenburg/pi-desktop/issues) with
-steps to reproduce, expected vs. actual behavior, and — for anything
+Open a [new issue](https://github.com/tbrandenburg/pi-desktop/issues/new/choose)
+using the bug report or feature request template — they ask for steps to
+reproduce, expected vs. actual behavior, and — for anything
 packaging-related — whether you saw it in `npm run dev`, the packaged app, or
 both.
+
+## Opening a PR
+
+Use the PR template's checklist (pre-filled automatically). If your PR
+resolves an issue, reference it with `Closes #N` / `Fixes #N` — a bare `#N`
+mention does **not** auto-close the issue on merge.
