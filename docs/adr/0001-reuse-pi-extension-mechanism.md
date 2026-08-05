@@ -216,6 +216,23 @@ package statically — the established pattern
 packaged `asar` layout is unproven and **must** be validated against the real
 AppImage (see §4.2).
 
+> **Resolved (2026-08-05 spike, evidence-based):** jiti-in-asar is **not a
+> blocker**. A real spike packed `@earendil-works/pi-coding-agent` plus a
+> trivial `.ts` extension into a genuine `.asar` archive and loaded it via
+> `ELECTRON_RUN_AS_NODE=1 electron` using the repo's existing
+> `nativeDynamicImport` trick (`native-import.ts`) — the extension was
+> transpiled and loaded successfully directly from the asar virtual path, no
+> extraction needed (`result.extensions.length === 1`, `errors: []`).
+> Inspection of `dist/core/extensions/loader.js` shows jiti runs with
+> `moduleCache: false` (no disk-cache writes against the read-only asar) and
+> is inlined into `pi-coding-agent`'s own bundle (no separate `jiti`
+> package/native-binary resolution step) — both of the realistic asar traps
+> are avoided by construction, not by luck. Recommendation: downgrade this
+> from "unproven, must validate" to "validated, low risk"; still re-confirm
+> once via a real `electron-builder` AppImage + `scripts/cdp-drive.ts` before
+> Phase 1 ships, per the repo's standing "always validate the real artifact"
+> rule — but no blocking risk remains for the approval decision itself.
+
 ### 3.2 The new runtime (replacing AgentHarness)
 
 ```ts
@@ -311,6 +328,30 @@ host, not bundled per-package (the ecosystem's `peerDependencies: "*"`
 convention). `pi-tui` is only needed by TUI extensions, which we run headless —
 so we do not ship it and reject/skip TUI-only extensions.
 
+> **Resolved (2026-08-05 spike, evidence-based):** researched and
+> source-inspected 16 real `pi-package`-keyword npm packages (8 via direct
+> `npm pack` + source read, not just README claims) to name the actual Phase 1
+> candidate. Finding: **zero** of the 16 pass a strict "`registerTool` and
+> nothing else, zero hooks" reading — this empirically reproduces the ADR's
+> own §1.4 statistic (~2%/1-of-43) rather than contradicting it. The closest
+> candidate, `pi-deepseek-search@1.0.15`, has exactly one `registerTool` call
+> plus a single benign `pi.on("session_start")` re-registration hook, no
+> `registerCommand`/`registerProvider`/`ctx.ui.*` — but its `execute()` makes
+> an unaudited outbound `fetch()` to a third-party endpoint carrying the
+> user's API key, which is real, unreviewed third-party code with full system
+> access shipping inside the signed desktop binary (§3.7's warning applies
+> directly), and it's provider-locked to DeepSeek only.
+>
+> **Recommendation: do not bundle a third-party package for Phase 1.** Instead,
+> package pi-desktop's **own** existing `createReadOnlyTools` (already noted in
+> §3.3 as convertible to `ToolDefinition`s) as a first-party local `pi-package`
+> under `resources/pi-packages/`. This proves the build-time
+> bundling/`extraResources`/discovery mechanism end-to-end with **zero**
+> unaudited third-party code risk, and defers the "bundle a real third-party
+> package" milestone until either (a) the ecosystem produces a genuinely
+> strict tool-only package, or (b) Phase 2's UI bridge lands and a
+> hook/command-using package becomes viable to bundle with a proper review.
+
 ### 3.6 Runtime extension (user installs later)
 
 Expose `DefaultPackageManager` over IPC via the `AGENTS.md` three-file recipe
@@ -323,6 +364,33 @@ user's global `~/.pi/agent`, never next to the portable exe). Update
 Portable-exe caveat: npm-source install needs a network + writable dir + npm
 (via the `npmCommand` settings override or a bundled npm). Degradation ladder:
 local-path & git only → bundled npm → full npm on installers with system Node.
+
+> **Resolved (2026-08-05 spike, evidence-based):** verified Electron ships
+> **no npm at all** alongside its bundled Node (`node_modules/electron/dist/`
+> contains only the Electron binary/Chromium/V8 resources — `ELECTRON_RUN_AS_NODE`
+> reaches Node in-process, not a standalone install with npm next to it), so
+> "bundled npm" means vendoring the full npm CLI + its own dependency tree
+> ourselves, not a free reuse of something Electron already ships. A
+> lighter-weight alternative (fetch a package tarball directly from
+> `registry.npmjs.org` + extract, no third-party code) was prototyped and
+> broke on the **first** real package tested (`is-odd@3.0.1`, which declares
+> a transitive dependency on `is-number@^6.0.0`) — proving a bespoke fetcher
+> cannot substitute for real semver-range resolution/hoisting/dedup; it would
+> mean reimplementing npm's resolver core, not a small shortcut.
+>
+> **Recommendation: ship only the first ladder tier — local-path & git —
+> for the first Phase 3 release.** It needs zero new vendored dependencies,
+> zero registry-availability/rate-limit dependency at runtime, and lets the
+> mandatory §3.7 trust/consent gate be built and validated against the
+> smallest possible install surface (a git URL + pinned ref) before ever
+> adding npm's much larger arbitrary-code + transitive-dependency attack
+> surface. "Full npm on installers with system Node" (ladder tier 3) is moot
+> for now anyway, since `AGENTS.md` rule #6 already defers Windows/installer
+> packaging. Whether "bundled npm" (tier 2) is ever worth building at all is
+> a genuinely open **product** question (real user demand for npm-registry
+> `pi-package` installs vs. git-hosted ones) that this research cannot
+> settle from the codebase alone — revisit only if real demand surfaces
+> after tier 1 ships.
 
 ### 3.7 Security / trust (non-negotiable before Phase 3)
 
@@ -364,6 +432,32 @@ curated bundles are vetted by us but still listed.
   in the packaged app" — end-to-end via `scripts/cdp-drive.ts`.
 - **Version lockstep:** `pi-coding-agent`/`pi-ai`/`pi-agent-core` must move
   together (shared `0.x` line). Bumps are coordinated + re-validated.
+
+> **Resolved (2026-08-05 spike, evidence-based):** the repo has **no**
+> Dependabot/Renovate config today (checked `.github/`) — dependency bumps are
+> currently 100% manual (`make version-patch` etc.), and `pi-coding-agent`
+> isn't a dependency yet (only `pi-ai`/`pi-agent-core`, both already
+> `^0.81.1`, confirming today's baseline is in fact in lockstep). Introducing
+> a bot solely for this 3-package constraint would be disproportionate, and
+> would only guard *automated* bumps — not a manual `npm install
+> pi-ai@newer` alone, the more likely real drift path for a 0.x-line SDK.
+>
+> **Recommendation:** a tiny CI script,
+> `scripts/check-pi-lockstep.mjs` — parses `package.json`, extracts
+> `major.minor` for each of `@earendil-works/pi-ai`,
+> `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent` that are
+> present, and fails if more than one distinct `major.minor` line exists —
+> wired into `ci.yml` as one extra step after `npm ci`. This matches the
+> repo's own established philosophy (`AGENTS.md`: prefer the tool already
+> running as the drift guard over a redundant layered check). Verified for
+> real: run against the current `package.json` → passes (both on `0.81.x`);
+> simulated drift (`pi-agent-core` rewritten to `^0.75.0`) → correctly exits 1
+> with the mismatching lines reported, then reverted. If Dependabot is ever
+> introduced for the repo generally, its `groups:` config
+> (`groups: { pi-sdk: { patterns: ["@earendil-works/pi-*"] } }`, syntax
+> confirmed against GitHub's docs) is a worthwhile complement — grouping any
+> bot-proposed bump of the three into one PR — but not a replacement for the
+> CI check, since it only constrains Dependabot's own PRs.
 - **Arbitrary code execution** (§3.7): Phase 3 must not ship without the trust
   gate.
 
