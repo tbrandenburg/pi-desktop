@@ -7,8 +7,8 @@ SHELL := /bin/bash
 VERSION = $(shell node -p "require('./package.json').version")
 
 .PHONY: help install run stop test lint check audit build build-renderer build-main clean \
-        dist dist-linux dist-win pack \
-        run-bundled run-linux run-win \
+        dist dist-linux dist-win dist-mac pack \
+        run-bundled run-linux run-win run-mac \
         version-patch version-minor version-major release publish \
         release-patch release-minor release-major
 
@@ -27,12 +27,16 @@ help:
 	@echo "  make dist-linux  Build and package Linux AppImage"
 	@echo "  make dist-win    Build and package Windows installer (nsis + portable)"
 	@echo "                   Requires 'wine' when cross-building from Linux."
+	@echo "  make dist-mac    Build and package macOS dmg + zip (universal, unsigned)"
+	@echo "                   Must run on real macOS hardware (no cross-build path)."
+	@echo "                   Unsigned: end users must right-click > Open past Gatekeeper."
 	@echo "  make clean       Remove build artifacts (dist-*, release, node_modules)"
 	@echo "  make run-bundled Run the already-built app for the current host platform"
 	@echo "                   (best-effort: picks whatever's newest in release/)"
 	@echo "  make run-linux   Run the built Linux AppImage directly"
 	@echo "  make run-win     Run the built Windows app (native .exe, or via"
 	@echo "                   'wine' when cross-running from Linux/macOS)"
+	@echo "  make run-mac     Run the built macOS app (macOS only)"
 	@echo "  make version-patch/-minor/-major"
 	@echo "                   Bump version (package.json + package-lock.json),"
 	@echo "                   commit 'chore(release): vX.Y.Z' and git tag it"
@@ -127,6 +131,16 @@ dist-win: build
 	}
 	npx electron-builder --win nsis portable --x64
 
+## Build macOS dmg + zip (universal, unsigned). Must run on real macOS
+## hardware -- unlike Windows/wine, there is no cross-build path for mac.
+dist-mac: build
+	@[ "$$(uname -s)" = "Darwin" ] || { \
+		echo "error: 'make dist-mac' must run on real macOS hardware (uname -s != Darwin)."; \
+		echo "This target has no cross-build path (unlike dist-win via wine)."; \
+		exit 1; \
+	}
+	npx electron-builder --mac dmg zip
+
 ## Remove build artifacts
 clean:
 	rm -rf dist-main dist-renderer release
@@ -145,8 +159,9 @@ run-bundled:
 	@case "$$(uname -s)" in \
 		Linux*) $(MAKE) run-linux ;; \
 		MINGW*|MSYS*|CYGWIN*) $(MAKE) run-win ;; \
+		Darwin*) $(MAKE) run-mac ;; \
 		*) echo "error: unsupported host platform for 'make run-bundled': $$(uname -s)"; \
-		   echo "Run 'make run-linux' or 'make run-win' explicitly instead."; \
+		   echo "Run 'make run-linux', 'make run-win', or 'make run-mac' explicitly instead."; \
 		   exit 1 ;; \
 	esac
 
@@ -196,6 +211,20 @@ run-win:
 			echo "Running via wine: $$exe"; \
 			wine "$$exe" ;; \
 	esac
+
+## Run the built macOS app (make dist-mac must have run first, on macOS).
+run-mac:
+	@[ "$$(uname -s)" = "Darwin" ] || { \
+		echo "error: 'make run-mac' requires macOS ('open' is macOS-only)."; \
+		exit 1; \
+	}
+	@app=$$(ls -td release/mac-universal/*.app release/mac/*.app 2>/dev/null | head -n1); \
+	if [ -z "$$app" ]; then \
+		echo "error: no .app found under release/. Run 'make dist-mac' first."; \
+		exit 1; \
+	fi; \
+	echo "Running: $$app"; \
+	open "$$app"
 
 ## --- Versioning & release -------------------------------------------------
 ##
