@@ -3,7 +3,9 @@ name: Release
 # Builds and attaches portable app bundles to the GitHub release matching a
 # pushed version tag (e.g. `v1.2.3`, created by `make version-patch/-minor/
 # -major`). NSIS installer is explicitly out of scope here -- it stays a
-# local/manual `make dist-win` concern (see issue #47).
+# local/manual `make dist-win` concern (see issue #47). The macOS dmg/zip
+# build is unsigned and unnotarized (identity: null in electron-builder.yml)
+# and needs no extra secrets -- see issue #81.
 #
 # This is independent of `make publish`, which creates the release shell
 # (via `gh release create --generate-notes`) with notes but no artifacts.
@@ -28,6 +30,8 @@ jobs:
             build-cmd: npx electron-builder --linux AppImage --publish always
           - os: windows-latest
             build-cmd: npx electron-builder --win portable --publish always
+          - os: macos-latest
+            build-cmd: npx electron-builder --mac dmg zip --publish always
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
