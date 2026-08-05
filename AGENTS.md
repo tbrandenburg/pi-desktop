@@ -890,3 +890,29 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   `mergeStateStatus` went from `BLOCKED` to `CLEAN`/mergeable once that
   check went green, then merged with a normal `gh pr merge` (no `--admin`
   needed) — proving the fix, not just the API response.
+- 2026-08-05: #81's `electron-builder.yml` config (`mac.target[].arch:
+  [universal]`) looked correct and passed every local YAML-parse/lint check,
+  but the very first real `v0.3.7` tag push silently built and published
+  `Pi-Desktop-Demo-0.3.7-mac-arm64.dmg` — arm64-only, not universal.
+  Root cause: electron-builder's CLI target shorthand (`--mac dmg zip`, used
+  by the Makefile's `dist-mac`, `package.json`'s `dist:mac`, and
+  `release.yml`'s macos-latest `build-cmd`) silently overrides/ignores the
+  yml's per-target `arch:` config and defaults to the host runner's own arch
+  (GitHub's `macos-latest` is now an arm64 runner) — confirmed against
+  electron-builder's own docs (`electron-builder --mac --universal` is a
+  separate, required CLI flag). No local check can catch this: `npm run
+  build`, YAML parsing, and even `npx electron-builder --mac dmg zip --help`
+  all look fine: the divergence only shows up in the actual job log's
+  `packaging platform=darwin arch=...` line and in the real released asset's
+  filename. Fixed by adding a bare `--universal` flag alongside the target
+  list in all three invocations, then re-verified with a second real tag
+  push (`v0.3.8`) showing `packaging platform=darwin arch=universal` in the
+  job log and `Pi-Desktop-Demo-0.3.8-mac-universal.dmg` (~237MB, roughly 2x
+  the prior arm64-only ~140MB build) as the actual released asset. Lesson:
+  for any packaging/build tool where CLI flags and config-file settings can
+  both specify the same option (target arch, output format, etc.), do not
+  assume the config file always applies just because CLI target names also
+  appear — verify by reading the actual build tool's own log output line
+  that states the resolved value (not just "job succeeded"), and only trust
+  a real tag-triggered CI run's actual artifact, never a design review of
+  the yml alone.
