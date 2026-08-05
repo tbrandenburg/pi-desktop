@@ -868,6 +868,21 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   `check-and-test` run was green — do not use `--admin` to bypass a
   genuinely failing/red check, only a protection rule that is provably
   misconfigured/stale relative to the actual workflow. Filed as a
-  follow-up issue rather than silently fixing the branch protection
-  config itself (repo-admin-level settings change, out of scope for a
-  code-only task).
+   follow-up issue rather than silently fixing the branch protection
+   config itself (repo-admin-level settings change, out of scope for a
+   code-only task).
+- 2026-08-05: Issue #87 (the `"CI"` vs `check-and-test` branch protection
+  mismatch above) was fixable directly, once confirmed the acting account
+  has real admin rights (`gh api repos/<owner>/<repo> --jq
+  '.permissions.admin'` returned `true`): `gh api --method PATCH
+  repos/<owner>/<repo>/branches/main/protection/required_status_checks -F
+  strict=true -f 'checks[][context]=check-and-test'` retargets the required
+  context without touching any other protection setting. Gotcha: `-f
+  strict=true` sends the string `"true"` and GitHub rejects it
+  (`'properties/strict', "true" is not a boolean`) — booleans must go
+  through `-F` (typed), not `-f` (always-string), when using `gh api`.
+  Verified end-to-end with a real disposable PR: opened it, watched
+  `gh pr checks` report the job as `check-and-test`, confirmed
+  `mergeStateStatus` went from `BLOCKED` to `CLEAN`/mergeable once that
+  check went green, then merged with a normal `gh pr merge` (no `--admin`
+  needed) — proving the fix, not just the API response.
