@@ -1,6 +1,6 @@
 # ADR 0001: Adopt pi-coding-agent's AgentSession as pi-desktop's Agent-Runtime Foundation (staged rollout for the pi-package extension ecosystem)
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-08-05, maintainer approval recorded on issue #77)
 - **Date:** 2026-07-26
 - **Deciders:** pi-desktop maintainers
 - **Supersedes:** — (this replaces an earlier draft of ADR 0001 that proposed a
