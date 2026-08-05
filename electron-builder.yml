@@ -44,6 +44,16 @@ linux:
       arch:
         - x64
 
+mac:
+  icon: assets/icon.icns
+  category: public.app-category.developer-tools
+  identity: null
+  target:
+    - target: dmg
+      arch: [universal]
+    - target: zip
+      arch: [universal]
+
 win:
   icon: assets/icon.png
   target:
