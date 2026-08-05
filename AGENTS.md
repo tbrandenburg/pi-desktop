@@ -56,7 +56,11 @@ exists.
    all been verified to work fine natively on Windows — see STATUS.md Milestone 7.
    Only the NSIS/portable installer targets need Windows Developer Mode enabled,
    because electron-builder's `winCodeSign` cache extraction requires symlink
-   privileges that a stock non-admin Windows user/session doesn't have).
+   privileges that a stock non-admin Windows user/session doesn't have). macOS
+   is also a supported CI-built target: unsigned, universal (x64+arm64) dmg +
+   zip, built via GitHub Actions' `macos-latest` runner — no local Mac
+   hardware is required for CI; a Mac is only useful for optional manual
+   verification of the resulting `.dmg`.
 7. Do not begin `pi-agent-core` / tool integration until the direct `pi-ai` streaming chat
    works end-to-end in dev mode.
 8. Keep STATUS.md updated with completed milestones and blockers.
