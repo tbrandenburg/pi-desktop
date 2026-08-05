@@ -401,6 +401,23 @@ ships: an explicit consent/trust gate (reuse pi's `ProjectTrustStore`), plus a
 Settings-dialog listing of installed packages + source + remove. Build-time
 curated bundles are vetted by us but still listed.
 
+> **Clarified (2026-08-05, source-verified):** confirmed against the real
+> `pi-coding-agent` source (`dist/core/project-trust.js`,
+> `dist/core/trust-manager.js`) that upstream `pi` itself has **no**
+> capability-restriction sandbox (no network/filesystem allowlisting, no
+> per-package permission model) — its only mitigation is (a) a single binary
+> "trust this project, yes/no" consent gate before any extension in it runs,
+> and (b) the documented human recommendation to *"review source code before
+> installing third-party packages"*. pi-desktop's Phase 3 trust gate is
+> deliberately scoped to **match this exact model** (reuse `ProjectTrustStore`
+> as-is, one consent prompt, source-visible package list) rather than invent
+> a stricter capability-sandboxing layer pi itself doesn't have — staying at
+> parity with the upstream CLI/TUI's actual security posture, not exceeding
+> or diverging from it. Any future desire for real sandboxing (e.g.
+> restricting network access per extension) would be new pi-desktop-specific
+> scope beyond what `pi` provides today, and should be raised and decided as
+> its own explicit ADR, not folded into this migration.
+
 ---
 
 ## 4. Consequences
