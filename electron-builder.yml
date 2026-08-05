@@ -44,6 +44,14 @@ linux:
       arch:
         - x64
 
+# NOTE: this file's per-target `arch: [universal]` below is silently ignored
+# whenever electron-builder is invoked with an explicit CLI target list (e.g.
+# `--mac dmg zip`), which defaults to the host runner's own arch instead
+# (confirmed on a real v0.3.7 GitHub Actions macos-latest arm64 runner --
+# see issue #94). All real mac build invocations (Makefile's `dist-mac`,
+# package.json's `dist:mac`, .github/workflows/release.yml's macos-latest
+# job) MUST also pass the separate `--universal` CLI flag, or this config's
+# `arch: [universal]` has no effect.
 mac:
   icon: assets/icon.icns
   category: public.app-category.developer-tools

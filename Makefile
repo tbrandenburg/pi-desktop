@@ -139,7 +139,7 @@ dist-mac: build
 		echo "This target has no cross-build path (unlike dist-win via wine)."; \
 		exit 1; \
 	}
-	npx electron-builder --mac dmg zip
+	npx electron-builder --mac dmg zip --universal
 
 ## Remove build artifacts
 clean:

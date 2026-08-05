@@ -31,7 +31,7 @@ jobs:
           - os: windows-latest
             build-cmd: npx electron-builder --win portable --publish always
           - os: macos-latest
-            build-cmd: npx electron-builder --mac dmg zip --publish always
+            build-cmd: npx electron-builder --mac dmg zip --universal --publish always
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
