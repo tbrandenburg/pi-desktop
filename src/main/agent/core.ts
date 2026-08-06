@@ -1,5 +1,4 @@
 import type {
-  AgentHarness as AgentHarnessType,
   JsonlSessionRepo as JsonlSessionRepoType,
   Session as SessionType,
 } from "@earendil-works/pi-agent-core";
@@ -14,7 +13,6 @@ import { nativeDynamicImport } from "../native-import";
 // explanation).
 
 export interface AgentCoreModule {
-  AgentHarness: typeof AgentHarnessType;
   JsonlSessionRepo: typeof JsonlSessionRepoType;
   Session: typeof SessionType;
 }
