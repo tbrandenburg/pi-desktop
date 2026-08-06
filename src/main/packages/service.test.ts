@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { PackageService, PackageTrustStore } from "./service";
 import { realCodingAgentLoaders } from "../agent/test-support/real-coding-agent-loaders";
+import { AgentRuntime } from "../agent/runtime";
 
 /**
  * Writes a real, tiny local pi-package to disk: a `package.json` with a
@@ -274,6 +275,69 @@ describe("PackageService (real DefaultPackageManager + real shared agentDir, thr
     // 5. Now genuinely loads and registers the real marker command.
     const commandsWhileTrusted = await discoveredCommandNames(trustedPaths);
     expect(commandsWhileTrusted).toContain(markerName);
+  });
+
+  it("issue #105 regression: an untrusted package's command never loads through AgentRuntime's REAL resource-loader wiring against the SAME shared agentDir it was installed into (not an isolated fixture agentDir) -- proves settings.json-configured packages don't bypass the trust gate", async () => {
+    const markerName = "issue-105-marker-cmd";
+    const source = writeFixturePackage(path.join(fixtureDir, "pkg-105"), markerName);
+    const service = makeService(async () => false);
+
+    // Installed but declined trust -- the package IS persisted into the
+    // real shared `settings.json` (same `agentDir` `AgentRuntime` uses for
+    // real chat turns, per #104), it just isn't in `trustedExtensionPaths()`.
+    const installed = await service.install(source);
+    expect(installed.trusted).toBe(false);
+    expect(await service.trustedExtensionPaths()).toEqual([]);
+
+    // Exercises the REAL, private `buildAdditionalPathsResourceLoader`
+    // method AgentRuntime.run() calls internally -- not a hand-rolled
+    // reconstruction of it -- fed the real `getTrustedPackagePaths`
+    // callback wired to this same `PackageService` instance, exactly as
+    // production `ipc.ts` wiring does. A harmless, command-free
+    // `piPackagesDir` fixture is passed (mirroring production's always-set
+    // bundled `read-only-tools` dir) purely so `additionalExtensionPaths`
+    // is non-empty and the method returns a real loader instead of
+    // `undefined` (its "nothing to add" short-circuit) -- it registers no
+    // commands itself, so it cannot affect this test's assertion.
+    const harmlessPiPackagesDir = writeFixturePackage(
+      path.join(fixtureDir, "harmless-pi-packages-dir"),
+      "harmless-unrelated-marker",
+    );
+    const runtime = new AgentRuntime(
+      realCodingAgentLoaders,
+      harmlessPiPackagesDir,
+      () => service.trustedExtensionPaths(),
+    );
+    const { DefaultResourceLoader, SettingsManager, getAgentDir } = await realCodingAgentLoaders.loadCodingAgent!();
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-pkg-105-cwd-"));
+    try {
+      // Proves this is genuinely the SAME shared agentDir the package was
+      // installed into (via the `PI_CODING_AGENT_DIR` env var set in
+      // `beforeEach`) -- not a decoupled/isolated one, which is exactly
+      // what hid this bug pre-fix (see `discoveredCommandNames`'s doc
+      // comment above).
+      expect(getAgentDir()).toBe(agentDir);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const loader = await (runtime as any).buildAdditionalPathsResourceLoader(
+        DefaultResourceLoader,
+        SettingsManager,
+        getAgentDir,
+        cwd,
+      );
+      const commandNames: string[] = [];
+      for (const extension of loader.getExtensions().extensions) {
+        for (const [name] of extension.commands) commandNames.push(name);
+      }
+
+      // Before the #105 fix (`noExtensions: true`), this package -- present
+      // in the shared `settings.json` from `service.install()` above --
+      // would load unconditionally via `resolve()`'s own
+      // `enabledExtensions`, regardless of the declined trust decision.
+      expect(commandNames).not.toContain(markerName);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it("remove deletes the configured package so it no longer appears in list() or trustedExtensionPaths()", async () => {
