@@ -52,7 +52,7 @@ describe("loadAgentCore / loadAgentCoreNode default loaders", () => {
     const { nativeDynamicImport } = await import("../native-import");
     const { loadAgentCore, loadAgentCoreNode } = await import("./core");
 
-    const fakeCoreModule = { AgentHarness: class {}, JsonlSessionRepo: class {}, Session: class {} } as never;
+    const fakeCoreModule = { JsonlSessionRepo: class {}, Session: class {} } as never;
     const fakeNodeModule = { NodeExecutionEnv: class {} } as never;
 
     const core = await loadAgentCore({ loadAgentCore: async () => fakeCoreModule });
