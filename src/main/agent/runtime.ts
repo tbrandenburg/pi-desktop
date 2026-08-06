@@ -3,19 +3,6 @@ import type { ExtensionUIContext, ModelRuntime, ResourceLoader, SessionManager }
 import type { ChatEvent, CommandInfo, StartChatRequest } from "../../shared/events";
 import { loadCodingAgent, type CodingAgentLoaders, type CodingAgentModule, type AgentSessionEvent } from "./coding-agent-loaders";
 
-// Only lists the event types `AgentRuntime.forward`'s switch statement
-// actually handles below -- everything else falls through to `default:
-// return` regardless of filter membership, so keep this set in sync with
-// that switch. `AgentSessionEvent` is a strict superset of the old
-// `AgentEvent` union (see ADR 0001 §1.5) -- "message_update" and
-// "tool_execution_start" pass through unchanged; only "agent_end" gained a
-// `willRetry` field the switch below doesn't need.
-const AGENT_SESSION_EVENT_TYPES = new Set<AgentSessionEvent["type"]>([
-  "message_update",
-  "tool_execution_start",
-  "agent_end",
-]);
-
 export interface AgentRuntimeRunArgs {
   requestId: string;
   request: StartChatRequest;
@@ -211,7 +198,7 @@ export class AgentRuntime {
     }
 
     const unsubscribe = session.subscribe((event) => {
-      if (AGENT_SESSION_EVENT_TYPES.has(event.type)) this.forward(requestId, event, emit);
+      this.forward(requestId, event, emit);
     });
     const onAbort = () => {
       void session.abort();
@@ -318,6 +305,18 @@ export class AgentRuntime {
     return loader;
   }
 
+  /**
+   * `AgentSessionEvent` (`coding-agent-loaders.ts`) is a third-party union
+   * from `@earendil-works/pi-coding-agent`/`pi-agent-core` this app doesn't
+   * control (issue #111). Every branch below is an explicit, deliberate
+   * decision -- no-op branches are documented, not merely omitted -- and the
+   * `default` assigns to a `never`-typed variable so `tsc` fails to compile
+   * if a future pi-coding-agent upgrade grows the union with a member not
+   * yet triaged here, instead of silently falling through. This switch is
+   * now the single source of truth for which event types this app reacts
+   * to; the previous separate `AGENT_SESSION_EVENT_TYPES` allowlist Set
+   * (kept in sync purely by a doc comment) has been removed.
+   */
   private forward(requestId: string, event: AgentSessionEvent, emit: (event: ChatEvent) => void): void {
     switch (event.type) {
       case "message_update": {
@@ -349,8 +348,37 @@ export class AgentRuntime {
         }
         return;
       }
-      default:
+      // Deliberate no-ops: this app has no `ChatEvent` counterpart for these
+      // yet (no turn/message boundary UI, no tool-progress/end UI beyond the
+      // initial `tool-call`, no queue/compaction/retry/bash-streaming UI).
+      // Each is listed explicitly (rather than falling through to a bare
+      // `default`) so the exhaustiveness check below actually forces a
+      // decision the next time this union grows.
+      case "agent_start":
+      case "turn_start":
+      case "turn_end":
+      case "message_start":
+      case "message_end":
+      case "tool_execution_update":
+      case "tool_execution_end":
+      case "agent_settled":
+      case "queue_update":
+      case "compaction_start":
+      case "entry_appended":
+      case "session_info_changed":
+      case "thinking_level_changed":
+      case "compaction_end":
+      case "auto_retry_start":
+      case "auto_retry_end":
+      case "summarization_retry_scheduled":
+      case "summarization_retry_attempt_start":
+      case "summarization_retry_finished":
+      case "bash_execution_update":
         return;
+      default: {
+        const exhaustiveCheck: never = event;
+        return exhaustiveCheck;
+      }
     }
   }
 }
