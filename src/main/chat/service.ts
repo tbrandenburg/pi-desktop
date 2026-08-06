@@ -2,7 +2,15 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { BrowserWindow } from "electron";
 import type { ChatEvent, CommandInfo, ExtensionUIRequest, ExtensionUIResponse, StartChatRequest } from "../../shared/events";
-import { buildModelsRegistry, findModelById, qualifyModelId, APP_SETTINGS_PROVIDER_ID, type ModelsRegistry } from "../model/registry";
+import {
+  buildModelsRegistry,
+  findModelById,
+  qualifyModelId,
+  asBareModelId,
+  asQualifiedModelId,
+  APP_SETTINGS_PROVIDER_ID,
+  type ModelsRegistry,
+} from "../model/registry";
 import type { SettingsStore } from "../settings/store";
 import { AgentRuntime } from "../agent/runtime";
 import { IpcUIContextBridge } from "../agent/ui-context";
@@ -120,8 +128,11 @@ export class ChatService {
       // when the renderer somehow didn't send one) is always a *bare* model
       // id scoped to the app's own single-slot provider, so it must be
       // qualified before `findModelById` can resolve it.
-      const modelId =
-        request.model || (settings.model && qualifyModelId(APP_SETTINGS_PROVIDER_ID, settings.model));
+      const modelId = request.model
+        ? asQualifiedModelId(request.model)
+        : settings.model
+          ? qualifyModelId(APP_SETTINGS_PROVIDER_ID, asBareModelId(settings.model))
+          : undefined;
       if (!modelId) {
         this.emit({
           type: "error",
