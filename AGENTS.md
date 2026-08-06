@@ -45,7 +45,7 @@ exists.
 
 1. Do not change the architecture: Electron + React + Vite + pi-ai (+ optional pi-agent-core).
 2. Do not introduce Tauri, Rust, Next.js, or a separate server process.
-3. Keep all Pi imports (`@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`) inside `src/main/agent` and `src/main/model` (formerly `src/main/llm`, re-homed by domain in #59).
+3. Keep all Pi imports (`@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent` — approved by ADR 0001, see `docs/adr/0001-reuse-pi-extension-mechanism.md`) inside `src/main/agent` and `src/main/model` (formerly `src/main/llm`, re-homed by domain in #59).
 4. The React renderer must never import Node or Pi APIs directly. It talks only through
    the typed preload bridge (`src/preload`).
 5. Never place API keys in renderer state after saving. Settings round-trip through the
