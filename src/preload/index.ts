@@ -1,7 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   ChatEvent,
+  CommandInfo,
   DesktopAgentApi,
+  ExtensionUIRequest,
+  ExtensionUIResponse,
   ModelInfo,
   ProviderSettings,
   ProviderSettingsSummary,
@@ -61,6 +64,20 @@ const api: DesktopAgentApi = {
 
   getVersion(): Promise<string> {
     return ipcRenderer.invoke("app:get-version");
+  },
+
+  listCommands(): Promise<CommandInfo[]> {
+    return ipcRenderer.invoke("chat:list-commands");
+  },
+
+  onExtensionUIRequest(listener: (request: ExtensionUIRequest) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, request: ExtensionUIRequest) => listener(request);
+    ipcRenderer.on("extension-ui:request", handler);
+    return () => ipcRenderer.removeListener("extension-ui:request", handler);
+  },
+
+  respondExtensionUI(requestId: string, response: ExtensionUIResponse): Promise<void> {
+    return ipcRenderer.invoke("extension-ui:respond", requestId, response);
   },
 };
 

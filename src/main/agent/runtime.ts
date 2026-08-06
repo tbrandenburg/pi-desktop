@@ -1,6 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import type { ChatEvent, StartChatRequest } from "../../shared/events";
+import type { ExtensionUIContext, ModelRuntime, ResourceLoader, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { ChatEvent, CommandInfo, StartChatRequest } from "../../shared/events";
 import { loadCodingAgent, type CodingAgentLoaders, type AgentSessionEvent } from "./coding-agent-loaders";
 import { createReadOnlyTools } from "./tools";
 
@@ -49,6 +49,26 @@ export interface AgentRuntimeRunArgs {
   modelRuntime?: ModelRuntime;
   signal: AbortSignal;
   emit: (event: ChatEvent) => void;
+  /**
+   * Real `ExtensionUIContext` adapter (`ui-context.ts`'s `IpcUIContextBridge`)
+   * bridging `ctx.ui.select/confirm/input/notify` calls over IPC to React
+   * modals in the renderer -- ADR 0001 §3.4 Phase 2. When omitted (e.g. the
+   * lightweight `listCommands` discovery session), extensions run headless
+   * exactly as in Phase 1 -- `AgentSession` defaults `hasUI` to `false` until
+   * `bindExtensions` is called with a real `uiContext`.
+   */
+  uiContext?: ExtensionUIContext;
+  /**
+   * Injectable `ResourceLoader`, overriding `createAgentSession`'s own
+   * default (which discovers real extensions/skills/prompts/themes from
+   * `cwd`/`agentDir`). Production code never sets this. Tests inject a
+   * `DefaultResourceLoader` configured with `extensionFactories` to load an
+   * inline test extension (`registerCommand` + `ctx.ui.*`) without touching
+   * any real global or project-local extension directory -- mirrors the
+   * `modelRuntime` injection seam above for the identical reason (real
+   * discovery has no way to see a factory a test built separately).
+   */
+  resourceLoader?: ResourceLoader;
 }
 
 /**
@@ -74,6 +94,8 @@ export class AgentRuntime {
     modelRuntime: injectedModelRuntime,
     signal,
     emit,
+    uiContext,
+    resourceLoader,
   }: AgentRuntimeRunArgs): Promise<void> {
     const { createAgentSession, ModelRuntime, SessionManager } = await loadCodingAgent(this.loaders);
 
@@ -142,7 +164,20 @@ export class AgentRuntime {
       // the Phase 1 runtime swap.
       noTools: "builtin",
       customTools: createReadOnlyTools(cwd),
+      resourceLoader,
     });
+
+    // Phase 2 (ADR 0001 §3.4, issue #91): wire the real IPC-backed
+    // `ExtensionUIContext` so `ctx.ui.select/confirm/input/notify` calls
+    // made by `registerCommand` handlers or hooks resolve against real
+    // React modals in the renderer instead of no-oping. `mode: "rpc"` is
+    // the closest of pi-coding-agent's own non-TUI modes to what
+    // pi-desktop actually is (a UI-optional host with dialog-capable but
+    // no terminal UI) -- see `ui-context.ts`'s doc comment. Omitted (as in
+    // `listCommands` below) this stays headless exactly like Phase 1.
+    if (uiContext) {
+      await session.bindExtensions({ uiContext, mode: "rpc" });
+    }
 
     const unsubscribe = session.subscribe((event) => {
       if (AGENT_SESSION_EVENT_TYPES.has(event.type)) this.forward(requestId, event, emit);
@@ -168,6 +203,36 @@ export class AgentRuntime {
       signal.removeEventListener("abort", onAbort);
       unsubscribe();
     }
+  }
+
+  /**
+   * Lists `pi.registerCommand` slash-commands from bundled/discovered
+   * extensions, for the composer's `/` autocomplete (ADR 0001 §3.4 Phase 2,
+   * issue #91). Uses a throwaway in-memory `SessionManager` (no on-disk
+   * writes, no persisted conversation) purely to run extension discovery --
+   * `createAgentSession`'s `extensionsResult.extensions[].commands` is
+   * populated by loading extensions alone, before any `prompt()`/
+   * `bindExtensions()` call, so this never needs a resolved model, a
+   * `uiContext`, or to touch the real cwd-scoped session on disk (contrast
+   * with `run()`'s session, which is real and persisted).
+   */
+  async listCommands(cwd: string, resourceLoader?: ResourceLoader): Promise<CommandInfo[]> {
+    const { createAgentSession, ModelRuntime, SessionManager } = await loadCodingAgent(this.loaders);
+    const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
+    const { extensionsResult } = await createAgentSession({
+      cwd,
+      modelRuntime,
+      sessionManager: SessionManager.inMemory(cwd),
+      noTools: "all",
+      resourceLoader,
+    });
+    const commands: CommandInfo[] = [];
+    for (const extension of extensionsResult.extensions) {
+      for (const [name, command] of extension.commands) {
+        commands.push({ name, description: command.description });
+      }
+    }
+    return commands;
   }
 
   private forward(requestId: string, event: AgentSessionEvent, emit: (event: ChatEvent) => void): void {

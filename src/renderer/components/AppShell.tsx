@@ -2,16 +2,24 @@ import { Moon, Settings, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ChatTimeline } from "./ChatTimeline";
 import { Composer } from "./Composer";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { ErrorBanner } from "./ErrorBanner";
+import { InputDialog } from "./InputDialog";
+import { NotificationToast } from "./NotificationToast";
+import { SelectDialog } from "./SelectDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { Sidebar } from "./Sidebar";
+import { desktopApi } from "../lib/desktop-api";
 import { useChatStore } from "../state/chat-store";
+import { useExtensionUIStore } from "../state/extension-ui-store";
 import { useSettingsStore } from "../state/settings-store";
 
 export function AppShell() {
   const loadModels = useChatStore((state) => state.loadModels);
+  const loadCommands = useChatStore((state) => state.loadCommands);
   const errorMessage = useChatStore((state) => state.errorMessage);
   const openSettings = useSettingsStore((state) => state.open);
+  const handleExtensionUIRequest = useExtensionUIStore((state) => state.handleRequest);
 
   // Theme is applied pre-paint by theme-init.ts (see main.tsx) to avoid FOUC,
   // so <html data-theme> is already correct on first render — seed state from
@@ -32,6 +40,14 @@ export function AppShell() {
   useEffect(() => {
     void loadModels();
   }, [loadModels]);
+
+  useEffect(() => {
+    void loadCommands();
+  }, [loadCommands]);
+
+  useEffect(() => {
+    return desktopApi().onExtensionUIRequest(handleExtensionUIRequest);
+  }, [handleExtensionUIRequest]);
 
   return (
     <div className="flex h-screen w-screen bg-surface text-white">
@@ -69,6 +85,10 @@ export function AppShell() {
       </div>
 
       <SettingsDialog />
+      <SelectDialog />
+      <ConfirmDialog />
+      <InputDialog />
+      <NotificationToast />
     </div>
   );
 }

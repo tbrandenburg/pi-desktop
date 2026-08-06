@@ -3,9 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { AgentRuntime } from "./runtime";
+import { IpcUIContextBridge } from "./ui-context";
 import { realCodingAgentLoaders } from "./test-support/real-coding-agent-loaders";
 import { buildFakeModelRuntime, FAKE_PROVIDER_ID } from "./test-support/fake-model-runtime";
-import type { ChatEvent, StartChatRequest } from "../../shared/events";
+import { buildTestResourceLoader, type TestExtensionLog } from "./test-support/inline-test-extension";
+import type { ChatEvent, ExtensionUIRequest, StartChatRequest } from "../../shared/events";
 
 describe("AgentRuntime (real AgentSession + real SessionManager, fake network)", () => {
   let cwd: string;
@@ -190,5 +192,137 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
     const allSessions = await SessionManager.list(cwd);
     expect(allSessions).toHaveLength(2);
     expect(allSessions.map((s) => s.id).sort()).toEqual(["conv-other", "conv-reused"]);
+  });
+});
+
+describe("AgentRuntime UI bridge (ADR 0001 §3.4 Phase 2, issue #91)", () => {
+  let cwd: string;
+  let agentDir: string;
+  let originalPiAgentDir: string | undefined;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ui-bridge-"));
+    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ui-bridge-agent-dir-"));
+    originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+  });
+
+  afterEach(() => {
+    if (originalPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalPiAgentDir;
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  it("listCommands() discovers a real pi.registerCommand registration from an inline extension", async () => {
+    const log: TestExtensionLog = { notified: [], invoked: false };
+    const resourceLoader = await buildTestResourceLoader(cwd, log);
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+
+    const commands = await runtime.listCommands(cwd, resourceLoader);
+
+    expect(commands).toEqual([{ name: "greet", description: "Greets after confirming with the user" }]);
+    // Discovery alone must never invoke the command handler.
+    expect(log.invoked).toBe(false);
+  });
+
+  it("listCommands() returns an empty list when no extension registers a command", async () => {
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    const commands = await runtime.listCommands(cwd);
+    expect(commands).toEqual([]);
+    expect(Array.isArray(commands)).toBe(true);
+  });
+
+  it("run() with a real IpcUIContextBridge round-trips ctx.ui.confirm/input/notify through a /greet command end-to-end", async () => {
+    const log: TestExtensionLog = { notified: [], invoked: false };
+    const resourceLoader = await buildTestResourceLoader(cwd, log);
+    const { modelRuntime, model } = await buildFakeModelRuntime(agentDir);
+
+    const pushed: ExtensionUIRequest[] = [];
+    const bridge = new IpcUIContextBridge((request) => {
+      pushed.push(request);
+      // Answer synchronously and deterministically: confirm "yes", then
+      // supply a name for the input dialog. A real renderer would instead
+      // call `respondExtensionUI` from a click handler -- this proves the
+      // main-process side of that contract (the promise genuinely awaits
+      // an out-of-band `respond()` call, not an immediate resolution).
+      if (request.kind === "confirm") {
+        queueMicrotask(() => bridge.respond(request.requestId, { kind: "confirm", value: true }));
+      } else if (request.kind === "input") {
+        queueMicrotask(() => bridge.respond(request.requestId, { kind: "input", value: "Ada" }));
+      }
+    });
+
+    const request: StartChatRequest = {
+      conversationId: "conv-ui-bridge",
+      model: "fake/fake-model",
+      messages: [{ role: "user", content: "/greet issue-91" }],
+    };
+    const events: ChatEvent[] = [];
+
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    await runtime.run({
+      requestId: "req-ui-1",
+      request,
+      cwd,
+      providerId: FAKE_PROVIDER_ID,
+      model,
+      modelRuntime,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      uiContext: bridge.uiContext,
+      resourceLoader,
+    });
+
+    // The extension handler actually ran and received the real resolved
+    // answers from the bridge -- not defaults/no-ops.
+    expect(log.invoked).toBe(true);
+    expect(log.confirmResult).toBe(true);
+    expect(log.inputResult).toBe("Ada");
+    expect(log.notified).toEqual(["Hello Ada (issue-91)"]);
+
+    // Both dialog-capable requests were genuinely pushed toward "the
+    // renderer" (captured here instead) before being answered.
+    expect(pushed.some((r) => r.kind === "confirm" && r.title === "Greet?")).toBe(true);
+    expect(pushed.some((r) => r.kind === "input" && r.title === "Name?")).toBe(true);
+
+    // A slash-command turn still completes the chat turn cleanly.
+    expect(events[0]).toEqual({ type: "started", requestId: "req-ui-1" });
+    expect(events.at(-1)).toEqual({ type: "completed", requestId: "req-ui-1" });
+  });
+
+  it("run() without a uiContext leaves ctx.ui.confirm answered with the safe default (headless, matching Phase 1)", async () => {
+    const log: TestExtensionLog = { notified: [], invoked: false };
+    const resourceLoader = await buildTestResourceLoader(cwd, log);
+    const { modelRuntime, model } = await buildFakeModelRuntime(agentDir);
+
+    const request: StartChatRequest = {
+      conversationId: "conv-headless",
+      model: "fake/fake-model",
+      messages: [{ role: "user", content: "/greet" }],
+    };
+    const events: ChatEvent[] = [];
+
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    await runtime.run({
+      requestId: "req-headless-1",
+      request,
+      cwd,
+      providerId: FAKE_PROVIDER_ID,
+      model,
+      modelRuntime,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      resourceLoader,
+      // uiContext intentionally omitted.
+    });
+
+    expect(log.invoked).toBe(true);
+    // Headless `ExtensionUIContext.confirm` (pi-coding-agent's own default
+    // when no uiContext is bound) resolves to `false` -- the handler must
+    // therefore take the "cancelled" branch, never the input/notify one.
+    expect(log.confirmResult).toBe(false);
+    expect(log.inputResult).toBeUndefined();
+    expect(events.at(-1)).toEqual({ type: "completed", requestId: "req-headless-1" });
   });
 });

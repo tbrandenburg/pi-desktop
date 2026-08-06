@@ -1,6 +1,6 @@
 import { app, type BrowserWindow, dialog, ipcMain } from "electron";
 import { startChatRequestSchema, providerSettingsSchema, workspaceDirSchema } from "../shared/schemas";
-import type { ModelInfo, WorkspaceInfo } from "../shared/events";
+import type { CommandInfo, ExtensionUIResponse, ModelInfo, WorkspaceInfo } from "../shared/events";
 import { ChatService } from "./chat/service";
 import { listConfiguredModels, resolvePiDefault } from "./model/pi-config";
 import { SettingsStore } from "./settings/store";
@@ -76,6 +76,14 @@ export function registerIpcHandlers(
 
   ipcMain.handle("chat:cancel", async (_event, requestId: string) => {
     chatService.cancel(requestId);
+  });
+
+  ipcMain.handle("chat:list-commands", async (): Promise<CommandInfo[]> => {
+    return chatService.listCommands();
+  });
+
+  ipcMain.handle("extension-ui:respond", async (_event, requestId: string, response: ExtensionUIResponse) => {
+    chatService.respondExtensionUI(requestId, response);
   });
 
   ipcMain.handle("settings:save", async (_event, rawSettings: unknown) => {

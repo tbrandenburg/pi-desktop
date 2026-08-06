@@ -42,6 +42,33 @@ export interface WorkspaceInfo {
   dir: string;
 }
 
+/**
+ * A `ctx.ui.*` dialog/notify call made by an extension's `registerCommand`
+ * handler or hook, pushed from the main process to the renderer so a real
+ * React modal can collect the user's answer -- ADR 0001 §3.4 Phase 2. Modeled
+ * on pi-coding-agent's own "rpc" mode `extension_ui_request` protocol
+ * (`modes/rpc/rpc-mode.js`), scoped to only the dialog-capable methods
+ * (`select`/`confirm`/`input`/`notify`) -- every other `ExtensionUIContext`
+ * method is TUI-only and stays a no-op (see `src/main/agent/ui-context.ts`).
+ */
+export type ExtensionUIRequest =
+  | { requestId: string; kind: "select"; title: string; options: string[] }
+  | { requestId: string; kind: "confirm"; title: string; message: string }
+  | { requestId: string; kind: "input"; title: string; placeholder?: string }
+  | { requestId: string; kind: "notify"; message: string; level: "info" | "warning" | "error" };
+
+/** The renderer's answer to a `select`/`confirm`/`input` `ExtensionUIRequest`, sent back via `respondExtensionUI`. */
+export type ExtensionUIResponse =
+  | { kind: "select"; value: string | undefined }
+  | { kind: "confirm"; value: boolean }
+  | { kind: "input"; value: string | undefined };
+
+/** A `pi.registerCommand`-registered slash-command, surfaced in the composer's autocomplete list. */
+export interface CommandInfo {
+  name: string;
+  description?: string;
+}
+
 export type ChatEvent =
   | { type: "started"; requestId: string }
   | { type: "text-delta"; requestId: string; text: string }
@@ -74,4 +101,10 @@ export interface DesktopAgentApi {
   getWorkspace(): Promise<WorkspaceInfo>;
   chooseWorkspace(): Promise<WorkspaceInfo | null>;
   getVersion(): Promise<string>;
+  /** Registered `pi.registerCommand` slash-commands available in the current workspace. */
+  listCommands(): Promise<CommandInfo[]>;
+  /** Subscribes to `ctx.ui.*` dialog/notify requests pushed from an active agent session. */
+  onExtensionUIRequest(listener: (request: ExtensionUIRequest) => void): () => void;
+  /** Sends the user's answer for a pending `select`/`confirm`/`input` `ExtensionUIRequest`. */
+  respondExtensionUI(requestId: string, response: ExtensionUIResponse): Promise<void>;
 }
