@@ -16,10 +16,10 @@ async function loadModelsRegistryForChat(
  * Owns all active streaming requests. Runs entirely in the Electron main
  * process; the renderer only ever sees `ChatEvent` objects via IPC.
  *
- * Chat turns are delegated to `AgentRuntime` (an `AgentHarness` wrapper),
- * which owns the tool-execution loop, context compaction, and cwd-scoped
- * session persistence (`JsonlSessionRepo`) -- this class no longer talks
- * directly to pi-ai's low-level `Models.stream()`.
+ * Chat turns are delegated to `AgentRuntime` (a `pi-coding-agent`
+ * `AgentSession` wrapper), which owns the tool-execution loop, context
+ * compaction, and cwd-scoped session persistence -- this class no longer
+ * talks directly to pi-ai's low-level `Models.stream()`.
  */
 export class ChatService {
   private activeAborts = new Map<string, AbortController>();
@@ -103,8 +103,9 @@ export class ChatService {
         requestId,
         request,
         cwd: path.resolve(this.getWorkspaceDir()),
-        models: registry.models,
+        providerId: found.providerId,
         model: found.model,
+        apiKey: settings.apiKey,
         signal,
         emit: (event) => this.emit(event),
       });

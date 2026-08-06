@@ -1,33 +1,36 @@
+import fs from "node:fs/promises";
 import { Object as TObject, String as TString } from "typebox";
-import type { AgentTool, ExecutionEnv } from "@earendil-works/pi-agent-core";
-import { assertPathWithinRoot } from "./path-guard";
+import type { ToolDefinition } from "../coding-agent-loaders";
+import { resolveWithinRoot } from "./path-guard";
 
 const parameters = TObject({
-  path: TString({ description: "Directory path, relative to the workspace root." }),
+  path: TString({ description: "File path, relative to the workspace root." }),
 });
 
 /**
- * Read-only file tool. Reads through the harness's injected `ExecutionEnv`
- * (`env.readTextFile`), never raw `node:fs`, so file access stays confined
- * to whatever workspace directory the environment was constructed with.
- * `assertPathWithinRoot` additionally rejects any path (relative traversal
- * or absolute) that would resolve outside `env.cwd`, since the underlying
- * `NodeExecutionEnv` performs no such confinement itself.
+ * Read-only file tool, adapted to pi-coding-agent's `ToolDefinition` shape
+ * (see ADR 0001 §3.3). Confined to `cwd` via `resolveWithinRoot` -- the same
+ * traversal guard the pre-Phase-1 `AgentTool`-based version used, just
+ * reading through plain `node:fs/promises` instead of an injected
+ * `ExecutionEnv` (pi-coding-agent's own built-in tools take the same
+ * `cwd: string` + raw `fs` approach; see `dist/core/tools/index.d.ts`).
  */
-export function createReadFileTool(env: ExecutionEnv): AgentTool<typeof parameters> {
+export function createReadFileTool(cwd: string): ToolDefinition<typeof parameters> {
   return {
     name: "read_file",
     label: "Read File",
     description: "Read the full text contents of a file in the current workspace.",
     parameters,
     async execute(_toolCallId, params) {
-      assertPathWithinRoot(env.cwd, params.path);
-      const result = await env.readTextFile(params.path);
-      if (!result.ok) {
-        throw new Error(result.error.message);
+      const resolved = resolveWithinRoot(cwd, params.path);
+      let text: string;
+      try {
+        text = await fs.readFile(resolved, "utf8");
+      } catch (error) {
+        throw new Error(error instanceof Error ? error.message : String(error));
       }
       return {
-        content: [{ type: "text", text: result.value }],
+        content: [{ type: "text", text }],
         details: { path: params.path },
       };
     },
