@@ -246,6 +246,40 @@ export async function buildModelsRegistry(
 }
 
 /**
+ * Branded string types distinguishing bare vs. fully-qualified model ids
+ * (issue #113). Both are plain strings at runtime -- the brand exists only
+ * at the type level, to stop a bare id from being passed where a qualified
+ * id is expected (or vice versa) without the compiler catching it. This
+ * class of bug shipped for real once already (see AGENTS.md lesson #11):
+ * a bare id like "gpt-5.6-luna" is not unique across providers, so any
+ * call site that quietly treats one form as the other can silently route
+ * to the wrong provider.
+ *
+ * Use `asBareModelId`/`asQualifiedModelId` to brand a value at the one
+ * trust boundary where it's known to genuinely be that form (e.g. a
+ * provider's own `model.id`, or an already-qualified id round-tripped
+ * from the renderer) -- never to blanket-silence an unrelated type error.
+ */
+declare const bareModelIdBrand: unique symbol;
+declare const qualifiedModelIdBrand: unique symbol;
+
+/** A model id scoped to one already-known provider, e.g. a provider's own `model.id`. */
+export type BareModelId = string & { readonly [bareModelIdBrand]: true };
+
+/** The `provider/modelId` form produced by `qualifyModelId`, globally unique across all registered providers. */
+export type QualifiedModelId = string & { readonly [qualifiedModelIdBrand]: true };
+
+/** Brands a string as a `BareModelId` at a trust boundary where it's known to genuinely be one. */
+export function asBareModelId(id: string): BareModelId {
+  return id as BareModelId;
+}
+
+/** Brands a string as a `QualifiedModelId` at a trust boundary where it's known to genuinely be one (e.g. round-tripped from the renderer). */
+export function asQualifiedModelId(id: string): QualifiedModelId {
+  return id as QualifiedModelId;
+}
+
+/**
  * Builds the fully-qualified, globally-unique id for a model: `provider/modelId`.
  * This -- not the bare model id -- is what's ever handed to the renderer as
  * `ModelInfo.id` and round-tripped back as `StartChatRequest.model`.
@@ -256,8 +290,8 @@ export async function buildModelsRegistry(
  * cloudflare-ai-gateway, github-copilot, openai, openai-codex, opencode).
  * A flat `id` string can never disambiguate which one the user picked.
  */
-export function qualifyModelId(providerId: string, modelId: string): string {
-  return `${providerId}/${modelId}`;
+export function qualifyModelId(providerId: string, modelId: BareModelId): QualifiedModelId {
+  return `${providerId}/${modelId}` as QualifiedModelId;
 }
 
 /**
@@ -270,7 +304,7 @@ export function qualifyModelId(providerId: string, modelId: string): string {
  */
 export function findModelById(
   models: MutableModels,
-  qualifiedId: string,
+  qualifiedId: QualifiedModelId,
 ): { model: Model<Api>; providerId: string } | null {
   const separatorIndex = qualifiedId.indexOf("/");
   if (separatorIndex === -1) return null;

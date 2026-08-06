@@ -3,6 +3,7 @@ import type { ModelInfo } from "../../shared/events";
 import {
   buildModelsRegistry,
   qualifyModelId,
+  asBareModelId,
   type AppSettingsProviderInput,
   type ModelsLoaders,
   type ModelsRegistry,
@@ -36,7 +37,7 @@ async function resolveFromRegistry(
     apiKey: auth.auth.apiKey,
     baseUrl: model.baseUrl,
     model: model.id,
-    label: qualifyModelId(providerId, model.id),
+    label: qualifyModelId(providerId, asBareModelId(model.id)),
   };
 }
 
@@ -98,7 +99,7 @@ export async function listConfiguredModels(
   const available = await registry.models.getAvailable();
 
   return available.map((model) => ({
-    id: qualifyModelId(model.provider, model.id),
+    id: qualifyModelId(model.provider, asBareModelId(model.id)),
     label: `${model.provider}/${model.id}`,
   }));
 }
