@@ -1,4 +1,4 @@
-import type { DesktopAgentApi, SessionRecord } from "../../shared/events";
+import type { DesktopAgentApi, PackageInfo, SessionRecord } from "../../shared/events";
 
 /**
  * Reads the `?fakeModels=` query param from the current browser URL to force
@@ -23,6 +23,10 @@ export function createFakeDesktopApi(): DesktopAgentApi {
   const sessions = new Map<string, SessionRecord>();
   let listener: ((event: import("../../shared/events").ChatEvent) => void) | null = null;
   let workspaceDir = "/home/fake-user";
+  // Small in-memory package list -- no real install/trust logic here, just
+  // enough shape (source + trusted) to keep the Settings UI's package list
+  // section exercisable in the browser dev harness (see AGENTS.md lesson #14).
+  const packages: PackageInfo[] = [];
 
   return {
     async listModels() {
@@ -120,5 +124,32 @@ export function createFakeDesktopApi(): DesktopAgentApi {
     },
 
     async respondExtensionUI() {},
+
+    async listPackages() {
+      return [...packages];
+    },
+
+    async installPackage(source) {
+      if (source.trim().toLowerCase().startsWith("npm:")) {
+        throw new Error(
+          "npm: package sources are not supported yet -- only local-path and git sources can be installed at runtime.",
+        );
+      }
+      // The fake harness auto-trusts (no real modal exists in the browser
+      // dev harness) -- the real bridge always blocks on a genuine trust
+      // prompt instead, see `src/main/packages/service.ts`.
+      const info: PackageInfo = { source: source.trim(), trusted: true };
+      const existingIndex = packages.findIndex((p) => p.source === info.source);
+      if (existingIndex >= 0) packages[existingIndex] = info;
+      else packages.push(info);
+      return info;
+    },
+
+    async removePackage(source) {
+      const index = packages.findIndex((p) => p.source === source);
+      if (index >= 0) packages.splice(index, 1);
+    },
+
+    async updatePackage() {},
   };
 }

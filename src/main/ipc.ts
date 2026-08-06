@@ -1,12 +1,14 @@
 import { app, type BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { startChatRequestSchema, providerSettingsSchema, workspaceDirSchema } from "../shared/schemas";
-import type { CommandInfo, ExtensionUIResponse, ModelInfo, WorkspaceInfo } from "../shared/events";
+import type { CommandInfo, ExtensionUIResponse, ModelInfo, PackageInfo, WorkspaceInfo } from "../shared/events";
 import { ChatService } from "./chat/service";
 import { listConfiguredModels, resolvePiDefault } from "./model/pi-config";
 import { SettingsStore } from "./settings/store";
 import { SessionService } from "./session/service";
 import { AgentRuntime } from "./agent/runtime";
+import { IpcUIContextBridge } from "./agent/ui-context";
+import { PackageService } from "./packages/service";
 import type { AgentCoreLoaders } from "./agent/core";
 import type { CodingAgentLoaders } from "./agent/coding-agent-loaders";
 
@@ -31,6 +33,17 @@ function resolvePiPackagesReadOnlyToolsDir(): string {
   return path.join(base, "read-only-tools");
 }
 
+/**
+ * Desktop-owned directory for runtime-installed pi-packages and their own
+ * settings/trust-decision files (ADR 0001 §3.6/§3.7, issue #92) --
+ * `app.getPath("userData")/pi-packages`. Never `~/.pi/agent` (that's pi's
+ * own config dir, shared with the real `pi` CLI) and never anywhere near a
+ * portable exe's own directory (which may not even be writable).
+ */
+function resolvePiPackagesUserDataDir(): string {
+  return path.join(app.getPath("userData"), "pi-packages");
+}
+
 export function registerIpcHandlers(
   getWindow: () => BrowserWindow | null,
   deps: RegisterIpcHandlersDeps = {},
@@ -43,8 +56,37 @@ export function registerIpcHandlers(
   });
 
   const sessionService = new SessionService(getWorkspaceDir, deps.agentCoreLoaders, deps.codingAgentLoaders);
-  const agentRuntime = new AgentRuntime(deps.codingAgentLoaders, resolvePiPackagesReadOnlyToolsDir());
-  const chatService = new ChatService(settingsStore, getWindow, undefined, getWorkspaceDir, agentRuntime);
+
+  // Shared across chat's extension `ctx.ui.*` dialogs (#91) AND the
+  // mandatory package-install trust prompt (#92) -- one real modal
+  // mechanism, never two parallel ones.
+  const uiContextBridge = new IpcUIContextBridge((request) => {
+    const win = getWindow();
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send("extension-ui:request", request);
+  });
+
+  const packageService = new PackageService(
+    resolvePiPackagesUserDataDir(),
+    (source) =>
+      uiContextBridge.uiContext.confirm(
+        "Trust this package?",
+        `"${source}" was just installed. Its code can run with full system access, exactly like any other pi extension. Only trust packages from sources you control or fully trust.`,
+      ),
+    deps.codingAgentLoaders,
+  );
+
+  const agentRuntime = new AgentRuntime(deps.codingAgentLoaders, resolvePiPackagesReadOnlyToolsDir(), () =>
+    packageService.trustedExtensionPaths(),
+  );
+  const chatService = new ChatService(
+    settingsStore,
+    getWindow,
+    undefined,
+    getWorkspaceDir,
+    agentRuntime,
+    uiContextBridge,
+  );
 
   ipcMain.handle("app:get-version", (): string => {
     return app.getVersion();
@@ -143,5 +185,21 @@ export function registerIpcHandlers(
     await settingsStore.setWorkspaceDir(dir);
     currentWorkspaceDir = dir;
     return { dir };
+  });
+
+  ipcMain.handle("packages:list", async (): Promise<PackageInfo[]> => {
+    return packageService.list();
+  });
+
+  ipcMain.handle("packages:install", async (_event, source: string): Promise<PackageInfo> => {
+    return packageService.install(source);
+  });
+
+  ipcMain.handle("packages:remove", async (_event, source: string): Promise<void> => {
+    await packageService.remove(source);
+  });
+
+  ipcMain.handle("packages:update", async (_event, source: string): Promise<void> => {
+    await packageService.update(source);
   });
 }

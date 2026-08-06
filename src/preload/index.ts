@@ -6,6 +6,7 @@ import type {
   ExtensionUIRequest,
   ExtensionUIResponse,
   ModelInfo,
+  PackageInfo,
   ProviderSettings,
   ProviderSettingsSummary,
   SessionRecord,
@@ -78,6 +79,22 @@ const api: DesktopAgentApi = {
 
   respondExtensionUI(requestId: string, response: ExtensionUIResponse): Promise<void> {
     return ipcRenderer.invoke("extension-ui:respond", requestId, response);
+  },
+
+  listPackages(): Promise<PackageInfo[]> {
+    return ipcRenderer.invoke("packages:list");
+  },
+
+  installPackage(source: string): Promise<PackageInfo> {
+    return ipcRenderer.invoke("packages:install", source);
+  },
+
+  removePackage(source: string): Promise<void> {
+    return ipcRenderer.invoke("packages:remove", source);
+  },
+
+  updatePackage(source: string): Promise<void> {
+    return ipcRenderer.invoke("packages:update", source);
   },
 };
 

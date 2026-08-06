@@ -42,6 +42,7 @@ vi.mock("electron", () => {
   return {
     app: {
       getVersion: () => "9.9.9-test",
+      getPath: () => "/tmp/pi-desktop-test-userdata",
     },
     ipcMain: {
       handle: (
