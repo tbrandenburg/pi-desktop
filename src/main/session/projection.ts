@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { Session, SessionTreeEntry } from "@earendil-works/pi-agent-core";
-import { qualifyModelId } from "../model/registry";
+import { qualifyModelId, asBareModelId } from "../model/registry";
 import type { ChatMessage, SessionRecord, SessionSummary } from "../../shared/events";
 
 /**
@@ -54,7 +54,7 @@ function textFromContentBlocks(content: { type: string; text?: string }[]): stri
 function deriveModel(entries: readonly SessionTreeEntry[]): string {
   const modelChange = [...entries].reverse().find((entry) => entry.type === "model_change");
   if (modelChange?.type === "model_change") {
-    return qualifyModelId(modelChange.provider, modelChange.modelId);
+    return qualifyModelId(modelChange.provider, asBareModelId(modelChange.modelId));
   }
   return "";
 }

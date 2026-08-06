@@ -6,6 +6,8 @@ import {
   buildModelsRegistry,
   findModelById,
   qualifyModelId,
+  asBareModelId,
+  asQualifiedModelId,
   APP_SETTINGS_PROVIDER_ID,
 } from "./registry";
 import { realModelsLoaders } from "./test-support/real-models-loaders";
@@ -44,7 +46,7 @@ describe("buildModelsRegistry", () => {
       expect.objectContaining({ id: "gpt-4o-mini", provider: APP_SETTINGS_PROVIDER_ID }),
     ]);
 
-    const found = findModelById(registry.models, qualifyModelId(APP_SETTINGS_PROVIDER_ID, "gpt-4o-mini"));
+    const found = findModelById(registry.models, qualifyModelId(APP_SETTINGS_PROVIDER_ID, asBareModelId("gpt-4o-mini")));
     expect(found?.providerId).toBe(APP_SETTINGS_PROVIDER_ID);
 
     // stream() must resolve auth from the in-memory static apiKey without
@@ -72,7 +74,7 @@ describe("buildModelsRegistry", () => {
       realModelsLoaders,
     );
 
-    const found = findModelById(registry.models, qualifyModelId(APP_SETTINGS_PROVIDER_ID, "gpt-4o-mini"));
+    const found = findModelById(registry.models, qualifyModelId(APP_SETTINGS_PROVIDER_ID, asBareModelId("gpt-4o-mini")));
     expect(found).not.toBeNull();
 
     const events = registry.models.stream(found!.model, {
@@ -195,7 +197,7 @@ describe("buildModelsRegistry with pi-ai built-in providers (auth.json)", () => 
     expect(collidingProviders.length).toBeGreaterThanOrEqual(6);
 
     for (const providerId of collidingProviders) {
-      const found = findModelById(registry.models, qualifyModelId(providerId, "gpt-5.6-luna"));
+      const found = findModelById(registry.models, qualifyModelId(providerId, asBareModelId("gpt-5.6-luna")));
       expect(found?.providerId).toBe(providerId);
     }
   });
@@ -214,11 +216,11 @@ describe("buildModelsRegistry with pi-ai built-in providers (auth.json)", () => 
 
     const appSettingsMatch = findModelById(
       registry.models,
-      qualifyModelId(APP_SETTINGS_PROVIDER_ID, "gpt-4o-mini"),
+      qualifyModelId(APP_SETTINGS_PROVIDER_ID, asBareModelId("gpt-4o-mini")),
     );
     expect(appSettingsMatch?.providerId).toBe(APP_SETTINGS_PROVIDER_ID);
 
-    const builtinMatch = findModelById(registry.models, qualifyModelId("openai", "gpt-4o-mini"));
+    const builtinMatch = findModelById(registry.models, qualifyModelId("openai", asBareModelId("gpt-4o-mini")));
     expect(builtinMatch?.providerId).toBe("openai");
   });
 });
@@ -301,8 +303,8 @@ describe("findModelById edge cases", () => {
       { apiKey: "sk-app-only", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
       realModelsLoaders,
     );
-    expect(findModelById(registry.models, "no-separator-here")).toBeNull();
-    expect(findModelById(registry.models, "")).toBeNull();
+    expect(findModelById(registry.models, asQualifiedModelId("no-separator-here"))).toBeNull();
+    expect(findModelById(registry.models, asQualifiedModelId(""))).toBeNull();
   });
 
   it("returns null when the provider segment does not correspond to any registered provider", async () => {
@@ -312,7 +314,7 @@ describe("findModelById edge cases", () => {
       { apiKey: "sk-app-only", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
       realModelsLoaders,
     );
-    expect(findModelById(registry.models, "nonexistent-provider/gpt-4o-mini")).toBeNull();
+    expect(findModelById(registry.models, asQualifiedModelId("nonexistent-provider/gpt-4o-mini"))).toBeNull();
   });
 
   it("returns null when the provider exists but the model id segment does not match any of its models", async () => {
@@ -322,7 +324,7 @@ describe("findModelById edge cases", () => {
       { apiKey: "sk-app-only", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
       realModelsLoaders,
     );
-    const found = findModelById(registry.models, qualifyModelId(APP_SETTINGS_PROVIDER_ID, "no-such-model"));
+    const found = findModelById(registry.models, qualifyModelId(APP_SETTINGS_PROVIDER_ID, asBareModelId("no-such-model")));
     expect(found).toBeNull();
   });
 
@@ -354,6 +356,6 @@ describe("findModelById edge cases", () => {
     expect(registry.models.getProvider("myprov")).toBeDefined();
     expect(registry.models.getProvider("myprov")!.getModels().some((m) => m.id === "myprovX")).toBe(true);
 
-    expect(findModelById(registry.models, "myprovX")).toBeNull();
+    expect(findModelById(registry.models, asQualifiedModelId("myprovX"))).toBeNull();
   });
 });
