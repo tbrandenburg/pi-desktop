@@ -82,12 +82,30 @@ export function readJson<T>(filePath: string): T | null {
  *    (`node_modules/@earendil-works/pi-ai/dist/auth/credential-store.js`).
  *  - Reading disk lazily on every `read()`/`list()` call and layering
  *    in-memory overrides on top of it mirrors the CLI's `RuntimeCredentials`
- *    overlay (`@earendil-works/pi-coding-agent@0.82.0`'s
- *    `dist/core/runtime-credentials.js`) composed with `AuthStorage.list()`'s
- *    project-over-global precedence merge (`dist/core/auth-storage.js`);
- *    that package is not a dependency of this app, so it isn't in
- *    node_modules -- verified via `npm pack
- *    @earendil-works/pi-coding-agent@0.82.0` and inspecting the tarball.
+ *    overlay composed with `AuthStorage.list()`'s project-over-global
+ *    precedence merge (`@earendil-works/pi-coding-agent`'s
+ *    `dist/core/auth-storage.js`).
+ *
+ * Spike conclusion (#114): `@earendil-works/pi-coding-agent` is now a real
+ * direct dependency of this app (unlike when this comment was first
+ * written), and it does export one relevant helper --
+ * `readStoredCredential(providerId, authPath)` -- but nothing else from
+ * `auth-storage.js` (`AuthStorage`, `FileAuthStorageBackend`,
+ * `CredentialStore`) is part of its public `index.js` export surface, so
+ * this class cannot be replaced wholesale by an upstream primitive:
+ *  - `readStoredCredential` only reads a *single* path for a *single*
+ *    provider id; it has no concept of this class's global/project
+ *    precedence merge or its `list()` (enumerate-all-providers) needs, so
+ *    using it would not remove the merge/list logic this class exists for.
+ *  - It is also less defensive than `toCredential` below: it does a bare
+ *    `JSON.parse` and returns `data[providerId]` with no shape validation,
+ *    where `toCredential` requires the exact fields a given credential type
+ *    needs before accepting it -- swapping it in would trade validation for
+ *    a marginal one-line dedupe, a net regression, not an improvement.
+ * pi-ai's own `InMemoryCredentialStore` still doesn't read `auth.json` at
+ * all (it's a pure in-memory `CredentialStore`, used as-is for the pattern
+ * reference above), so no pi-ai primitive helps here either. Conclusion:
+ * keep this class as-is.
  *
  * Deliberately NOT copied: `AuthStorage`'s `FileAuthStorageBackend` uses
  * `proper-lockfile` for atomic, cross-process-safe writes to `auth.json`.
