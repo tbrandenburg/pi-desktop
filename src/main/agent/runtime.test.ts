@@ -7,9 +7,33 @@ import { IpcUIContextBridge } from "./ui-context";
 import { realCodingAgentLoaders } from "./test-support/real-coding-agent-loaders";
 import { buildFakeModelRuntime, FAKE_PROVIDER_ID } from "./test-support/fake-model-runtime";
 import { buildTestResourceLoader, type TestExtensionLog } from "./test-support/inline-test-extension";
+import { PackageService } from "../packages/service";
 import type { ChatEvent, ExtensionUIRequest, StartChatRequest } from "../../shared/events";
 
 const REAL_PI_PACKAGES_DIR = path.resolve(__dirname, "../../../resources/pi-packages/read-only-tools");
+
+/**
+ * Writes a real, tiny local pi-package to disk: a `package.json` with a
+ * `pi.extensions` manifest entry and a plain CommonJS extension module that
+ * registers an observable, distinctively-named `pi.registerCommand` --
+ * mirrors `service.test.ts`'s own `writeFixturePackage` helper (duplicated
+ * here rather than imported/exported, per this issue's scope being limited
+ * to `runtime.ts`/`runtime.test.ts`).
+ */
+function writeFixturePackage(dir: string, markerName: string): string {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify({ name: "fixture-package", version: "1.0.0", pi: { extensions: ["extension.js"] } }, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(dir, "extension.js"),
+    `module.exports = function (pi) {
+      pi.registerCommand("${markerName}", { description: "marker command" }, async () => {});
+    };`,
+  );
+  return dir;
+}
 
 describe("AgentRuntime (real AgentSession + real SessionManager, fake network)", () => {
   let cwd: string;
@@ -448,5 +472,66 @@ describe("AgentRuntime bundled pi-package discovery (ADR 0001 §3.5, issue #97)"
       .extensions.flatMap((extension) => Array.from(extension.tools.keys()));
     expect(toolNames).not.toContain("read_file");
     expect(toolNames).not.toContain("list_files");
+  });
+});
+
+describe("AgentRuntime.listCommands() trust gate (issue #106)", () => {
+  let cwd: string;
+  let agentDir: string;
+  let fixtureDir: string;
+  let originalPiAgentDir: string | undefined;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-106-cwd-"));
+    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-106-agentdir-"));
+    fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-106-fixture-"));
+    originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+  });
+
+  afterEach(() => {
+    if (originalPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalPiAgentDir;
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(agentDir, { recursive: true, force: true });
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  });
+
+  it("an untrusted package's command never appears in listCommands() called the real production way (no explicit resourceLoader)", async () => {
+    const markerName = "issue-106-untrusted-marker-cmd";
+    const source = writeFixturePackage(path.join(fixtureDir, "pkg-106"), markerName);
+
+    // Real `PackageService` sharing the same `agentDir`/`settings.json`
+    // AgentRuntime uses (per #104), with trust declined (per #105's
+    // regression pattern) -- the package IS persisted into settings.json,
+    // it just never shows up in `trustedExtensionPaths()`.
+    const service = new PackageService(async () => false, async () => true, realCodingAgentLoaders);
+    const installed = await service.install(source);
+    expect(installed.trusted).toBe(false);
+    expect(await service.trustedExtensionPaths()).toEqual([]);
+
+    // Real production call shape: `AgentRuntime` constructed with the bundled
+    // `piPackagesDir` + `getTrustedPackagePaths` wired to this same
+    // `PackageService`, exactly like `ipc.ts` wires it in production, and
+    // `listCommands()` called with NO explicit `resourceLoader` argument --
+    // this is exactly how `ChatService.listCommands()` and `ipc.ts`'s
+    // `chat:list-commands` handler call it in production.
+    const runtime = new AgentRuntime(realCodingAgentLoaders, REAL_PI_PACKAGES_DIR, () =>
+      service.trustedExtensionPaths(),
+    );
+
+    const commands = await runtime.listCommands(cwd);
+    const commandNames = commands.map((c) => c.name);
+
+    // Before the #106 fix, `listCommands()` passed `resourceLoader`
+    // (`undefined`) straight through to `createAgentSession`, which falls
+    // back to its own internal, unfiltered default loader -- resolving
+    // every package configured in the shared `settings.json`, trusted or
+    // not. After the fix, `listCommands()` builds the same trust-filtered
+    // loader `run()` uses, so the untrusted package's command must be
+    // excluded while the app still functions (empty list is valid, no
+    // exception thrown).
+    expect(commandNames).not.toContain(markerName);
+    expect(Array.isArray(commands)).toBe(true);
   });
 });
