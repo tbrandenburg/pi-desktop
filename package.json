@@ -11,6 +11,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
+    "postinstall": "node scripts/patch-nested-pi-coding-agent-deps.mjs",
     "dev:renderer": "vite",
     "dev:main": "tsc -p tsconfig.main.json -w",
     "dev": "concurrently -k \"npm:dev:main\" \"tsx scripts/run-electron-dev.ts\"",
