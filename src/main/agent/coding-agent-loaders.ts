@@ -5,9 +5,11 @@ import type {
   AgentSessionEvent as AgentSessionEventType,
   CreateAgentSessionOptions as CreateAgentSessionOptionsType,
   CreateAgentSessionResult as CreateAgentSessionResultType,
+  DefaultResourceLoader as DefaultResourceLoaderType,
   ModelRuntime as ModelRuntimeType,
   CreateModelRuntimeOptions as CreateModelRuntimeOptionsType,
   SessionManager as SessionManagerType,
+  SettingsManager as SettingsManagerType,
   ToolDefinition as ToolDefinitionType,
 } from "@earendil-works/pi-coding-agent";
 
@@ -26,6 +28,18 @@ export interface CodingAgentModule {
   createAgentSession: typeof createAgentSessionType;
   ModelRuntime: typeof ModelRuntimeType;
   SessionManager: typeof SessionManagerType;
+  /**
+   * Used by `AgentRuntime` to build its own default `ResourceLoader` (issue
+   * #97) with `additionalExtensionPaths` pointing at the bundled
+   * `resources/pi-packages/*` local packages -- `createAgentSession`'s own
+   * `CreateAgentSessionOptions` has no `additionalExtensionPaths` field, so
+   * feeding it requires constructing a `DefaultResourceLoader` ourselves
+   * (mirroring exactly what `createAgentSession` does internally when no
+   * `resourceLoader` is passed, see pi-coding-agent's `sdk.js`) and passing
+   * it through the existing `resourceLoader` injection seam.
+   */
+  DefaultResourceLoader: typeof DefaultResourceLoaderType;
+  SettingsManager: typeof SettingsManagerType;
   /**
    * Resolves pi-coding-agent's config directory (`~/.pi/agent`, or
    * `$PI_CODING_AGENT_DIR` if set). `AgentRuntime` relies on this being the *same*

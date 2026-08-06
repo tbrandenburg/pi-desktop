@@ -1,0 +1,9 @@
+{
+  "name": "@pi-desktop/read-only-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "First-party pi-package bundling pi-desktop's read_file/list_files read-only tools (ADR 0001 §3.5, issue #97). Ships pre-transpiled -- no runtime jiti/npm needed for this bundled package.",
+  "pi": {
+    "extensions": ["extensions/read-only-tools.js"]
+  }
+}

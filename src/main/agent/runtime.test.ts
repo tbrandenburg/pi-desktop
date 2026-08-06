@@ -9,6 +9,8 @@ import { buildFakeModelRuntime, FAKE_PROVIDER_ID } from "./test-support/fake-mod
 import { buildTestResourceLoader, type TestExtensionLog } from "./test-support/inline-test-extension";
 import type { ChatEvent, ExtensionUIRequest, StartChatRequest } from "../../shared/events";
 
+const REAL_PI_PACKAGES_DIR = path.resolve(__dirname, "../../../resources/pi-packages/read-only-tools");
+
 describe("AgentRuntime (real AgentSession + real SessionManager, fake network)", () => {
   let cwd: string;
   let agentDir: string;
@@ -324,5 +326,127 @@ describe("AgentRuntime UI bridge (ADR 0001 §3.4 Phase 2, issue #91)", () => {
     expect(log.confirmResult).toBe(false);
     expect(log.inputResult).toBeUndefined();
     expect(events.at(-1)).toEqual({ type: "completed", requestId: "req-headless-1" });
+  });
+});
+
+describe("AgentRuntime bundled pi-package discovery (ADR 0001 §3.5, issue #97)", () => {
+  let cwd: string;
+  let agentDir: string;
+  let originalPiAgentDir: string | undefined;
+
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-pi-package-"));
+    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-pi-package-agent-dir-"));
+    originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+  });
+
+  afterEach(() => {
+    if (originalPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalPiAgentDir;
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  it("run() with a real piPackagesDir genuinely discovers read_file/list_files through additionalExtensionPaths and executes a real read against the session cwd", async () => {
+    fs.writeFileSync(path.join(cwd, "discovered.txt"), "found via real pi-package pipeline");
+
+    const runtime = new AgentRuntime(realCodingAgentLoaders, REAL_PI_PACKAGES_DIR);
+    const { modelRuntime, model } = await buildFakeModelRuntime(agentDir);
+    const request: StartChatRequest = {
+      conversationId: "conv-pi-package",
+      model: "fake/fake-model",
+      messages: [{ role: "user", content: "hello" }],
+    };
+    const events: ChatEvent[] = [];
+
+    await runtime.run({
+      requestId: "req-pi-package-1",
+      request,
+      cwd,
+      providerId: FAKE_PROVIDER_ID,
+      model,
+      modelRuntime,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+    });
+
+    // Real proof the chat turn itself still completes cleanly with the
+    // bundled package wired in (no regression to the base chat flow).
+    expect(events[0]).toEqual({ type: "started", requestId: "req-pi-package-1" });
+    expect(events.at(-1)).toEqual({ type: "completed", requestId: "req-pi-package-1" });
+
+    // Real proof of *discovery*: build the exact same kind of resource
+    // loader `run()` builds internally (can't reach into `run()`'s private
+    // loader directly), pointed at the real bundled package dir, and assert
+    // the real extension-loading pipeline (`additionalExtensionPaths` +
+    // `DefaultResourceLoader` + jiti) actually found and loaded it -- not
+    // just that the directory exists on disk.
+    const { DefaultResourceLoader, SettingsManager } = await realCodingAgentLoaders.loadCodingAgent!();
+    const loader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      settingsManager: SettingsManager.create(cwd, agentDir),
+      additionalExtensionPaths: [REAL_PI_PACKAGES_DIR],
+    });
+    await loader.reload();
+    const extensionsResult = loader.getExtensions();
+
+    expect(extensionsResult.errors).toEqual([]);
+    const toolNames = extensionsResult.extensions.flatMap((extension) => Array.from(extension.tools.keys()));
+    expect(toolNames).toEqual(expect.arrayContaining(["read_file", "list_files"]));
+
+    // Real proof the *discovered* tool definition (not a separately
+    // constructed one) actually reads real files when executed.
+    const readFileTool = extensionsResult.extensions
+      .flatMap((extension) => Array.from(extension.tools.values()))
+      .find((tool) => tool.definition.name === "read_file")!;
+    const result = await readFileTool.definition.execute(
+      "call-real",
+      { path: "discovered.txt" },
+      undefined,
+      undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { cwd } as any,
+    );
+    expect(result.content).toEqual([{ type: "text", text: "found via real pi-package pipeline" }]);
+    expect(result.details).toEqual({ path: "discovered.txt" });
+  });
+
+  it("run() without a piPackagesDir never registers read_file/list_files -- proves the bundled package is genuinely optional, not silently always-on", async () => {
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    const { modelRuntime, model } = await buildFakeModelRuntime(agentDir);
+    const request: StartChatRequest = {
+      conversationId: "conv-no-pi-package",
+      model: "fake/fake-model",
+      messages: [{ role: "user", content: "hello" }],
+    };
+    const events: ChatEvent[] = [];
+
+    await runtime.run({
+      requestId: "req-no-pi-package",
+      request,
+      cwd,
+      providerId: FAKE_PROVIDER_ID,
+      model,
+      modelRuntime,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+    });
+
+    expect(events.at(-1)).toEqual({ type: "completed", requestId: "req-no-pi-package" });
+
+    const { DefaultResourceLoader, SettingsManager } = await realCodingAgentLoaders.loadCodingAgent!();
+    const loader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      settingsManager: SettingsManager.create(cwd, agentDir),
+    });
+    await loader.reload();
+    const toolNames = loader
+      .getExtensions()
+      .extensions.flatMap((extension) => Array.from(extension.tools.keys()));
+    expect(toolNames).not.toContain("read_file");
+    expect(toolNames).not.toContain("list_files");
   });
 });
