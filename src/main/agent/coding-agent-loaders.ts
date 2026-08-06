@@ -56,7 +56,7 @@ export interface CodingAgentModule {
   getAgentDir: typeof getAgentDirType;
   /** Reuses pi's own `DefaultPackageManager` AS-IS (ADR 0001 §3.6/§3.7, issue #92) -- see `../packages/service.ts`. */
   DefaultPackageManager: typeof DefaultPackageManagerType;
-  /** Reuses pi's own `ProjectTrustStore` AS-IS (ADR 0001 §3.7, issue #92) -- the mandatory trust gate's storage backend. */
+  /** pi's own project-level trust primitive -- unused by pi-desktop's package install flow (issue #109), kept only as an unused loader field. */
   ProjectTrustStore: typeof ProjectTrustStoreType;
   hasTrustRequiringProjectResources: typeof hasTrustRequiringProjectResourcesType;
 }

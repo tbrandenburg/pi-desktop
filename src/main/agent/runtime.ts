@@ -96,18 +96,6 @@ export class AgentRuntime {
   constructor(
     private readonly loaders: CodingAgentLoaders = {},
     private readonly piPackagesDir?: string,
-    /**
-     * Resolves the on-disk directory paths of every runtime-installed
-     * pi-package the user has explicitly trusted (ADR 0001 §3.6/§3.7, issue
-     * #92) -- see `../packages/service.ts`'s `trustedExtensionPaths()`.
-     * Invoked fresh on every `run()`/`listCommands()` call (never cached
-     * here) so a package installed/removed/trusted mid-session is picked
-     * up on the *next* chat turn without restarting the app. Omitted in
-     * tests and by the lightweight `listCommands` discovery session is
-     * fine -- an empty/omitted list simply means no runtime packages are
-     * fed in, identical to before this constructor param existed.
-     */
-    private readonly getTrustedPackagePaths?: () => Promise<string[]>,
   ) {}
 
   async run({
@@ -262,12 +250,11 @@ export class AgentRuntime {
    * `resourceLoader` mirrors `run()`'s own param of the same name: real
    * production callers (`ChatService.listCommands()`, `ipc.ts`'s
    * `chat:list-commands` handler) never pass one, so this always builds
-   * the same trust-filtered `buildAdditionalPathsResourceLoader()` result
-   * `run()` uses -- otherwise `createAgentSession` would fall back to its
-   * own internal, unfiltered default loader, which lists slash-commands
-   * from every package configured in `settings.json` regardless of this
-   * app's own per-package trust decision (issue #106). Tests inject their
-   * own loader (e.g. `buildTestResourceLoader`) to skip this.
+   * the same `buildAdditionalPathsResourceLoader()` result `run()` uses --
+   * purely to inject the bundled first-party `read-only-tools` package dir
+   * (issue #97), not for any trust filtering (issue #109 removed the
+   * persistent trust gate entirely). Tests inject their own loader (e.g.
+   * `buildTestResourceLoader`) to skip this.
    */
   async listCommands(cwd: string, resourceLoader?: ResourceLoader): Promise<CommandInfo[]> {
     const { createAgentSession, ModelRuntime, SessionManager, DefaultResourceLoader, SettingsManager, getAgentDir } =
@@ -296,13 +283,20 @@ export class AgentRuntime {
    * Builds a real `DefaultResourceLoader` identical to the one
    * `createAgentSession` constructs internally when no `resourceLoader` is
    * passed, except with `additionalExtensionPaths` set to the bundled
-   * first-party `read-only-tools` package dir (issue #97) plus every
-   * runtime-installed, user-*trusted* pi-package dir (issue #92) --
-   * untrusted/undecided packages are simply never included here, which is
-   * the actual enforcement point of the mandatory trust gate (see
-   * `../packages/service.ts`). Returns `undefined` (falls back to
-   * `createAgentSession`'s own internal default) when there is nothing to
-   * add, matching the pre-#92 behavior exactly.
+   * first-party `read-only-tools` package dir (issue #97). Returns
+   * `undefined` (falls back to `createAgentSession`'s own internal
+   * default) when there is nothing to add.
+   *
+   * Issue #109: this used to also gate in every runtime-installed
+   * pi-package dir the user had explicitly consented to keep enabled, and
+   * set `noExtensions: true` to suppress the library's own
+   * `settings.json`-derived extension resolution so a not-yet-consented
+   * package couldn't sneak in that way (issue #105). Both were removed
+   * #105). Both were removed together: there is no more trust filtering,
+   * so every package configured in `settings.json` should load exactly
+   * the way it would for the real `pi` CLI -- `noExtensions: true` staying
+   * in place after removing the trust filter would have silently broken
+   * every installed package instead.
    */
   private async buildAdditionalPathsResourceLoader(
     DefaultResourceLoaderClass: CodingAgentModule["DefaultResourceLoader"],
@@ -310,11 +304,7 @@ export class AgentRuntime {
     getAgentDirFn: CodingAgentModule["getAgentDir"],
     cwd: string,
   ): Promise<ResourceLoader | undefined> {
-    const trustedPackagePaths = (await this.getTrustedPackagePaths?.()) ?? [];
-    const additionalExtensionPaths = [
-      ...(this.piPackagesDir ? [this.piPackagesDir] : []),
-      ...trustedPackagePaths,
-    ];
+    const additionalExtensionPaths = [...(this.piPackagesDir ? [this.piPackagesDir] : [])];
     if (additionalExtensionPaths.length === 0) return undefined;
 
     const agentDir = getAgentDirFn();
@@ -323,20 +313,6 @@ export class AgentRuntime {
       agentDir,
       settingsManager: SettingsManagerClass.create(cwd, agentDir),
       additionalExtensionPaths,
-      // issue #105: since #104 made `PackageService` and `AgentRuntime`
-      // share the same `agentDir`/`settings.json`, `resolve()`'s own
-      // `enabledExtensions` (every package configured in `settings.json`,
-      // trusted or not) would otherwise get merged alongside
-      // `additionalExtensionPaths` (see `resource-loader.js`'s
-      // `loadCurrentExtensionSet`), silently bypassing the mandatory trust
-      // gate for any package the CLI (or a declined-trust pi-desktop
-      // install) already persisted there. `noExtensions: true` excludes
-      // that settings.json-derived path entirely -- `additionalExtensionPaths`
-      // above (bundled `read-only-tools` + `trustedExtensionPaths()`) is
-      // and remains the *only* way extensions get loaded into a real
-      // pi-desktop chat session. Only "extensions" resolution is gated by
-      // this flag; skills/prompts/themes are unaffected.
-      noExtensions: true,
     });
     await loader.reload();
     return loader;
