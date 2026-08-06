@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PackageService, PackageTrustStore } from "./service";
+import { PackageService } from "./service";
 import { realCodingAgentLoaders } from "../agent/test-support/real-coding-agent-loaders";
-import { AgentRuntime } from "../agent/runtime";
 
 /**
  * Writes a real, tiny local pi-package to disk: a `package.json` with a
@@ -26,59 +25,6 @@ function writeFixturePackage(dir: string, markerName: string): string {
     };`,
   );
   return dir;
-}
-
-/**
- * Real extension discovery (no trust gate involved) -- proves whether
- * `paths` are actually loaded by pi-coding-agent's own resource loader.
- * Uses its own throwaway `agentDir`/`cwd`, deliberately decoupled from
- * `PackageService`'s real shared `getAgentDir()` directory: this isolates
- * "does `additionalExtensionPaths` alone make a path load" from
- * `DefaultResourceLoader.resolve()`'s *separate*, unconditional loading of
- * every package already configured in `settings.json` -- which is a real,
- * distinct behavior from the trust-gated `additionalExtensionPaths` list,
- * and would otherwise make this helper load the fixture package
- * unconditionally once it's persisted to the same shared agentDir,
- * independent of the trust decision under test (see handoff notes for the
- * broader implication).
- */
-async function discoveredCommandNames(paths: string[]): Promise<string[]> {
-  const { createAgentSession, ModelRuntime, SessionManager, DefaultResourceLoader, SettingsManager } =
-    await realCodingAgentLoaders.loadCodingAgent!();
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-pkg-cwd-"));
-  const isolatedAgentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-pkg-discover-agentdir-"));
-  try {
-    const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
-    // Always construct an explicit resourceLoader (even for an empty
-    // `paths` list): `createAgentSession` falls back to its own internal
-    // default loader when none is passed, which resolves `getAgentDir()`
-    // from `$PI_CODING_AGENT_DIR` -- the *same* shared agentDir the outer
-    // test suite points `PackageService` at. Omitting this would silently
-    // load the fixture package straight out of that shared `settings.json`,
-    // unconditionally, regardless of the trust decision under test.
-    const resourceLoader = new DefaultResourceLoader({
-      cwd,
-      agentDir: isolatedAgentDir,
-      settingsManager: SettingsManager.create(cwd, isolatedAgentDir),
-      additionalExtensionPaths: paths,
-    });
-    await resourceLoader.reload();
-    const { extensionsResult } = await createAgentSession({
-      cwd,
-      modelRuntime,
-      sessionManager: SessionManager.inMemory(cwd),
-      noTools: "all",
-      resourceLoader,
-    });
-    const names: string[] = [];
-    for (const extension of extensionsResult.extensions) {
-      for (const [name] of extension.commands) names.push(name);
-    }
-    return names;
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-    fs.rmSync(isolatedAgentDir, { recursive: true, force: true });
-  }
 }
 
 /**
@@ -119,11 +65,8 @@ describe("PackageService (real DefaultPackageManager + real shared agentDir, thr
     fs.rmSync(fixtureDir, { recursive: true, force: true });
   });
 
-  function makeService(
-    confirmTrust: (source: string) => Promise<boolean> = async () => true,
-    confirmNpmInstall: (source: string) => Promise<boolean> = async () => true,
-  ): PackageService {
-    return new PackageService(confirmTrust, confirmNpmInstall, realCodingAgentLoaders);
+  function makeService(confirmInstall: (source: string) => Promise<boolean> = async () => true): PackageService {
+    return new PackageService(confirmInstall, realCodingAgentLoaders);
   }
 
   it("installs a real local-path source into the real shared agentDir (getAgentDir()), and lists it back", async () => {
@@ -133,14 +76,13 @@ describe("PackageService (real DefaultPackageManager + real shared agentDir, thr
     const installed = await service.install(source);
 
     expect(installed.source).toBe(source);
-    expect(installed.trusted).toBe(true);
 
     const listed = await service.list();
     expect(listed).toHaveLength(1);
     // pi's own `DefaultPackageManager` normalizes local-path sources it
-    // persists (e.g. relative-to-agentDir form) -- still fully source-visible
-    // per ADR §3.7, just not necessarily byte-identical to what was typed.
-    expect(listed[0].trusted).toBe(true);
+    // persists (e.g. relative-to-agentDir form) -- still fully
+    // source-visible, just not necessarily byte-identical to what was
+    // typed.
     expect(path.resolve(agentDir, listed[0].source)).toBe(source);
 
     // Real shared agentDir: the settings file this wrote must be under
@@ -149,21 +91,36 @@ describe("PackageService (real DefaultPackageManager + real shared agentDir, thr
     expect(fs.existsSync(path.join(agentDir, "settings.json"))).toBe(true);
   });
 
-  it("prompts for trust exactly once on first install of an undecided source, and never re-prompts on a later re-install", async () => {
-    const source = writeFixturePackage(path.join(fixtureDir, "pkg-b"), "pkg-b-marker");
+  it("declining the single pre-install confirm aborts before anything is installed or written to settings.json", async () => {
+    const source = writeFixturePackage(path.join(fixtureDir, "pkg-decline"), "pkg-decline-marker");
+    let confirmCalls = 0;
+    const service = makeService(async () => {
+      confirmCalls += 1;
+      return false;
+    });
+
+    await expect(service.install(source)).rejects.toThrow(/declined/i);
+    expect(confirmCalls).toBe(1);
+
+    // Nothing installed, no settings.json write.
+    await expect(service.list()).resolves.toEqual([]);
+    expect(fs.existsSync(path.join(agentDir, "settings.json"))).toBe(false);
+  });
+
+  it("accepting the single pre-install confirm installs normally, exactly once per install call", async () => {
+    const source = writeFixturePackage(path.join(fixtureDir, "pkg-accept"), "pkg-accept-marker");
     let confirmCalls = 0;
     const service = makeService(async () => {
       confirmCalls += 1;
       return true;
     });
 
-    const first = await service.install(source);
-    expect(first.trusted).toBe(true);
+    const installed = await service.install(source);
+    expect(installed.source).toBe(source);
     expect(confirmCalls).toBe(1);
 
-    const second = await service.install(source);
-    expect(second.trusted).toBe(true);
-    expect(confirmCalls).toBe(1);
+    const listed = await service.list();
+    expect(listed).toHaveLength(1);
   });
 
   describe("npm: source support", () => {
@@ -178,43 +135,26 @@ describe("PackageService (real DefaultPackageManager + real shared agentDir, thr
       }
     });
 
-    it("declining the pre-install npm confirm never installs anything, and never reaches the trust prompt", async () => {
+    it("declining the single install confirm never installs an npm: source", async () => {
       fakeBin = writeFakeNpmOnPath();
-      let trustConfirmCalls = 0;
-      const service = makeService(
-        async () => {
-          trustConfirmCalls += 1;
-          return true;
-        },
-        async () => false,
-      );
+      const service = makeService(async () => false);
 
       await expect(service.install("npm:some-package")).rejects.toThrow(/declined/i);
-      expect(trustConfirmCalls).toBe(0);
       await expect(service.list()).resolves.toEqual([]);
     });
 
-    it("accepting the pre-install npm confirm proceeds to a real install attempt via DefaultPackageManager, then the post-install trust gate", async () => {
+    it("accepting the confirm proceeds to a real install attempt via DefaultPackageManager for an npm: source", async () => {
       fakeBin = writeFakeNpmOnPath();
-      let npmConfirmCalls = 0;
-      let trustConfirmCalls = 0;
-      const service = makeService(
-        async () => {
-          trustConfirmCalls += 1;
-          return true;
-        },
-        async () => {
-          npmConfirmCalls += 1;
-          return true;
-        },
-      );
+      let confirmCalls = 0;
+      const service = makeService(async () => {
+        confirmCalls += 1;
+        return true;
+      });
 
       const installed = await service.install("npm:fixture-npm-package");
 
-      expect(npmConfirmCalls).toBe(1);
-      expect(trustConfirmCalls).toBe(1);
+      expect(confirmCalls).toBe(1);
       expect(installed.source).toBe("npm:fixture-npm-package");
-      expect(installed.trusted).toBe(true);
 
       const listed = await service.list();
       expect(listed).toHaveLength(1);
@@ -226,14 +166,14 @@ describe("PackageService (real DefaultPackageManager + real shared agentDir, thr
       const originalPath = process.env.PATH;
       process.env.PATH = emptyBinDir;
       try {
-        let npmConfirmCalls = 0;
-        const service = makeService(async () => true, async () => {
-          npmConfirmCalls += 1;
+        let confirmCalls = 0;
+        const service = makeService(async () => {
+          confirmCalls += 1;
           return true;
         });
 
         await expect(service.install("npm:some-package")).rejects.toThrow(/no npm-capable package manager/i);
-        expect(npmConfirmCalls).toBe(0);
+        expect(confirmCalls).toBe(0);
       } finally {
         if (originalPath === undefined) delete process.env.PATH;
         else process.env.PATH = originalPath;
@@ -242,115 +182,75 @@ describe("PackageService (real DefaultPackageManager + real shared agentDir, thr
     });
   });
 
-  it("the trust gate genuinely blocks execution: an untrusted package's resolved path is withheld from trustedExtensionPaths, and its real registerCommand never loads -- once trusted, both flip", async () => {
-    const markerName = "trust-gate-marker-cmd";
-    const source = writeFixturePackage(path.join(fixtureDir, "pkg-c"), markerName);
-    const service = makeService(async () => false);
+  it("an installed package's resource-loader path is NOT suppressed (issue #109: no more noExtensions/trust filtering) -- its real registerCommand loads via the library's own settings.json-derived resolution", async () => {
+    const markerName = "issue-109-marker-cmd";
+    const source = writeFixturePackage(path.join(fixtureDir, "pkg-e"), markerName);
+    const service = makeService();
 
-    // 1. Install with a declined trust prompt.
-    const installed = await service.install(source);
-    expect(installed.trusted).toBe(false);
+    await service.install(source);
 
-    // 2. Untrusted: withheld from the resolved path list AgentRuntime feeds
-    //    into the real extension-discovery pipeline.
-    const untrustedPaths = await service.trustedExtensionPaths();
-    expect(untrustedPaths).toEqual([]);
-
-    // 3. Proven at the real pi-coding-agent extension-loading layer (not
-    //    just "the list is empty" -- the marker command genuinely never
-    //    gets registered when fed an empty path list).
-    const commandsWhileUntrusted = await discoveredCommandNames(untrustedPaths);
-    expect(commandsWhileUntrusted).not.toContain(markerName);
-
-    // 4. The user (or a settings UI action) later trusts the exact same
-    //    real trust-store entry directly -- proving this is a real,
-    //    persisted, flippable decision, not a one-way gate. Uses the same
-    //    canonical key `PackageService` itself resolves for a local-path
-    //    source with no on-disk normalization (its own absolute path).
-    new PackageTrustStore(agentDir).set(source, true);
-
-    const trustedPaths = await service.trustedExtensionPaths();
-    expect(trustedPaths).toEqual([source]);
-
-    // 5. Now genuinely loads and registers the real marker command.
-    const commandsWhileTrusted = await discoveredCommandNames(trustedPaths);
-    expect(commandsWhileTrusted).toContain(markerName);
-  });
-
-  it("issue #105 regression: an untrusted package's command never loads through AgentRuntime's REAL resource-loader wiring against the SAME shared agentDir it was installed into (not an isolated fixture agentDir) -- proves settings.json-configured packages don't bypass the trust gate", async () => {
-    const markerName = "issue-105-marker-cmd";
-    const source = writeFixturePackage(path.join(fixtureDir, "pkg-105"), markerName);
-    const service = makeService(async () => false);
-
-    // Installed but declined trust -- the package IS persisted into the
-    // real shared `settings.json` (same `agentDir` `AgentRuntime` uses for
-    // real chat turns, per #104), it just isn't in `trustedExtensionPaths()`.
-    const installed = await service.install(source);
-    expect(installed.trusted).toBe(false);
-    expect(await service.trustedExtensionPaths()).toEqual([]);
-
-    // Exercises the REAL, private `buildAdditionalPathsResourceLoader`
-    // method AgentRuntime.run() calls internally -- not a hand-rolled
-    // reconstruction of it -- fed the real `getTrustedPackagePaths`
-    // callback wired to this same `PackageService` instance, exactly as
-    // production `ipc.ts` wiring does. A harmless, command-free
-    // `piPackagesDir` fixture is passed (mirroring production's always-set
-    // bundled `read-only-tools` dir) purely so `additionalExtensionPaths`
-    // is non-empty and the method returns a real loader instead of
-    // `undefined` (its "nothing to add" short-circuit) -- it registers no
-    // commands itself, so it cannot affect this test's assertion.
-    const harmlessPiPackagesDir = writeFixturePackage(
-      path.join(fixtureDir, "harmless-pi-packages-dir"),
-      "harmless-unrelated-marker",
-    );
-    const runtime = new AgentRuntime(
-      realCodingAgentLoaders,
-      harmlessPiPackagesDir,
-      () => service.trustedExtensionPaths(),
-    );
-    const { DefaultResourceLoader, SettingsManager, getAgentDir } = await realCodingAgentLoaders.loadCodingAgent!();
-    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-pkg-105-cwd-"));
+    // Exercises the real, unfiltered `DefaultResourceLoader` default
+    // resolution (no `additionalExtensionPaths`, no `noExtensions`) against
+    // the SAME shared agentDir the package was installed into -- proving
+    // library-default `settings.json`-driven extension resolution is
+    // restored, not suppressed.
+    const { createAgentSession, ModelRuntime, SessionManager, DefaultResourceLoader, SettingsManager, getAgentDir } =
+      await realCodingAgentLoaders.loadCodingAgent!();
+    expect(getAgentDir()).toBe(agentDir);
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-pkg-109-cwd-"));
     try {
-      // Proves this is genuinely the SAME shared agentDir the package was
-      // installed into (via the `PI_CODING_AGENT_DIR` env var set in
-      // `beforeEach`) -- not a decoupled/isolated one, which is exactly
-      // what hid this bug pre-fix (see `discoveredCommandNames`'s doc
-      // comment above).
-      expect(getAgentDir()).toBe(agentDir);
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const loader = await (runtime as any).buildAdditionalPathsResourceLoader(
-        DefaultResourceLoader,
-        SettingsManager,
-        getAgentDir,
+      const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
+      const resourceLoader = new DefaultResourceLoader({
         cwd,
-      );
+        agentDir,
+        settingsManager: SettingsManager.create(cwd, agentDir),
+      });
+      await resourceLoader.reload();
+      const { extensionsResult } = await createAgentSession({
+        cwd,
+        modelRuntime,
+        sessionManager: SessionManager.inMemory(cwd),
+        noTools: "all",
+        resourceLoader,
+      });
       const commandNames: string[] = [];
-      for (const extension of loader.getExtensions().extensions) {
+      for (const extension of extensionsResult.extensions) {
         for (const [name] of extension.commands) commandNames.push(name);
       }
-
-      // Before the #105 fix (`noExtensions: true`), this package -- present
-      // in the shared `settings.json` from `service.install()` above --
-      // would load unconditionally via `resolve()`'s own
-      // `enabledExtensions`, regardless of the declined trust decision.
-      expect(commandNames).not.toContain(markerName);
+      expect(commandNames).toContain(markerName);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
   });
 
-  it("remove deletes the configured package so it no longer appears in list() or trustedExtensionPaths()", async () => {
+  it("a package installed via the real pi CLI (already in settings.json, never seen by pi-desktop's install()) lists normally with no prompt", async () => {
+    // Simulates CLI parity: write directly into the shared agentDir's
+    // settings.json the way `DefaultPackageManager.installAndPersist` would,
+    // without ever going through `PackageService.install()`.
+    const source = writeFixturePackage(path.join(fixtureDir, "pkg-cli"), "pkg-cli-marker");
+    const service = makeService(async () => {
+      throw new Error("should never be prompted for an already-configured package");
+    });
+    const { DefaultPackageManager, SettingsManager, getAgentDir } = await realCodingAgentLoaders.loadCodingAgent!();
+    const settingsManager = SettingsManager.create(agentDir, agentDir);
+    const packageManager = new DefaultPackageManager({ cwd: agentDir, agentDir, settingsManager });
+    await packageManager.installAndPersist(source);
+    expect(getAgentDir()).toBe(agentDir);
+
+    const listed = await service.list();
+    expect(listed).toHaveLength(1);
+    expect(path.resolve(agentDir, listed[0].source)).toBe(source);
+  });
+
+  it("remove deletes the configured package so it no longer appears in list()", async () => {
     const source = writeFixturePackage(path.join(fixtureDir, "pkg-d"), "pkg-d-marker");
     const service = makeService();
 
     await service.install(source);
     expect(await service.list()).toHaveLength(1);
-    expect(await service.trustedExtensionPaths()).toEqual([source]);
 
     await service.remove(source);
 
     expect(await service.list()).toEqual([]);
-    expect(await service.trustedExtensionPaths()).toEqual([]);
   });
 });

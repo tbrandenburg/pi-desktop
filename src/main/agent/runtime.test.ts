@@ -475,16 +475,16 @@ describe("AgentRuntime bundled pi-package discovery (ADR 0001 §3.5, issue #97)"
   });
 });
 
-describe("AgentRuntime.listCommands() trust gate (issue #106)", () => {
+describe("AgentRuntime.listCommands() library-default resolution (issue #109: no trust gate)", () => {
   let cwd: string;
   let agentDir: string;
   let fixtureDir: string;
   let originalPiAgentDir: string | undefined;
 
   beforeEach(() => {
-    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-106-cwd-"));
-    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-106-agentdir-"));
-    fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-106-fixture-"));
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-109-cwd-"));
+    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-109-agentdir-"));
+    fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-109-fixture-"));
     originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = agentDir;
   });
@@ -497,41 +497,36 @@ describe("AgentRuntime.listCommands() trust gate (issue #106)", () => {
     fs.rmSync(fixtureDir, { recursive: true, force: true });
   });
 
-  it("an untrusted package's command never appears in listCommands() called the real production way (no explicit resourceLoader)", async () => {
-    const markerName = "issue-106-untrusted-marker-cmd";
-    const source = writeFixturePackage(path.join(fixtureDir, "pkg-106"), markerName);
+  it("a package installed via PackageService (settings.json-configured, real production call shape, no explicit resourceLoader) DOES appear in listCommands() -- proves noExtensions removal restored library-default resolution", async () => {
+    const markerName = "issue-109-restored-marker-cmd";
+    const source = writeFixturePackage(path.join(fixtureDir, "pkg-109"), markerName);
 
     // Real `PackageService` sharing the same `agentDir`/`settings.json`
-    // AgentRuntime uses (per #104), with trust declined (per #105's
-    // regression pattern) -- the package IS persisted into settings.json,
-    // it just never shows up in `trustedExtensionPaths()`.
-    const service = new PackageService(async () => false, async () => true, realCodingAgentLoaders);
+    // AgentRuntime uses (per #104), with the single pre-install confirm
+    // accepted.
+    const service = new PackageService(async () => true, realCodingAgentLoaders);
     const installed = await service.install(source);
-    expect(installed.trusted).toBe(false);
-    expect(await service.trustedExtensionPaths()).toEqual([]);
+    expect(installed.source).toBe(source);
 
-    // Real production call shape: `AgentRuntime` constructed with the bundled
-    // `piPackagesDir` + `getTrustedPackagePaths` wired to this same
-    // `PackageService`, exactly like `ipc.ts` wires it in production, and
-    // `listCommands()` called with NO explicit `resourceLoader` argument --
-    // this is exactly how `ChatService.listCommands()` and `ipc.ts`'s
-    // `chat:list-commands` handler call it in production.
-    const runtime = new AgentRuntime(realCodingAgentLoaders, REAL_PI_PACKAGES_DIR, () =>
-      service.trustedExtensionPaths(),
-    );
+    // Real production call shape: `AgentRuntime` constructed with the
+    // bundled `piPackagesDir`, exactly like `ipc.ts` wires it in
+    // production, and `listCommands()` called with NO explicit
+    // `resourceLoader` argument -- this is exactly how
+    // `ChatService.listCommands()` and `ipc.ts`'s `chat:list-commands`
+    // handler call it in production.
+    const runtime = new AgentRuntime(realCodingAgentLoaders, REAL_PI_PACKAGES_DIR);
 
     const commands = await runtime.listCommands(cwd);
     const commandNames = commands.map((c) => c.name);
 
-    // Before the #106 fix, `listCommands()` passed `resourceLoader`
-    // (`undefined`) straight through to `createAgentSession`, which falls
-    // back to its own internal, unfiltered default loader -- resolving
-    // every package configured in the shared `settings.json`, trusted or
-    // not. After the fix, `listCommands()` builds the same trust-filtered
-    // loader `run()` uses, so the untrusted package's command must be
-    // excluded while the app still functions (empty list is valid, no
-    // exception thrown).
-    expect(commandNames).not.toContain(markerName);
+    // Before issue #109's fix, `buildAdditionalPathsResourceLoader` set
+    // `noExtensions: true`, which suppressed ALL settings.json-derived
+    // extension resolution regardless of trust -- a settings.json
+    // configured package's command would never appear here. After
+    // removing both the trust filter and `noExtensions: true` together,
+    // library-default resolution is restored and the command must appear.
+    expect(commandNames).toContain(markerName);
     expect(Array.isArray(commands)).toBe(true);
   });
 });
+

@@ -23,8 +23,8 @@ export function createFakeDesktopApi(): DesktopAgentApi {
   const sessions = new Map<string, SessionRecord>();
   let listener: ((event: import("../../shared/events").ChatEvent) => void) | null = null;
   let workspaceDir = "/home/fake-user";
-  // Small in-memory package list -- no real install/trust logic here, just
-  // enough shape (source + trusted) to keep the Settings UI's package list
+  // Small in-memory package list -- no real install logic here, just
+  // enough shape (source) to keep the Settings UI's package list
   // section exercisable in the browser dev harness (see AGENTS.md lesson #14).
   const packages: PackageInfo[] = [];
 
@@ -130,11 +130,10 @@ export function createFakeDesktopApi(): DesktopAgentApi {
     },
 
     async installPackage(source) {
-      // The fake harness auto-confirms both the npm pre-install warning and
-      // the post-install trust prompt (no real modal exists in the browser
-      // dev harness) -- the real bridge always blocks on genuine confirm
-      // dialogs instead, see `src/main/packages/service.ts`.
-      const info: PackageInfo = { source: source.trim(), trusted: true };
+      // The fake harness auto-confirms the install (no real modal exists in
+      // the browser dev harness) -- the real bridge always blocks on a
+      // genuine confirm dialog instead, see `src/main/packages/service.ts`.
+      const info: PackageInfo = { source: source.trim() };
       const existingIndex = packages.findIndex((p) => p.source === info.source);
       if (existingIndex >= 0) packages[existingIndex] = info;
       else packages.push(info);

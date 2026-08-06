@@ -47,8 +47,8 @@ export function registerIpcHandlers(
   const sessionService = new SessionService(getWorkspaceDir, deps.agentCoreLoaders, deps.codingAgentLoaders);
 
   // Shared across chat's extension `ctx.ui.*` dialogs (#91) AND the
-  // mandatory package-install trust prompt (#92) -- one real modal
-  // mechanism, never two parallel ones.
+  // package-install consent prompt (#109) -- one real modal mechanism,
+  // never two parallel ones.
   const uiContextBridge = new IpcUIContextBridge((request) => {
     const win = getWindow();
     if (!win || win.isDestroyed()) return;
@@ -58,20 +58,13 @@ export function registerIpcHandlers(
   const packageService = new PackageService(
     (source) =>
       uiContextBridge.uiContext.confirm(
-        "Trust this package?",
-        `"${source}" was just installed. Its code can run with full system access, exactly like any other pi extension. Only trust packages from sources you control or fully trust.`,
-      ),
-    (source) =>
-      uiContextBridge.uiContext.confirm(
-        "Install this npm package now?",
-        `Installing "${source}" will run its npm lifecycle scripts (e.g. postinstall) immediately, before any review is possible. Only proceed if you trust this source.`,
+        "Install this package?",
+        `"${source}" will run with full system access, exactly like any other pi extension (npm sources also run install scripts immediately, before any review). Only install packages from sources you control or fully trust.`,
       ),
     deps.codingAgentLoaders,
   );
 
-  const agentRuntime = new AgentRuntime(deps.codingAgentLoaders, resolvePiPackagesReadOnlyToolsDir(), () =>
-    packageService.trustedExtensionPaths(),
-  );
+  const agentRuntime = new AgentRuntime(deps.codingAgentLoaders, resolvePiPackagesReadOnlyToolsDir());
   const chatService = new ChatService(
     settingsStore,
     getWindow,

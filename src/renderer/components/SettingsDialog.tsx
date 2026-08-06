@@ -33,8 +33,8 @@ export function SettingsDialog() {
     setError(null);
     setInstalling(true);
     try {
-      // `installPackage` blocks on the real, mandatory trust prompt
-      // (ADR 0001 §3.7) -- this call only resolves once the user has
+      // `installPackage` blocks on the real, mandatory pre-install consent
+      // prompt (ADR 0001 §3.7) -- this call only resolves once the user has
       // answered it.
       await desktopApi().installPackage(trimmed);
       setSource("");
@@ -64,8 +64,8 @@ export function SettingsDialog() {
         <div className="mb-4">
           <h3 className="mb-2 text-sm font-semibold text-white">Packages</h3>
           <p className="mb-2 text-xs text-white/60">
-            Install a local-path or git pi-package. Third-party package code runs with full
-            system access -- you will be asked to explicitly trust each package before it runs.
+            Install a local-path, git, or npm pi-package. Installed packages run with full
+            system access -- remove any you no longer trust.
           </p>
 
           <div className="mb-2 flex gap-2">
@@ -99,7 +99,6 @@ export function SettingsDialog() {
                 >
                   <span className="truncate" title={pkg.source}>
                     {pkg.source}
-                    {!pkg.trusted && <span className="ml-2 text-amber-400">(untrusted)</span>}
                   </span>
                   <button
                     type="button"

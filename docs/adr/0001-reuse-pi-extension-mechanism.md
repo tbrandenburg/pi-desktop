@@ -301,7 +301,7 @@ The stages gate which **capabilities are surfaced**, not the contract. The real
 |---|---|---|---|
 | **1 — Runtime swap, headless** | `AgentHarness` → `AgentSession`; real `ExtensionRunner`; `hasUI=false`; load bundled tool/skill extensions only; commands/hooks *load* but UI calls no-op | Tool-only pkgs (~2%) **on the real runner** — plus a proven foundation | Runtime rewrite (contained); ESM/CJS + jiti-in-asar revalidation; +~13 MB packaged |
 | **2 — UI bridge** | `ExtensionUIContext` (`select`/`confirm`/`input`/`notify`) over IPC → React modals; surface slash-commands in the composer | **~80%** (`ctx.ui`) + **~76%** (`registerCommand`) — the big jump | IPC + React modal adapter (genuine glue) |
-| **3 — Providers + runtime install** | `registerProvider` bridge; `DefaultPackageManager` over IPC for user installs; **trust/consent gate** | Provider-based + user-installable packages | Provider wiring; portable-exe npm degradation; security gate |
+| **3 — Providers + runtime install** | `registerProvider` bridge; `DefaultPackageManager` over IPC for user installs; **one-time install consent** | Provider-based + user-installable packages | Provider wiring; portable-exe npm degradation; consent UX |
 
 TUI-only APIs (`custom()`, `setWidget`, `setFooter`, `setEditorComponent` — they
 return `@earendil-works/pi-tui` `Component`s) are **never** implemented; they stay
@@ -382,11 +382,11 @@ local-path & git only → bundled npm → full npm on installers with system Nod
 > **Recommendation: ship only the first ladder tier — local-path & git —
 > for the first Phase 3 release.** It needs zero new vendored dependencies,
 > zero registry-availability/rate-limit dependency at runtime, and lets the
-> mandatory §3.7 trust/consent gate be built and validated against the
-> smallest possible install surface (a git URL + pinned ref) before ever
-> adding npm's much larger arbitrary-code + transitive-dependency attack
-> surface. "Full npm on installers with system Node" (ladder tier 3) is moot
-> for now anyway, since `AGENTS.md` rule #6 already defers Windows/installer
+> §3.7 install-consent flow be built and validated against the smallest
+> possible install surface (a git URL + pinned ref) before ever adding
+> npm's much larger arbitrary-code + transitive-dependency attack surface.
+> "Full npm on installers with system Node" (ladder tier 3) is moot for now
+> anyway, since `AGENTS.md` rule #6 already defers Windows/installer
 > packaging. Whether "bundled npm" (tier 2) is ever worth building at all is
 > a genuinely open **product** question (real user demand for npm-registry
 > `pi-package` installs vs. git-hosted ones) that this research cannot
@@ -397,15 +397,21 @@ local-path & git only → bundled npm → full npm on installers with system Nod
 > `DefaultPackageManager`'s own npm install path as-is (no bespoke fetcher),
 > gated by an additional pre-install confirm warning that npm lifecycle
 > scripts run immediately, plus the existing §3.7 post-install trust gate.
+>
+> **Superseded again (issue #109):** the separate npm-specific pre-install
+> confirm and the post-install trust gate were collapsed into a single
+> pre-install consent prompt shown for every source type (local-path, git,
+> `npm:` alike) -- see §3.7 below for the full rationale.
 
-### 3.7 Security / trust (non-negotiable before Phase 3)
+### 3.7 Security / consent (one-time, install-time only)
 
 `pi-coding-agent`'s `docs/packages.md`: *"Pi packages run with full system
-access. Extensions execute arbitrary code."* In a distributed desktop binary this
-is a larger liability than in a CLI. Before **runtime** third-party install
-ships: an explicit consent/trust gate (reuse pi's `ProjectTrustStore`), plus a
-Settings-dialog listing of installed packages + source + remove. Build-time
-curated bundles are vetted by us but still listed.
+access. Extensions execute arbitrary code."* In a distributed desktop binary
+this is a larger liability than in a CLI. Runtime third-party install requires
+a single, real pre-install consent prompt, plus a Settings-dialog listing of
+installed packages + source + remove -- full transparency instead of a
+persistent capability gate. Build-time curated bundles are vetted by us but
+still listed.
 
 > **Clarified (2026-08-05, source-verified):** confirmed against the real
 > `pi-coding-agent` source (`dist/core/project-trust.js`,
@@ -414,27 +420,50 @@ curated bundles are vetted by us but still listed.
 > per-package permission model) — its only mitigation is (a) a single binary
 > "trust this project, yes/no" consent gate before any extension in it runs,
 > and (b) the documented human recommendation to *"review source code before
-> installing third-party packages"*. pi-desktop's Phase 3 trust gate is
-> deliberately scoped to **match this exact model** (reuse `ProjectTrustStore`
-> as-is, one consent prompt, source-visible package list) rather than invent
-> a stricter capability-sandboxing layer pi itself doesn't have — staying at
+> installing third-party packages"*. pi-desktop's install-consent flow is
+> deliberately scoped to **match this exact model** (one consent prompt,
+> source-visible package list, no capability sandbox) rather than invent a
+> stricter capability-sandboxing layer pi itself doesn't have — staying at
 > parity with the upstream CLI/TUI's actual security posture, not exceeding
 > or diverging from it. Any future desire for real sandboxing (e.g.
 > restricting network access per extension) would be new pi-desktop-specific
 > scope beyond what `pi` provides today, and should be raised and decided as
 > its own explicit ADR, not folded into this migration.
 >
-> **Corrected (issue #104):** `ProjectTrustStore` is NOT actually reused
-> as-is for this gate. It was found to be empirically unsafe for
-> package-source-keyed trust: its `normalizeCwd`/`findNearestTrustEntry`
-> treat every key as a filesystem path and walk up parent directories,
-> silently inheriting `trusted=true` for a local-path package nested under
-> an already-trusted project directory, and silently resolving non-path
-> source strings (`git:...`, `npm:...`) relative to `process.cwd()`. A
-> small dedicated exact-match key/value trust store
-> (`<agentDir>/pi-desktop-package-trust.json`) is used instead -- same
-> "ask once, persist the binary decision" model, but with opaque,
-> non-path keys and no ancestor walk.
+> **Corrected (issue #104):** `ProjectTrustStore` was never actually reused
+> as-is for the (now-removed) per-package trust gate. It was found to be
+> empirically unsafe for package-source-keyed trust decisions: its
+> `normalizeCwd`/`findNearestTrustEntry` treat every key as a filesystem
+> path and walk up parent directories, silently inheriting a decision for a
+> local-path package nested under an already-decided project directory, and
+> silently resolving non-path source strings (`git:...`, `npm:...`) relative
+> to `process.cwd()`. A dedicated exact-match key/value store was built
+> instead as a stopgap (superseded below).
+>
+> **Superseded (issue #109) -- the persistent trust gate was removed
+> entirely.** Two real bugs shipped in a single day from the same root
+> cause: #105 (`DefaultResourceLoader` unconditionally merging every
+> `settings.json`-configured package into the loaded extension set once
+> #104 shared `agentDir`, bypassing the gate) and #106 (`AgentRuntime
+> .listCommands()` building its own resource loader via a separate code
+> path that never applied the filter, leaking untrusted command names into
+> `/` autocomplete). Both were the same class of bug in two different call
+> sites, and there was no structural guarantee a third didn't exist:
+> enforcing an app-invented capability gate correctly requires an identical
+> filter at *every* place `pi-coding-agent` resolves extensions internally
+> -- and every one of those call sites lives inside a library pi-desktop
+> does not control. The fix is structural, not another patch: there is no
+> more persistent trust/enabled state at all. Instead, a single informed
+> consent prompt is shown once, before anything is installed, for every
+> source type alike (local-path, git, `npm:`) -- declining it installs
+> nothing and writes nothing to `settings.json`. After that, every
+> configured package always loads, exactly as it would for the real `pi`
+> CLI -- the Settings dialog's package list is exactly the set of packages
+> that run, with no hidden accepted/declined state to drift out of sync
+> with the library's own resolution. This is a *closer* match to upstream
+> `pi`'s own security posture (described just above) than the removed gate
+> ever was, not a weaker one: `pi` itself has no persistent per-package
+> capability gate either, only a one-time consent prompt.
 
 ---
 
@@ -493,8 +522,8 @@ curated bundles are vetted by us but still listed.
 > confirmed against GitHub's docs) is a worthwhile complement — grouping any
 > bot-proposed bump of the three into one PR — but not a replacement for the
 > CI check, since it only constrains Dependabot's own PRs.
-- **Arbitrary code execution** (§3.7): Phase 3 must not ship without the trust
-  gate.
+- **Arbitrary code execution** (§3.7): Phase 3 must not ship without a real
+  pre-install consent prompt.
 
 ### 4.3 Neutral
 
@@ -566,12 +595,13 @@ support" and "adopt pi extensions" are two distinct, non-overlapping levers.
 - [ ] Surface `registerCommand` slash-commands in the composer.
 - [ ] Re-validate against the packaged artifact.
 
-**Phase 3 — providers, runtime install, trust**
+**Phase 3 — providers, runtime install, install consent**
 - [ ] `packages:*` IPC (three-file recipe) + fake-desktop-api update.
 - [ ] Desktop-owned settings/install dir under `userData`.
 - [ ] `registerProvider` bridge.
-- [ ] Trust/consent gate before executing third-party extensions; Settings-dialog
-      package list.
+- [ ] Single pre-install consent prompt before installing any third-party
+      source; Settings-dialog package list (source visibility only, no
+      persistent capability gate -- see §3.7).
 - [ ] Portable-exe install degradation (local/git-only or bundled npm).
 - [ ] Re-validate against the packaged artifact.
 

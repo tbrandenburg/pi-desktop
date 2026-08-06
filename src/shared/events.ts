@@ -71,16 +71,14 @@ export interface CommandInfo {
 
 /**
  * A configured runtime pi-package (ADR 0001 §3.6/§3.7, issue #92) --
- * local-path or git source only, installed under the desktop-owned
- * `userData` directory (never `~/.pi/agent`). `trusted` reflects the
- * binary `ProjectTrustStore` consent decision keyed by the package's own
- * source string: a package is never loaded into an active chat session
- * (its `additionalExtensionPaths` entry is simply omitted) until
- * `trusted === true`.
+ * local-path, git, or `npm:` source, installed under the real, shared
+ * `~/.pi/agent` directory. There is no persistent trust/enabled state
+ * (issue #109): a package is installed after a single informed consent
+ * prompt, and every configured package always loads -- this list is
+ * exactly the set of packages that run, with no hidden state.
  */
 export interface PackageInfo {
   source: string;
-  trusted: boolean;
 }
 
 export type ChatEvent =
@@ -121,14 +119,13 @@ export interface DesktopAgentApi {
   onExtensionUIRequest(listener: (request: ExtensionUIRequest) => void): () => void;
   /** Sends the user's answer for a pending `select`/`confirm`/`input` `ExtensionUIRequest`. */
   respondExtensionUI(requestId: string, response: ExtensionUIResponse): Promise<void>;
-  /** Lists runtime-installed pi-packages (local-path/git only, ADR 0001 §3.6). */
+  /** Lists runtime-installed pi-packages (local-path, git, or npm: source, ADR 0001 §3.6). */
   listPackages(): Promise<PackageInfo[]>;
   /**
-   * Installs a local-path or git pi-package source. Blocks on a real,
-   * mandatory trust prompt (routed through `onExtensionUIRequest`/
-   * `respondExtensionUI`) before the returned `PackageInfo.trusted` is
-   * `true` -- an `npm:` source is rejected with an error, client- and
-   * server-side.
+   * Installs a local-path, git, or `npm:` pi-package source. Blocks on a
+   * real, single pre-install consent prompt (routed through
+   * `onExtensionUIRequest`/`respondExtensionUI`) -- declining it rejects
+   * this call and installs nothing (issue #109).
    */
   installPackage(source: string): Promise<PackageInfo>;
   removePackage(source: string): Promise<void>;
