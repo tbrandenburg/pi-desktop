@@ -9,8 +9,20 @@ export function Composer() {
   const sendMessage = useChatStore((state) => state.sendMessage);
   const stopGeneration = useChatStore((state) => state.stopGeneration);
   const selectedModel = useChatStore((state) => state.selectedModel);
+  const commands = useChatStore((state) => state.commands);
   const isGenerating = status === "thinking" || status === "streaming";
   const hasModel = Boolean(selectedModel);
+
+  // Slash-command autocomplete (ADR 0001 §3.4 Phase 2, issue #91): only
+  // shown while the composer's text is a still-being-typed `/name` prefix
+  // (no space yet) -- matches pi-coding-agent's own command-name parsing
+  // (`AgentSession._tryExecuteExtensionCommand`), so what the list narrows
+  // down to is exactly what `session.prompt()` will dispatch on submit.
+  const commandMatch = /^\/(\S*)$/.exec(value);
+  const matchingCommands =
+    commandMatch && commands.length > 0
+      ? commands.filter((command) => command.name.startsWith(commandMatch[1]))
+      : [];
 
   const submit = () => {
     if (isGenerating || !value.trim() || !hasModel) return;
@@ -18,9 +30,30 @@ export function Composer() {
     setValue("");
   };
 
+  const runCommand = (name: string) => {
+    if (isGenerating || !hasModel) return;
+    void sendMessage(`/${name}`);
+    setValue("");
+  };
+
   return (
     <div className="border-t border-surface-border bg-surface-panel/60 px-6 py-4">
       <div className="relative rounded-2xl border border-surface-border bg-surface-panel px-4 py-3 focus-within:border-accent/50">
+        {matchingCommands.length > 0 && (
+          <div className="absolute bottom-full left-0 mb-2 w-full max-w-sm rounded-xl border border-surface-border bg-surface-panel shadow-xl">
+            {matchingCommands.map((command) => (
+              <button
+                key={command.name}
+                type="button"
+                onClick={() => runCommand(command.name)}
+                className="flex w-full flex-col items-start px-4 py-2 text-left text-sm hover:bg-surface-hover"
+              >
+                <span className="text-white">/{command.name}</span>
+                {command.description && <span className="text-xs text-white/50">{command.description}</span>}
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
           value={value}
           onChange={(event) => setValue(event.target.value)}

@@ -105,5 +105,20 @@ export function createFakeDesktopApi(): DesktopAgentApi {
     async getVersion() {
       return "0.0.0-dev";
     },
+
+    async listCommands() {
+      // No extensions in the browser dev harness -- an empty list is the
+      // correct, honest fake (see AGENTS.md lesson #14: don't invent fake
+      // data the real bridge wouldn't produce for an equivalent state).
+      return [];
+    },
+
+    onExtensionUIRequest() {
+      // No extension ever runs in this harness, so no UI request is ever
+      // pushed -- return a no-op unsubscribe to satisfy the real interface.
+      return () => {};
+    },
+
+    async respondExtensionUI() {},
   };
 }

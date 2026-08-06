@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { BrowserWindow } from "electron";
-import type { ChatEvent, StartChatRequest } from "../../shared/events";
+import type { ChatEvent, CommandInfo, ExtensionUIRequest, ExtensionUIResponse, StartChatRequest } from "../../shared/events";
 import { buildModelsRegistry, findModelById, qualifyModelId, APP_SETTINGS_PROVIDER_ID, type ModelsRegistry } from "../model/registry";
 import type { SettingsStore } from "../settings/store";
 import { AgentRuntime } from "../agent/runtime";
+import { IpcUIContextBridge } from "../agent/ui-context";
 
 async function loadModelsRegistryForChat(
   settings: { apiKey: string; baseUrl: string; model: string },
@@ -23,6 +24,11 @@ async function loadModelsRegistryForChat(
  */
 export class ChatService {
   private activeAborts = new Map<string, AbortController>();
+  // Shared across every chat turn (ADR 0001 §3.4 Phase 2, issue #91):
+  // `ctx.ui.*` dialog calls are keyed by their own generated request id, so
+  // one bridge safely serves however many `AgentRuntime.run` sessions are
+  // in flight -- no per-request instance needed.
+  private readonly uiContextBridge: IpcUIContextBridge;
 
   constructor(
     private readonly settingsStore: SettingsStore,
@@ -32,7 +38,9 @@ export class ChatService {
     ) => Promise<ModelsRegistry> = loadModelsRegistryForChat,
     private readonly getWorkspaceDir: () => string = () => process.cwd(),
     private readonly agentRuntime: AgentRuntime = new AgentRuntime(),
-  ) {}
+  ) {
+    this.uiContextBridge = new IpcUIContextBridge((request) => this.emitExtensionUIRequest(request));
+  }
 
   async startChat(request: StartChatRequest): Promise<string> {
     const requestId = randomUUID();
@@ -46,6 +54,22 @@ export class ChatService {
 
   cancel(requestId: string): void {
     this.activeAborts.get(requestId)?.abort();
+  }
+
+  /** Lists `pi.registerCommand` slash-commands for the composer's `/` autocomplete. */
+  async listCommands(): Promise<CommandInfo[]> {
+    return this.agentRuntime.listCommands(path.resolve(this.getWorkspaceDir()));
+  }
+
+  /** Resolves a pending `select`/`confirm`/`input` extension UI dialog with the renderer's answer. */
+  respondExtensionUI(requestId: string, response: ExtensionUIResponse): void {
+    this.uiContextBridge.respond(requestId, response);
+  }
+
+  private emitExtensionUIRequest(request: ExtensionUIRequest): void {
+    const win = this.getWindow();
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send("extension-ui:request", request);
   }
 
   private emit(event: ChatEvent): void {
@@ -108,6 +132,7 @@ export class ChatService {
         apiKey: settings.apiKey,
         signal,
         emit: (event) => this.emit(event),
+        uiContext: this.uiContextBridge.uiContext,
       });
     } catch (error) {
       this.emit({

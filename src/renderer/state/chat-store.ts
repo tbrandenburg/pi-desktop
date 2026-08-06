@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { ChatMessage, ModelInfo, SessionSummary } from "../../shared/events";
+import type { ChatMessage, CommandInfo, ModelInfo, SessionSummary } from "../../shared/events";
 import { desktopApi } from "../lib/desktop-api";
 
 export interface DisplayMessage extends ChatMessage {
@@ -13,6 +13,7 @@ interface ChatState {
   conversationId: string;
   sessions: SessionSummary[];
   models: ModelInfo[];
+  commands: CommandInfo[];
   selectedModel: string;
   messages: DisplayMessage[];
   activeRequestId: string | null;
@@ -20,6 +21,7 @@ interface ChatState {
   errorMessage: string | null;
   workspaceDir: string;
   loadModels: () => Promise<void>;
+  loadCommands: () => Promise<void>;
   selectModel: (modelId: string) => void;
   sendMessage: (text: string) => Promise<void>;
   stopGeneration: () => Promise<void>;
@@ -37,6 +39,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
   conversationId: crypto.randomUUID(),
   sessions: [],
   models: [],
+  commands: [],
   selectedModel: "",
   messages: [],
   activeRequestId: null,
@@ -50,6 +53,11 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
   },
 
   selectModel: (modelId: string) => set({ selectedModel: modelId }),
+
+  loadCommands: async () => {
+    const commands = await desktopApi().listCommands();
+    set({ commands });
+  },
 
   loadSessions: async () => {
     const sessions = await desktopApi().listSessions();
