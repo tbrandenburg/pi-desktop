@@ -916,3 +916,27 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   that states the resolved value (not just "job succeeded"), and only trust
   a real tag-triggered CI run's actual artifact, never a design review of
   the yml alone.
+- 2026-08-06: A subagent implementing #104 (unifying `PackageService`'s and
+  `AgentRuntime`'s config directory) reported all-green validation
+  (typecheck/lint/185 tests), but its own handoff flagged a suspicious detail
+  in its trust-gate regression test: it had to deliberately decouple the
+  test's verification `DefaultResourceLoader`'s `agentDir` from the real
+  shared one to keep the test passing. Independently tracing
+  `pi-coding-agent`'s actual source (`resource-loader.js`'s
+  `loadCurrentExtensionSet`) confirmed this decoupling was hiding a real bug:
+  once two subsystems share a config directory, any resource-loader
+  constructed against that directory resolves and loads *every*
+  `settings.json`-configured package unconditionally, with zero trust
+  filtering — completely bypassing a trust gate that only filters a
+  *separate* `additionalExtensionPaths` list fed in alongside it. The fix was
+  a single `noExtensions: true` constructor flag, verified with a real
+  before/after regression test (failed before, passed after). Rule: when a
+  subagent's own test needs an artificial workaround (an isolated fixture, a
+  decoupled directory, a mocked boundary) to make an assertion pass, treat
+  that workaround itself as a signal to investigate rather than accept the
+  green result — it is often hiding the exact bug the test was meant to
+  catch. This is especially critical whenever a fix's whole premise is
+  "unify two previously-separate stores/directories": any code path that
+  reads from that store without knowledge of the other subsystem's own
+  filtering/gating logic will silently inherit *all* of the other
+  subsystem's data, not just the parts meant to be shared.

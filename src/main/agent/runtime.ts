@@ -309,6 +309,20 @@ export class AgentRuntime {
       agentDir,
       settingsManager: SettingsManagerClass.create(cwd, agentDir),
       additionalExtensionPaths,
+      // issue #105: since #104 made `PackageService` and `AgentRuntime`
+      // share the same `agentDir`/`settings.json`, `resolve()`'s own
+      // `enabledExtensions` (every package configured in `settings.json`,
+      // trusted or not) would otherwise get merged alongside
+      // `additionalExtensionPaths` (see `resource-loader.js`'s
+      // `loadCurrentExtensionSet`), silently bypassing the mandatory trust
+      // gate for any package the CLI (or a declined-trust pi-desktop
+      // install) already persisted there. `noExtensions: true` excludes
+      // that settings.json-derived path entirely -- `additionalExtensionPaths`
+      // above (bundled `read-only-tools` + `trustedExtensionPaths()`) is
+      // and remains the *only* way extensions get loaded into a real
+      // pi-desktop chat session. Only "extensions" resolution is gated by
+      // this flag; skills/prompts/themes are unaffected.
+      noExtensions: true,
     });
     await loader.reload();
     return loader;
