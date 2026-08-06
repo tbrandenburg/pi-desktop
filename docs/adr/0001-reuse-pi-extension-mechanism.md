@@ -355,9 +355,10 @@ so we do not ship it and reject/skip TUI-only extensions.
 ### 3.6 Runtime extension (user installs later)
 
 Expose `DefaultPackageManager` over IPC via the `AGENTS.md` three-file recipe
-(domain-named channels `packages:list|install|remove|update`), backed by a
-desktop-owned settings/install location under Electron `userData` (never the
-user's global `~/.pi/agent`, never next to the portable exe). Update
+(domain-named channels `packages:list|install|remove|update`), backed by the
+real, shared `~/.pi/agent` directory (`getAgentDir()`, same as
+models/sessions -- see issue #104) so packages installed via pi-desktop or the
+real `pi` CLI/TUI are immediately visible to both. Update
 `src/renderer/lib/fake-desktop-api.ts` so the browser harness keeps compiling
 (`AGENTS.md` lesson #14).
 
@@ -391,6 +392,11 @@ local-path & git only → bundled npm → full npm on installers with system Nod
 > `pi-package` installs vs. git-hosted ones) that this research cannot
 > settle from the codebase alone — revisit only if real demand surfaces
 > after tier 1 ships.
+>
+> **Superseded (issue #104):** `npm:` sources are now supported, reusing
+> `DefaultPackageManager`'s own npm install path as-is (no bespoke fetcher),
+> gated by an additional pre-install confirm warning that npm lifecycle
+> scripts run immediately, plus the existing §3.7 post-install trust gate.
 
 ### 3.7 Security / trust (non-negotiable before Phase 3)
 
@@ -417,6 +423,18 @@ curated bundles are vetted by us but still listed.
 > restricting network access per extension) would be new pi-desktop-specific
 > scope beyond what `pi` provides today, and should be raised and decided as
 > its own explicit ADR, not folded into this migration.
+>
+> **Corrected (issue #104):** `ProjectTrustStore` is NOT actually reused
+> as-is for this gate. It was found to be empirically unsafe for
+> package-source-keyed trust: its `normalizeCwd`/`findNearestTrustEntry`
+> treat every key as a filesystem path and walk up parent directories,
+> silently inheriting `trusted=true` for a local-path package nested under
+> an already-trusted project directory, and silently resolving non-path
+> source strings (`git:...`, `npm:...`) relative to `process.cwd()`. A
+> small dedicated exact-match key/value trust store
+> (`<agentDir>/pi-desktop-package-trust.json`) is used instead -- same
+> "ask once, persist the binary decision" model, but with opaque,
+> non-path keys and no ancestor walk.
 
 ---
 

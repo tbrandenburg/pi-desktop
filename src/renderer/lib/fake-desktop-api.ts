@@ -130,14 +130,10 @@ export function createFakeDesktopApi(): DesktopAgentApi {
     },
 
     async installPackage(source) {
-      if (source.trim().toLowerCase().startsWith("npm:")) {
-        throw new Error(
-          "npm: package sources are not supported yet -- only local-path and git sources can be installed at runtime.",
-        );
-      }
-      // The fake harness auto-trusts (no real modal exists in the browser
-      // dev harness) -- the real bridge always blocks on a genuine trust
-      // prompt instead, see `src/main/packages/service.ts`.
+      // The fake harness auto-confirms both the npm pre-install warning and
+      // the post-install trust prompt (no real modal exists in the browser
+      // dev harness) -- the real bridge always blocks on genuine confirm
+      // dialogs instead, see `src/main/packages/service.ts`.
       const info: PackageInfo = { source: source.trim(), trusted: true };
       const existingIndex = packages.findIndex((p) => p.source === info.source);
       if (existingIndex >= 0) packages[existingIndex] = info;

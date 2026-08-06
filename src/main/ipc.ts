@@ -33,17 +33,6 @@ function resolvePiPackagesReadOnlyToolsDir(): string {
   return path.join(base, "read-only-tools");
 }
 
-/**
- * Desktop-owned directory for runtime-installed pi-packages and their own
- * settings/trust-decision files (ADR 0001 §3.6/§3.7, issue #92) --
- * `app.getPath("userData")/pi-packages`. Never `~/.pi/agent` (that's pi's
- * own config dir, shared with the real `pi` CLI) and never anywhere near a
- * portable exe's own directory (which may not even be writable).
- */
-function resolvePiPackagesUserDataDir(): string {
-  return path.join(app.getPath("userData"), "pi-packages");
-}
-
 export function registerIpcHandlers(
   getWindow: () => BrowserWindow | null,
   deps: RegisterIpcHandlersDeps = {},
@@ -67,11 +56,15 @@ export function registerIpcHandlers(
   });
 
   const packageService = new PackageService(
-    resolvePiPackagesUserDataDir(),
     (source) =>
       uiContextBridge.uiContext.confirm(
         "Trust this package?",
         `"${source}" was just installed. Its code can run with full system access, exactly like any other pi extension. Only trust packages from sources you control or fully trust.`,
+      ),
+    (source) =>
+      uiContextBridge.uiContext.confirm(
+        "Install this npm package now?",
+        `Installing "${source}" will run its npm lifecycle scripts (e.g. postinstall) immediately, before any review is possible. Only proceed if you trust this source.`,
       ),
     deps.codingAgentLoaders,
   );
