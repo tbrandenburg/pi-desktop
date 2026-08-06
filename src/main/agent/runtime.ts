@@ -1,8 +1,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionUIContext, ModelRuntime, ResourceLoader, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ChatEvent, CommandInfo, StartChatRequest } from "../../shared/events";
-import { loadCodingAgent, type CodingAgentLoaders, type AgentSessionEvent } from "./coding-agent-loaders";
-import { createReadOnlyTools } from "./tools";
+import { loadCodingAgent, type CodingAgentLoaders, type CodingAgentModule, type AgentSessionEvent } from "./coding-agent-loaders";
 
 // Only lists the event types `AgentRuntime.forward`'s switch statement
 // actually handles below -- everything else falls through to `default:
@@ -82,7 +81,22 @@ export interface AgentRuntimeRunArgs {
  * calls are wired yet (Phase 2, issue #91).
  */
 export class AgentRuntime {
-  constructor(private readonly loaders: CodingAgentLoaders = {}) {}
+  /**
+   * @param piPackagesDir Absolute path to the bundled first-party
+   *   `resources/pi-packages/read-only-tools` local pi-package (ADR 0001
+   *   §3.5, issue #97) -- resolved by the real Electron entry point
+   *   (`ipc.ts`, via `app.isPackaged`/`process.resourcesPath`) since
+   *   `app`/`process.resourcesPath` resolution is Electron-runtime-specific
+   *   and must not be imported into this unit-tested module directly (it
+   *   would break `runtime.test.ts`, which runs under plain Vitest/Node,
+   *   not the real Electron process). Production code always passes a real
+   *   path; tests either omit it (proving the pi-package is optional, not
+   *   load-bearing for basic chat) or pass a temp-dir fixture package.
+   */
+  constructor(
+    private readonly loaders: CodingAgentLoaders = {},
+    private readonly piPackagesDir?: string,
+  ) {}
 
   async run({
     requestId,
@@ -97,7 +111,8 @@ export class AgentRuntime {
     uiContext,
     resourceLoader,
   }: AgentRuntimeRunArgs): Promise<void> {
-    const { createAgentSession, ModelRuntime, SessionManager } = await loadCodingAgent(this.loaders);
+    const { createAgentSession, ModelRuntime, SessionManager, DefaultResourceLoader, SettingsManager, getAgentDir } =
+      await loadCodingAgent(this.loaders);
 
     const lastUserMessage = [...request.messages].reverse().find((m) => m.role === "user");
     if (!lastUserMessage) {
@@ -152,6 +167,23 @@ export class AgentRuntime {
 
     const sessionManager = await openOrCreateSessionManager(SessionManager, cwd, request.conversationId);
 
+    // Feed the bundled first-party pi-package(s) (`resources/pi-packages/*`,
+    // ADR 0001 §3.5, issue #97) into the *real* extension discovery pipeline
+    // via `additionalExtensionPaths` -- `createAgentSession`'s own options
+    // have no such field, so this builds the exact same `DefaultResourceLoader`
+    // it would otherwise construct internally (see pi-coding-agent's
+    // `sdk.js`), just with that one extra option set. Only built when the
+    // caller didn't already inject a `resourceLoader` (tests inject their
+    // own, e.g. `buildTestResourceLoader`) -- production callers never pass
+    // one, so this always runs for real chat turns.
+    const effectiveResourceLoader =
+      resourceLoader ??
+      (this.piPackagesDir
+        ? await buildDefaultResourceLoaderWithPiPackages(DefaultResourceLoader, SettingsManager, getAgentDir, cwd, [
+            this.piPackagesDir,
+          ])
+        : undefined);
+
     const { session } = await createAgentSession({
       cwd,
       modelRuntime,
@@ -159,12 +191,15 @@ export class AgentRuntime {
       sessionManager,
       // Read-only tool set -- deliberately excludes pi-coding-agent's own
       // bash/edit/write/read built-ins (`noTools: "builtin"` disables the
-      // default built-in tools while leaving our `customTools` active).
-      // This preserves issue #41's original read-only scope unchanged by
-      // the Phase 1 runtime swap.
+      // default built-in tools while leaving extension-registered tools
+      // active). This preserves issue #41's original read-only scope
+      // unchanged. The `read_file`/`list_files` tools themselves are no
+      // longer wired via `customTools` (issue #90's adapter) -- they are
+      // now registered by the real bundled pi-package above, proving the
+      // `additionalExtensionPaths`/package-discovery pipeline end-to-end
+      // (issue #97).
       noTools: "builtin",
-      customTools: createReadOnlyTools(cwd),
-      resourceLoader,
+      resourceLoader: effectiveResourceLoader,
     });
 
     // Phase 2 (ADR 0001 §3.4, issue #91): wire the real IPC-backed
@@ -300,4 +335,34 @@ async function openOrCreateSessionManager(
   const match = existing.find((info) => info.id === conversationId);
   if (match) return SessionManagerClass.open(match.path);
   return SessionManagerClass.create(cwd, undefined, { id: conversationId });
+}
+
+/**
+ * Builds a real `DefaultResourceLoader` identical to the one
+ * `createAgentSession` constructs internally when no `resourceLoader` is
+ * passed (same `cwd`/`agentDir`/`settingsManager` inputs, see
+ * pi-coding-agent's `sdk.js`), except with `additionalExtensionPaths` set to
+ * the bundled `resources/pi-packages/*` local package directories (ADR 0001
+ * §3.5, issue #97). `additionalExtensionPaths` has no equivalent field on
+ * `CreateAgentSessionOptions` itself, so feeding it requires building this
+ * loader ourselves and passing it through the existing `resourceLoader`
+ * seam -- exactly mirroring `buildTestResourceLoader`'s pattern for inline
+ * test extensions (`test-support/inline-test-extension.ts`).
+ */
+async function buildDefaultResourceLoaderWithPiPackages(
+  DefaultResourceLoaderClass: CodingAgentModule["DefaultResourceLoader"],
+  SettingsManagerClass: CodingAgentModule["SettingsManager"],
+  getAgentDirFn: CodingAgentModule["getAgentDir"],
+  cwd: string,
+  additionalExtensionPaths: string[],
+): Promise<ResourceLoader> {
+  const agentDir = getAgentDirFn();
+  const loader = new DefaultResourceLoaderClass({
+    cwd,
+    agentDir,
+    settingsManager: SettingsManagerClass.create(cwd, agentDir),
+    additionalExtensionPaths,
+  });
+  await loader.reload();
+  return loader;
 }

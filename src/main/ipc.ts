@@ -1,16 +1,34 @@
 import { app, type BrowserWindow, dialog, ipcMain } from "electron";
+import path from "node:path";
 import { startChatRequestSchema, providerSettingsSchema, workspaceDirSchema } from "../shared/schemas";
 import type { CommandInfo, ExtensionUIResponse, ModelInfo, WorkspaceInfo } from "../shared/events";
 import { ChatService } from "./chat/service";
 import { listConfiguredModels, resolvePiDefault } from "./model/pi-config";
 import { SettingsStore } from "./settings/store";
 import { SessionService } from "./session/service";
+import { AgentRuntime } from "./agent/runtime";
 import type { AgentCoreLoaders } from "./agent/core";
 import type { CodingAgentLoaders } from "./agent/coding-agent-loaders";
 
 export interface RegisterIpcHandlersDeps {
   agentCoreLoaders?: AgentCoreLoaders;
   codingAgentLoaders?: CodingAgentLoaders;
+}
+
+/**
+ * Resolves the bundled first-party `read-only-tools` pi-package (ADR 0001
+ * §3.5, issue #97) -- `resources/pi-packages/read-only-tools` in dev
+ * (`electron-builder.yml`'s `extraResources` only applies to the packaged
+ * app), `process.resourcesPath/pi-packages/read-only-tools` once packaged.
+ * `app.isPackaged`/`process.resourcesPath` are real-Electron-runtime-only
+ * APIs, so this resolution deliberately lives here (the real Electron entry
+ * point, already importing `app` above) rather than inside `AgentRuntime`
+ * itself, which is unit-tested under plain Vitest/Node with no real
+ * `electron` module available.
+ */
+function resolvePiPackagesReadOnlyToolsDir(): string {
+  const base = app.isPackaged ? path.join(process.resourcesPath, "pi-packages") : path.join(process.cwd(), "resources", "pi-packages");
+  return path.join(base, "read-only-tools");
 }
 
 export function registerIpcHandlers(
@@ -25,7 +43,8 @@ export function registerIpcHandlers(
   });
 
   const sessionService = new SessionService(getWorkspaceDir, deps.agentCoreLoaders, deps.codingAgentLoaders);
-  const chatService = new ChatService(settingsStore, getWindow, undefined, getWorkspaceDir);
+  const agentRuntime = new AgentRuntime(deps.codingAgentLoaders, resolvePiPackagesReadOnlyToolsDir());
+  const chatService = new ChatService(settingsStore, getWindow, undefined, getWorkspaceDir, agentRuntime);
 
   ipcMain.handle("app:get-version", (): string => {
     return app.getVersion();
