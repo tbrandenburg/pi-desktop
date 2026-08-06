@@ -258,16 +258,30 @@ export class AgentRuntime {
    * `bindExtensions()` call, so this never needs a resolved model, a
    * `uiContext`, or to touch the real cwd-scoped session on disk (contrast
    * with `run()`'s session, which is real and persisted).
+   *
+   * `resourceLoader` mirrors `run()`'s own param of the same name: real
+   * production callers (`ChatService.listCommands()`, `ipc.ts`'s
+   * `chat:list-commands` handler) never pass one, so this always builds
+   * the same trust-filtered `buildAdditionalPathsResourceLoader()` result
+   * `run()` uses -- otherwise `createAgentSession` would fall back to its
+   * own internal, unfiltered default loader, which lists slash-commands
+   * from every package configured in `settings.json` regardless of this
+   * app's own per-package trust decision (issue #106). Tests inject their
+   * own loader (e.g. `buildTestResourceLoader`) to skip this.
    */
   async listCommands(cwd: string, resourceLoader?: ResourceLoader): Promise<CommandInfo[]> {
-    const { createAgentSession, ModelRuntime, SessionManager } = await loadCodingAgent(this.loaders);
+    const { createAgentSession, ModelRuntime, SessionManager, DefaultResourceLoader, SettingsManager, getAgentDir } =
+      await loadCodingAgent(this.loaders);
     const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
+    const effectiveResourceLoader =
+      resourceLoader ??
+      (await this.buildAdditionalPathsResourceLoader(DefaultResourceLoader, SettingsManager, getAgentDir, cwd));
     const { extensionsResult } = await createAgentSession({
       cwd,
       modelRuntime,
       sessionManager: SessionManager.inMemory(cwd),
       noTools: "all",
-      resourceLoader,
+      resourceLoader: effectiveResourceLoader,
     });
     const commands: CommandInfo[] = [];
     for (const extension of extensionsResult.extensions) {
