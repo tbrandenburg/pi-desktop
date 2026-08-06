@@ -69,6 +69,20 @@ export interface CommandInfo {
   description?: string;
 }
 
+/**
+ * A configured runtime pi-package (ADR 0001 §3.6/§3.7, issue #92) --
+ * local-path or git source only, installed under the desktop-owned
+ * `userData` directory (never `~/.pi/agent`). `trusted` reflects the
+ * binary `ProjectTrustStore` consent decision keyed by the package's own
+ * source string: a package is never loaded into an active chat session
+ * (its `additionalExtensionPaths` entry is simply omitted) until
+ * `trusted === true`.
+ */
+export interface PackageInfo {
+  source: string;
+  trusted: boolean;
+}
+
 export type ChatEvent =
   | { type: "started"; requestId: string }
   | { type: "text-delta"; requestId: string; text: string }
@@ -107,4 +121,16 @@ export interface DesktopAgentApi {
   onExtensionUIRequest(listener: (request: ExtensionUIRequest) => void): () => void;
   /** Sends the user's answer for a pending `select`/`confirm`/`input` `ExtensionUIRequest`. */
   respondExtensionUI(requestId: string, response: ExtensionUIResponse): Promise<void>;
+  /** Lists runtime-installed pi-packages (local-path/git only, ADR 0001 §3.6). */
+  listPackages(): Promise<PackageInfo[]>;
+  /**
+   * Installs a local-path or git pi-package source. Blocks on a real,
+   * mandatory trust prompt (routed through `onExtensionUIRequest`/
+   * `respondExtensionUI`) before the returned `PackageInfo.trusted` is
+   * `true` -- an `npm:` source is rejected with an error, client- and
+   * server-side.
+   */
+  installPackage(source: string): Promise<PackageInfo>;
+  removePackage(source: string): Promise<void>;
+  updatePackage(source: string): Promise<void>;
 }

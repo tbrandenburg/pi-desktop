@@ -38,8 +38,16 @@ export class ChatService {
     ) => Promise<ModelsRegistry> = loadModelsRegistryForChat,
     private readonly getWorkspaceDir: () => string = () => process.cwd(),
     private readonly agentRuntime: AgentRuntime = new AgentRuntime(),
+    /**
+     * Shared `IpcUIContextBridge` instance, injected so `PackageService`'s
+     * mandatory trust prompt (`../packages/service.ts`, issue #92) can reuse
+     * this exact same real modal mechanism instead of a second, parallel
+     * one -- see `ipc.ts`'s wiring. Defaults to constructing its own (as
+     * before this param existed) when omitted, e.g. in every existing test.
+     */
+    uiContextBridge?: IpcUIContextBridge,
   ) {
-    this.uiContextBridge = new IpcUIContextBridge((request) => this.emitExtensionUIRequest(request));
+    this.uiContextBridge = uiContextBridge ?? new IpcUIContextBridge((request) => this.emitExtensionUIRequest(request));
   }
 
   async startChat(request: StartChatRequest): Promise<string> {
@@ -64,6 +72,17 @@ export class ChatService {
   /** Resolves a pending `select`/`confirm`/`input` extension UI dialog with the renderer's answer. */
   respondExtensionUI(requestId: string, response: ExtensionUIResponse): void {
     this.uiContextBridge.respond(requestId, response);
+  }
+
+  /**
+   * Surfaces a real, blocking `confirm` modal in the renderer via the same
+   * `ExtensionUIContext` IPC bridge used for `ctx.ui.confirm` calls made by
+   * extensions -- reused as-is for `PackageService`'s mandatory trust
+   * prompt (ADR 0001 §3.7, issue #92) instead of a second, parallel modal
+   * mechanism.
+   */
+  confirmViaUI(title: string, message: string): Promise<boolean> {
+    return this.uiContextBridge.uiContext.confirm(title, message);
   }
 
   private emitExtensionUIRequest(request: ExtensionUIRequest): void {

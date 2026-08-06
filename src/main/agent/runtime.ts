@@ -96,6 +96,18 @@ export class AgentRuntime {
   constructor(
     private readonly loaders: CodingAgentLoaders = {},
     private readonly piPackagesDir?: string,
+    /**
+     * Resolves the on-disk directory paths of every runtime-installed
+     * pi-package the user has explicitly trusted (ADR 0001 §3.6/§3.7, issue
+     * #92) -- see `../packages/service.ts`'s `trustedExtensionPaths()`.
+     * Invoked fresh on every `run()`/`listCommands()` call (never cached
+     * here) so a package installed/removed/trusted mid-session is picked
+     * up on the *next* chat turn without restarting the app. Omitted in
+     * tests and by the lightweight `listCommands` discovery session is
+     * fine -- an empty/omitted list simply means no runtime packages are
+     * fed in, identical to before this constructor param existed.
+     */
+    private readonly getTrustedPackagePaths?: () => Promise<string[]>,
   ) {}
 
   async run({
@@ -178,11 +190,7 @@ export class AgentRuntime {
     // one, so this always runs for real chat turns.
     const effectiveResourceLoader =
       resourceLoader ??
-      (this.piPackagesDir
-        ? await buildDefaultResourceLoaderWithPiPackages(DefaultResourceLoader, SettingsManager, getAgentDir, cwd, [
-            this.piPackagesDir,
-          ])
-        : undefined);
+      (await this.buildAdditionalPathsResourceLoader(DefaultResourceLoader, SettingsManager, getAgentDir, cwd));
 
     const { session } = await createAgentSession({
       cwd,
@@ -270,6 +278,42 @@ export class AgentRuntime {
     return commands;
   }
 
+  /**
+   * Builds a real `DefaultResourceLoader` identical to the one
+   * `createAgentSession` constructs internally when no `resourceLoader` is
+   * passed, except with `additionalExtensionPaths` set to the bundled
+   * first-party `read-only-tools` package dir (issue #97) plus every
+   * runtime-installed, user-*trusted* pi-package dir (issue #92) --
+   * untrusted/undecided packages are simply never included here, which is
+   * the actual enforcement point of the mandatory trust gate (see
+   * `../packages/service.ts`). Returns `undefined` (falls back to
+   * `createAgentSession`'s own internal default) when there is nothing to
+   * add, matching the pre-#92 behavior exactly.
+   */
+  private async buildAdditionalPathsResourceLoader(
+    DefaultResourceLoaderClass: CodingAgentModule["DefaultResourceLoader"],
+    SettingsManagerClass: CodingAgentModule["SettingsManager"],
+    getAgentDirFn: CodingAgentModule["getAgentDir"],
+    cwd: string,
+  ): Promise<ResourceLoader | undefined> {
+    const trustedPackagePaths = (await this.getTrustedPackagePaths?.()) ?? [];
+    const additionalExtensionPaths = [
+      ...(this.piPackagesDir ? [this.piPackagesDir] : []),
+      ...trustedPackagePaths,
+    ];
+    if (additionalExtensionPaths.length === 0) return undefined;
+
+    const agentDir = getAgentDirFn();
+    const loader = new DefaultResourceLoaderClass({
+      cwd,
+      agentDir,
+      settingsManager: SettingsManagerClass.create(cwd, agentDir),
+      additionalExtensionPaths,
+    });
+    await loader.reload();
+    return loader;
+  }
+
   private forward(requestId: string, event: AgentSessionEvent, emit: (event: ChatEvent) => void): void {
     switch (event.type) {
       case "message_update": {
@@ -337,32 +381,3 @@ async function openOrCreateSessionManager(
   return SessionManagerClass.create(cwd, undefined, { id: conversationId });
 }
 
-/**
- * Builds a real `DefaultResourceLoader` identical to the one
- * `createAgentSession` constructs internally when no `resourceLoader` is
- * passed (same `cwd`/`agentDir`/`settingsManager` inputs, see
- * pi-coding-agent's `sdk.js`), except with `additionalExtensionPaths` set to
- * the bundled `resources/pi-packages/*` local package directories (ADR 0001
- * §3.5, issue #97). `additionalExtensionPaths` has no equivalent field on
- * `CreateAgentSessionOptions` itself, so feeding it requires building this
- * loader ourselves and passing it through the existing `resourceLoader`
- * seam -- exactly mirroring `buildTestResourceLoader`'s pattern for inline
- * test extensions (`test-support/inline-test-extension.ts`).
- */
-async function buildDefaultResourceLoaderWithPiPackages(
-  DefaultResourceLoaderClass: CodingAgentModule["DefaultResourceLoader"],
-  SettingsManagerClass: CodingAgentModule["SettingsManager"],
-  getAgentDirFn: CodingAgentModule["getAgentDir"],
-  cwd: string,
-  additionalExtensionPaths: string[],
-): Promise<ResourceLoader> {
-  const agentDir = getAgentDirFn();
-  const loader = new DefaultResourceLoaderClass({
-    cwd,
-    agentDir,
-    settingsManager: SettingsManagerClass.create(cwd, agentDir),
-    additionalExtensionPaths,
-  });
-  await loader.reload();
-  return loader;
-}

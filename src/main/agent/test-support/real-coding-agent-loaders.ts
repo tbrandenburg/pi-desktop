@@ -1,4 +1,14 @@
-import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import {
+  createAgentSession,
+  DefaultPackageManager,
+  DefaultResourceLoader,
+  getAgentDir,
+  hasTrustRequiringProjectResources,
+  ModelRuntime,
+  ProjectTrustStore,
+  SessionManager,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import type { CodingAgentLoaders } from "../coding-agent-loaders";
 
 // Real @earendil-works/pi-coding-agent code, imported the normal static way
@@ -15,5 +25,8 @@ export const realCodingAgentLoaders: CodingAgentLoaders = {
     getAgentDir,
     DefaultResourceLoader,
     SettingsManager,
+    DefaultPackageManager,
+    ProjectTrustStore,
+    hasTrustRequiringProjectResources,
   }),
 };

@@ -1,13 +1,16 @@
 import type {
   createAgentSession as createAgentSessionType,
   getAgentDir as getAgentDirType,
+  hasTrustRequiringProjectResources as hasTrustRequiringProjectResourcesType,
   AgentSession as AgentSessionType,
   AgentSessionEvent as AgentSessionEventType,
   CreateAgentSessionOptions as CreateAgentSessionOptionsType,
   CreateAgentSessionResult as CreateAgentSessionResultType,
+  DefaultPackageManager as DefaultPackageManagerType,
   DefaultResourceLoader as DefaultResourceLoaderType,
   ModelRuntime as ModelRuntimeType,
   CreateModelRuntimeOptions as CreateModelRuntimeOptionsType,
+  ProjectTrustStore as ProjectTrustStoreType,
   SessionManager as SessionManagerType,
   SettingsManager as SettingsManagerType,
   ToolDefinition as ToolDefinitionType,
@@ -51,6 +54,11 @@ export interface CodingAgentModule {
    * on-disk session files (see issue #90 follow-up).
    */
   getAgentDir: typeof getAgentDirType;
+  /** Reuses pi's own `DefaultPackageManager` AS-IS (ADR 0001 §3.6/§3.7, issue #92) -- see `../packages/service.ts`. */
+  DefaultPackageManager: typeof DefaultPackageManagerType;
+  /** Reuses pi's own `ProjectTrustStore` AS-IS (ADR 0001 §3.7, issue #92) -- the mandatory trust gate's storage backend. */
+  ProjectTrustStore: typeof ProjectTrustStoreType;
+  hasTrustRequiringProjectResources: typeof hasTrustRequiringProjectResourcesType;
 }
 
 let codingAgentModule: CodingAgentModule | null = null;
