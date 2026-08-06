@@ -5,6 +5,7 @@ import path from "node:path";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { realAgentCoreLoaders } from "./agent/test-support/real-agent-core-loaders";
+import { realCodingAgentLoaders } from "./agent/test-support/real-coding-agent-loaders";
 
 // This suite must be hermetic regardless of the machine's real ~/.pi/agent
 // config, so .pi resolution is mocked here (tested separately in pi-config.test.ts).
@@ -74,18 +75,30 @@ async function invoke(channel: string, ...args: unknown[]) {
 
 describe("IPC settings round-trip integration", () => {
   let workspaceDir: string;
+  let agentDir: string;
+  let originalPiAgentDir: string | undefined;
 
   beforeEach(() => {
     memoryStore.clear();
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ipc-workspace-"));
+    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ipc-agent-"));
+    // Isolates SessionService's `getAgentDir()`-based sessions directory
+    // away from the real developer's `~/.pi/agent` (see
+    // `session/service.test.ts` for the identical pattern).
+    originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
     memoryStore.set("workspaceDir", workspaceDir);
     registerIpcHandlers(() => null as unknown as BrowserWindow, {
       agentCoreLoaders: realAgentCoreLoaders,
+      codingAgentLoaders: realCodingAgentLoaders,
     });
   });
 
   afterEach(() => {
+    if (originalPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalPiAgentDir;
     fs.rmSync(workspaceDir, { recursive: true, force: true });
+    fs.rmSync(agentDir, { recursive: true, force: true });
   });
 
   it("persists provider settings, never leaks the raw API key back, and preserves it across a re-save without one", async () => {
@@ -194,8 +207,12 @@ describe("IPC settings round-trip integration", () => {
     const { JsonlSessionRepo, Session } = await realAgentCoreLoaders.loadAgentCore!();
     const { NodeExecutionEnv } = await realAgentCoreLoaders.loadAgentCoreNode!();
     void Session;
+    // Writes to the same `<agentDir>/sessions` root the now-fixed
+    // `SessionService` reads from (issue #90 follow-up) -- previously this
+    // wrote directly under `workspaceDir`, which matched the *old*,
+    // pre-fix `SessionService` behavior.
     const env = new NodeExecutionEnv({ cwd: workspaceDir });
-    const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: workspaceDir });
+    const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: path.join(agentDir, "sessions") });
     const session = await repo.create({ cwd: workspaceDir, id: "s1" });
     await session.appendMessage({ role: "user", content: "Hello", timestamp: Date.now() });
 

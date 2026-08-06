@@ -1,5 +1,6 @@
 import type {
   createAgentSession as createAgentSessionType,
+  getAgentDir as getAgentDirType,
   AgentSession as AgentSessionType,
   AgentSessionEvent as AgentSessionEventType,
   CreateAgentSessionOptions as CreateAgentSessionOptionsType,
@@ -25,6 +26,17 @@ export interface CodingAgentModule {
   createAgentSession: typeof createAgentSessionType;
   ModelRuntime: typeof ModelRuntimeType;
   SessionManager: typeof SessionManagerType;
+  /**
+   * Resolves pi-coding-agent's config directory (`~/.pi/agent`, or
+   * `$PI_CODING_AGENT_DIR` if set). `AgentRuntime` relies on this being the *same*
+   * default `createAgentSession`/`SessionManager`/`ModelRuntime` already use
+   * internally when no `agentDir` override is passed -- `SessionService`
+   * (`src/main/session/service.ts`) uses it to point its own
+   * `JsonlSessionRepo` at the exact same `<agentDir>/sessions/<encoded-cwd>`
+   * directory `SessionManager` writes to, so both read/write the same
+   * on-disk session files (see issue #90 follow-up).
+   */
+  getAgentDir: typeof getAgentDirType;
 }
 
 let codingAgentModule: CodingAgentModule | null = null;

@@ -2,93 +2,33 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { AssistantMessageEventStream, Api, Model } from "@earendil-works/pi-ai";
 import { AgentRuntime } from "./runtime";
 import { realCodingAgentLoaders } from "./test-support/real-coding-agent-loaders";
+import { buildFakeModelRuntime, FAKE_PROVIDER_ID } from "./test-support/fake-model-runtime";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
-
-/**
- * A minimal fake `ProviderStreams`-style stream (no network) registered
- * directly onto a real `ModelRuntime` via `registerProvider`'s
- * `streamSimple` override -- `provider-composer.js`'s `streamWith` routes
- * *both* `.stream()` and `.streamSimple()` calls through a registered
- * `streamSimple` override when present, so this single fake covers whatever
- * `AgentSession` calls internally. This exercises the real
- * `createAgentSession`/`AgentSession` tool loop and real `SessionManager`
- * disk persistence end-to-end -- only the network boundary is faked, per
- * the same test-pattern guidance the pre-Phase-1 `AgentHarness` tests used.
- */
-function fakeAssistantStream(): AssistantMessageEventStream {
-  const base = {
-    role: "assistant" as const,
-    content: [] as { type: "text"; text: string }[],
-    api: "openai-completions" as const,
-    provider: "fake",
-    model: "fake-model",
-    usage: { input: 3, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 8, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-    stopReason: "stop" as const,
-    timestamp: Date.now(),
-  };
-  const stream = createAssistantMessageEventStream();
-  queueMicrotask(() => {
-    stream.push({ type: "start", partial: { ...base, content: [] } });
-    stream.push({ type: "thinking_start", contentIndex: 0, partial: { ...base, content: [] } });
-    stream.push({ type: "thinking_delta", contentIndex: 0, delta: "pondering...", partial: { ...base, content: [] } });
-    stream.push({ type: "thinking_end", contentIndex: 0, content: "pondering...", partial: { ...base, content: [] } });
-    stream.push({ type: "text_start", contentIndex: 1, partial: { ...base, content: [] } });
-    stream.push({ type: "text_delta", contentIndex: 1, delta: "Hi ", partial: { ...base, content: [] } });
-    stream.push({ type: "text_delta", contentIndex: 1, delta: "there", partial: { ...base, content: [] } });
-    const finalMessage = { ...base, content: [{ type: "text" as const, text: "Hi there" }] };
-    stream.push({ type: "text_end", contentIndex: 1, content: "Hi there", partial: finalMessage });
-    stream.push({ type: "done", reason: "stop", message: finalMessage });
-    stream.end(finalMessage);
-  });
-  return stream;
-}
-
-const FAKE_PROVIDER_ID = "fake";
-const FAKE_MODEL_ID = "fake-model";
-
-async function buildFakeModelRuntime(agentDir: string) {
-  const { ModelRuntime } = await realCodingAgentLoaders.loadCodingAgent!();
-  const modelRuntime = await ModelRuntime.create({
-    authPath: path.join(agentDir, "auth.json"),
-    modelsPath: null,
-    allowModelNetwork: false,
-  });
-  modelRuntime.registerProvider(FAKE_PROVIDER_ID, {
-    baseUrl: "https://fake.local",
-    api: "openai-completions",
-    apiKey: "fake-key",
-    streamSimple: fakeAssistantStream,
-    models: [
-      {
-        id: FAKE_MODEL_ID,
-        name: FAKE_MODEL_ID,
-        reasoning: false,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 128_000,
-        maxTokens: 4096,
-      },
-    ],
-  });
-  const model = modelRuntime.getModel(FAKE_PROVIDER_ID, FAKE_MODEL_ID);
-  if (!model) throw new Error("fake model failed to register");
-  return { modelRuntime, model: model as unknown as Model<Api> };
-}
 
 describe("AgentRuntime (real AgentSession + real SessionManager, fake network)", () => {
   let cwd: string;
   let agentDir: string;
+  let originalPiAgentDir: string | undefined;
 
   beforeEach(() => {
     cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-agent-runtime-"));
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-agent-dir-"));
+    // Isolates every default-resolved pi-coding-agent path (auth.json,
+    // models.json, and -- crucially for these tests -- `SessionManager`'s
+    // default cwd-encoded session directory) away from the real
+    // developer's `~/.pi/agent`, exactly like `getAgentDir()` itself
+    // documents (`config.js`: "if PI_CODING_AGENT_DIR is set, use it"). This is
+    // also what `AgentRuntime.run` in production relies on implicitly
+    // (it never passes an explicit `agentDir`/`sessionDir` override).
+    originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
   });
 
   afterEach(() => {
+    if (originalPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalPiAgentDir;
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(agentDir, { recursive: true, force: true });
   });
@@ -111,7 +51,6 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
       providerId: FAKE_PROVIDER_ID,
       model,
       modelRuntime,
-      agentDir,
       signal: new AbortController().signal,
       emit: (event) => events.push(event),
     });
@@ -123,10 +62,11 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
     expect(events.some((e) => e.type === "usage" && e.inputTokens === 3 && e.outputTokens === 5)).toBe(true);
     expect(events.at(-1)).toEqual({ type: "completed", requestId: "req-1" });
 
-    // Real on-disk proof: a fresh SessionManager.list() against the same
-    // cwd must find the persisted session under the same conversationId.
+    // Real on-disk proof: a fresh SessionManager.list() (default,
+    // cwd-encoded resolution -- same as `AgentRuntime` itself uses) must
+    // find the persisted session under the same conversationId.
     const { SessionManager } = await realCodingAgentLoaders.loadCodingAgent!();
-    const sessions = await SessionManager.list(cwd, path.join(agentDir, "sessions"));
+    const sessions = await SessionManager.list(cwd);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toBe("conv-real-1");
   });
@@ -149,7 +89,6 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
       providerId: FAKE_PROVIDER_ID,
       model,
       modelRuntime,
-      agentDir,
       signal: new AbortController().signal,
       emit: (event) => events.push(event),
     });
@@ -183,7 +122,6 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
       providerId: FAKE_PROVIDER_ID,
       model,
       modelRuntime,
-      agentDir,
       signal: new AbortController().signal,
       emit: (event) => events.push(event),
     });
@@ -191,8 +129,8 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
     expect(events.at(-1)).toEqual({ type: "completed", requestId: "req-3" });
 
     const { SessionManager } = await realCodingAgentLoaders.loadCodingAgent!();
-    const sessions = await SessionManager.list(cwd, path.join(agentDir, "sessions"));
-    const sessionManager = SessionManager.open(sessions[0].path, path.join(agentDir, "sessions"));
+    const sessions = await SessionManager.list(cwd);
+    const sessionManager = SessionManager.open(sessions[0].path);
     const entries = sessionManager.getEntries();
     const userMessages = entries
       .filter((e) => e.type === "message" && e.message.role === "user")
@@ -216,7 +154,6 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
         providerId: FAKE_PROVIDER_ID,
         model,
         modelRuntime,
-        agentDir,
         signal: new AbortController().signal,
         emit: (event) => events.push(event),
       });
@@ -230,14 +167,13 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
     expect(secondEvents.at(-1)).toEqual({ type: "completed", requestId: "req-b" });
 
     const { SessionManager } = await realCodingAgentLoaders.loadCodingAgent!();
-    const sessionDir = path.join(agentDir, "sessions");
     // Exactly one session file on disk -- proves the second run() found and
     // reused the existing session, rather than creating a second one.
-    const sessions = await SessionManager.list(cwd, sessionDir);
+    const sessions = await SessionManager.list(cwd);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toBe("conv-reused");
 
-    const sessionManager = SessionManager.open(sessions[0].path, sessionDir);
+    const sessionManager = SessionManager.open(sessions[0].path);
     const userMessages = sessionManager
       .getEntries()
       .filter((e) => e.type === "message" && e.message.role === "user")
@@ -251,7 +187,7 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
     // confused with "conv-reused" -- proves the match is filtered by id
     // rather than picking the first/any session.
     await runOnce("req-c", "conv-other", "unrelated conversation");
-    const allSessions = await SessionManager.list(cwd, sessionDir);
+    const allSessions = await SessionManager.list(cwd);
     expect(allSessions).toHaveLength(2);
     expect(allSessions.map((s) => s.id).sort()).toEqual(["conv-other", "conv-reused"]);
   });

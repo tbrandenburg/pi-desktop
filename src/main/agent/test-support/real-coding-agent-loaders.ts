@@ -1,4 +1,4 @@
-import { createAgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, getAgentDir, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { CodingAgentLoaders } from "../coding-agent-loaders";
 
 // Real @earendil-works/pi-coding-agent code, imported the normal static way
@@ -8,5 +8,5 @@ import type { CodingAgentLoaders } from "../coding-agent-loaders";
 // cannot run under Vitest's vm-based test pool at all (see
 // `real-agent-core-loaders.ts` for the identical, already-proven pattern).
 export const realCodingAgentLoaders: CodingAgentLoaders = {
-  loadCodingAgent: async () => ({ createAgentSession, ModelRuntime, SessionManager }),
+  loadCodingAgent: async () => ({ createAgentSession, ModelRuntime, SessionManager, getAgentDir }),
 };

@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ChatEvent, StartChatRequest } from "../../shared/events";
@@ -28,16 +27,6 @@ export interface AgentRuntimeRunArgs {
   /** pi-desktop's own stored credential for `providerId`, if any (never `~/.pi/agent/auth.json` -- see AGENTS.md rule #5). */
   apiKey?: string;
   /**
-   * Overrides pi-coding-agent's default `~/.pi/agent` config directory
-   * (auth.json/models.json/sessions). Production code never sets this
-   * (it intentionally shares the real `~/.pi/agent`, same as
-   * `src/main/model/registry.ts`'s built-in/agent-dir provider sources);
-   * tests set it to an isolated temp directory so they never read or
-   * write the real developer's `~/.pi/agent` (which can be large enough
-   * to make `createAgentSession`'s resource discovery slow).
-   */
-  agentDir?: string;
-  /**
    * Injectable `ModelRuntime` instance, overriding the default
    * `ModelRuntime.create()` construction below. Production code never sets
    * this (each real chat turn builds its own instance from the real
@@ -47,6 +36,15 @@ export interface AgentRuntimeRunArgs {
    * internally that has no way to see a fake registered on a *different*
    * instance a test built separately, since `registerProvider` is purely
    * in-memory (not persisted to `auth.json`/`models.json`).
+   *
+   * Test isolation from the real `~/.pi/agent` (auth.json/models.json/
+   * sessions) is achieved via the `PI_CODING_AGENT_DIR` env var pi-coding-agent's
+   * own `getAgentDir()` already honors (see `config.js`) -- not via a
+   * separate `agentDir` constructor/run-arg override, so that both
+   * `AgentRuntime` (via `SessionManager`'s *default*, cwd-encoded session
+   * directory resolution) and `SessionService` (`src/main/session/
+   * service.ts`, via `getAgentDir()` directly) always resolve to the exact
+   * same directory with zero extra plumbing.
    */
   modelRuntime?: ModelRuntime;
   signal: AbortSignal;
@@ -73,7 +71,6 @@ export class AgentRuntime {
     providerId,
     model,
     apiKey,
-    agentDir,
     modelRuntime: injectedModelRuntime,
     signal,
     emit,
@@ -89,12 +86,7 @@ export class AgentRuntime {
     // `ModelRuntime.create()` discovers models the exact same way the `pi`
     // CLI does: built-in provider catalogs plus `~/.pi/agent/auth.json` /
     // `models.json`.
-    const modelRuntime =
-      injectedModelRuntime ??
-      (await ModelRuntime.create({
-        authPath: agentDir ? path.join(agentDir, "auth.json") : undefined,
-        allowModelNetwork: false,
-      }));
+    const modelRuntime = injectedModelRuntime ?? (await ModelRuntime.create({ allowModelNetwork: false }));
     // `ModelRuntime`'s own discovery (builtin catalogs + `~/.pi/agent/{auth,models}.json`)
     // covers most providers already. It does not know about pi-desktop's
     // own single-slot `app-settings` provider (baseUrl/model configured
@@ -136,17 +128,10 @@ export class AgentRuntime {
       resolvedModel = modelRuntime.getModel(providerId, model.id) ?? model;
     }
 
-    const sessionDir = agentDir ? path.join(agentDir, "sessions") : undefined;
-    const sessionManager = await openOrCreateSessionManager(
-      SessionManager,
-      cwd,
-      request.conversationId,
-      sessionDir,
-    );
+    const sessionManager = await openOrCreateSessionManager(SessionManager, cwd, request.conversationId);
 
     const { session } = await createAgentSession({
       cwd,
-      agentDir,
       modelRuntime,
       model: resolvedModel,
       sessionManager,
@@ -229,15 +214,25 @@ export class AgentRuntime {
  * helper. This is what lets the same `conversationId` (generated once by
  * the renderer per conversation) keep resolving to the same persisted,
  * cwd-scoped session across separate `runChat` calls.
+ *
+ * Deliberately never passes an explicit `sessionDir` override to
+ * `SessionManager.list/open/create` -- omitting it is what makes
+ * `SessionManager` apply its own default, cwd-encoded resolution
+ * (`<agentDir>/sessions/<encoded-cwd>/...`, see `getDefaultSessionDirPath`
+ * in pi-coding-agent's `session-manager.js`). `SessionService`
+ * (`src/main/session/service.ts`) relies on this exact same default
+ * resolution (reconstructed via `JsonlSessionRepo`'s own identical
+ * `encodeCwd()` step) to read back what this method writes -- passing a
+ * custom `sessionDir` here would silently break that alignment (see issue
+ * #90's session-format-alignment follow-up).
  */
 async function openOrCreateSessionManager(
   SessionManagerClass: typeof SessionManager,
   cwd: string,
   conversationId: string,
-  sessionDir?: string,
 ): Promise<SessionManager> {
-  const existing = await SessionManagerClass.list(cwd, sessionDir);
+  const existing = await SessionManagerClass.list(cwd);
   const match = existing.find((info) => info.id === conversationId);
-  if (match) return SessionManagerClass.open(match.path, sessionDir);
-  return SessionManagerClass.create(cwd, sessionDir, { id: conversationId });
+  if (match) return SessionManagerClass.open(match.path);
+  return SessionManagerClass.create(cwd, undefined, { id: conversationId });
 }
