@@ -11,6 +11,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
+    "postinstall": "node scripts/patch-nested-pi-coding-agent-deps.mjs",
     "dev:renderer": "vite",
     "dev:main": "tsc -p tsconfig.main.json -w",
     "dev": "concurrently -k \"npm:dev:main\" \"tsx scripts/run-electron-dev.ts\"",
@@ -26,6 +27,7 @@
     "test": "vitest run",
     "cdp": "tsx scripts/cdp-drive.ts",
     "check:test-ratio": "bash scripts/check-test-ratio.sh",
+    "check:pi-lockstep": "node scripts/check-pi-lockstep.mjs",
     "test:mutation": "stryker run"
   },
   "overrides": {
@@ -34,8 +36,9 @@
     "@emnapi/wasi-threads": "1.2.3"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.81.1",
-    "@earendil-works/pi-ai": "^0.81.1",
+    "@earendil-works/pi-agent-core": "^0.83.0",
+    "@earendil-works/pi-ai": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
     "electron-store": "^8.2.0",
     "immer": "^11.1.15",
     "lucide-react": "^0.474.0",

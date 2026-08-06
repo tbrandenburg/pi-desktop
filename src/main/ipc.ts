@@ -6,9 +6,11 @@ import { listConfiguredModels, resolvePiDefault } from "./model/pi-config";
 import { SettingsStore } from "./settings/store";
 import { SessionService } from "./session/service";
 import type { AgentCoreLoaders } from "./agent/core";
+import type { CodingAgentLoaders } from "./agent/coding-agent-loaders";
 
 export interface RegisterIpcHandlersDeps {
   agentCoreLoaders?: AgentCoreLoaders;
+  codingAgentLoaders?: CodingAgentLoaders;
 }
 
 export function registerIpcHandlers(
@@ -22,7 +24,7 @@ export function registerIpcHandlers(
     currentWorkspaceDir = dir;
   });
 
-  const sessionService = new SessionService(getWorkspaceDir, deps.agentCoreLoaders);
+  const sessionService = new SessionService(getWorkspaceDir, deps.agentCoreLoaders, deps.codingAgentLoaders);
   const chatService = new ChatService(settingsStore, getWindow, undefined, getWorkspaceDir);
 
   ipcMain.handle("app:get-version", (): string => {

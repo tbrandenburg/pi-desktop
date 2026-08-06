@@ -81,6 +81,7 @@ test:
 lint:
 	npm run check
 	npm run lint:oxlint
+	npm run check:pi-lockstep
 	@find src \( -name "*.ts" -o -name "*.tsx" \) | grep -Ev '\.test\.' | xargs wc -l | grep -v ' total$$' | awk '$$1>500{print "WARNING: " $$2 " has " $$1 " lines"}'
 	npm run check:test-ratio
 	npm test -- --coverage

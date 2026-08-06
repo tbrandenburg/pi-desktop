@@ -1,4 +1,4 @@
-import { AgentHarness, JsonlSessionRepo, Session } from "@earendil-works/pi-agent-core";
+import { JsonlSessionRepo, Session } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { AgentCoreLoaders } from "../core";
 
@@ -9,6 +9,6 @@ import type { AgentCoreLoaders } from "../core";
 // cannot run under Vitest's vm-based test pool at all (see
 // `real-models-loaders.ts` for the identical, already-proven pattern).
 export const realAgentCoreLoaders: AgentCoreLoaders = {
-  loadAgentCore: async () => ({ AgentHarness, JsonlSessionRepo, Session }),
+  loadAgentCore: async () => ({ JsonlSessionRepo, Session }),
   loadAgentCoreNode: async () => ({ NodeExecutionEnv }),
 };
