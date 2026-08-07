@@ -141,7 +141,6 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
         if (!message || !message.streaming) return;
         draft.status = "error";
         draft.activeRequestId = null;
-        draft.errorMessage = "No response received";
         message.streaming = false;
         message.error = "No response received";
       });
@@ -193,7 +192,6 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
         set((draft) => {
           draft.status = "error";
           draft.activeRequestId = null;
-          draft.errorMessage = event.message;
           const message = draft.messages.find((m) => m.id === assistantMessage.id);
           if (message) {
             message.streaming = false;
@@ -240,7 +238,6 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
       set((draft) => {
         draft.status = "error";
         draft.activeRequestId = null;
-        draft.errorMessage = errorMessage;
         const message = draft.messages.find((m) => m.id === assistantMessage.id);
         if (message) {
           message.streaming = false;
