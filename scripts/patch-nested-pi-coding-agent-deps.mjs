@@ -43,6 +43,15 @@
 // undici/minimatch bumped past these versions (their main branch already
 // has this fix as of this writing, just not yet released to npm).
 import { execFileSync } from "node:child_process";
+
+// On Windows, `npm` resolves to the `npm.cmd` shim, which `execFileSync`
+// cannot execute directly without `shell: true` (Node.js/Windows only
+// auto-resolves `.exe`, not `.cmd`/`.bat`, for direct child_process spawns --
+// see https://nodejs.org/api/child_process.html#spawning-bat-and-cmd-files-on-windows).
+// Passing `shell: true` would work but re-introduces the shell-injection
+// surface `execFileSync` exists to avoid; naming the platform-correct binary
+// instead keeps the same safe, no-shell spawn on every OS.
+const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
 import {
   existsSync,
   mkdtempSync,
@@ -103,7 +112,7 @@ for (const { nestedPath, lockKey, name, version } of patches) {
 
   const tmpDir = mkdtempSync(join(tmpdir(), "patch-nested-dep-"));
   try {
-    execFileSync("npm", ["pack", spec, "--silent"], { cwd: tmpDir, stdio: "pipe" });
+    execFileSync(npmBin, ["pack", spec, "--silent"], { cwd: tmpDir, stdio: "pipe" });
     const tarball = readdirSync(tmpDir).find((f) => f.endsWith(".tgz"));
     if (!tarball) {
       throw new Error(`npm pack ${spec} produced no tarball`);
@@ -116,7 +125,7 @@ for (const { nestedPath, lockKey, name, version } of patches) {
 
     if (lock?.packages?.[lockKey]) {
       const dist = JSON.parse(
-        execFileSync("npm", ["view", spec, "dist", "--json"], { encoding: "utf8" }),
+        execFileSync(npmBin, ["view", spec, "dist", "--json"], { encoding: "utf8" }),
       );
       const entry = lock.packages[lockKey];
       if (entry.version !== version) {
