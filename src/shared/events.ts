@@ -55,7 +55,18 @@ export type ExtensionUIRequest =
   | { requestId: string; kind: "select"; title: string; options: string[] }
   | { requestId: string; kind: "confirm"; title: string; message: string }
   | { requestId: string; kind: "input"; title: string; placeholder?: string }
-  | { requestId: string; kind: "notify"; message: string; level: "info" | "warning" | "error" };
+  | { requestId: string; kind: "notify"; message: string; level: "info" | "warning" | "error" }
+  | { requestId: string; kind: "set-title"; title: string }
+  | { requestId: string; kind: "set-status"; key: string; text: string | undefined }
+  | {
+      requestId: string;
+      kind: "set-working";
+      message?: string;
+      visible?: boolean;
+      hiddenThinkingLabel?: string;
+    }
+  | { requestId: string; kind: "set-tools-expanded"; value: boolean }
+  | { requestId: string; kind: "set-editor-text"; text: string; mode: "replace" | "paste" };
 
 /** The renderer's answer to a `select`/`confirm`/`input` `ExtensionUIRequest`, sent back via `respondExtensionUI`. */
 export type ExtensionUIResponse =
@@ -67,6 +78,19 @@ export type ExtensionUIResponse =
 export interface CommandInfo {
   name: string;
   description?: string;
+}
+
+/** A suggestion returned by an extension-registered `addAutocompleteProvider` for the current composer text. */
+export interface AutocompleteSuggestion {
+  value: string;
+  description?: string;
+}
+
+/** A `ctx.ui.registerShortcut`-registered keyboard shortcut, surfaced to the renderer so it can intercept the matching keydown. */
+export interface ShortcutInfo {
+  id: string;
+  /** Normalized lowercase, `+`-joined combo, e.g. `"ctrl+shift+p"`. */
+  keys: string;
 }
 
 /**
@@ -131,4 +155,19 @@ export interface DesktopAgentApi {
   installPackage(source: string): Promise<PackageInfo>;
   removePackage(source: string): Promise<void>;
   updatePackage(source: string): Promise<void>;
+
+  /** Current tools-expanded state, cached in main and kept in sync via `reportToolsExpanded`. */
+  getToolsExpanded(): Promise<boolean>;
+  /** Renderer reports a user-driven tools-expanded toggle back to main so `ExtensionUIContext.getToolsExpanded()` stays accurate. */
+  reportToolsExpanded(value: boolean): Promise<void>;
+  /** Current composer editor text, cached in main and kept in sync via `reportEditorText`. */
+  getEditorText(): Promise<string>;
+  /** Renderer reports the composer's current text back to main so `ExtensionUIContext.getEditorText()` stays accurate. */
+  reportEditorText(text: string): Promise<void>;
+  /** Asks main to run every extension-registered autocomplete provider against the current composer text. */
+  queryAutocomplete(text: string): Promise<AutocompleteSuggestion[]>;
+  /** Lists extension-registered keyboard shortcuts so the renderer can intercept matching keydowns. */
+  listShortcuts(): Promise<ShortcutInfo[]>;
+  /** Invokes the extension callback registered for the given shortcut id. */
+  triggerShortcut(id: string): Promise<void>;
 }

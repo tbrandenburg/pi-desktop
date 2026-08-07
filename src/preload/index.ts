@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  AutocompleteSuggestion,
   ChatEvent,
   CommandInfo,
   DesktopAgentApi,
@@ -11,6 +12,7 @@ import type {
   ProviderSettingsSummary,
   SessionRecord,
   SessionSummary,
+  ShortcutInfo,
   StartChatRequest,
   WorkspaceInfo,
 } from "../shared/events";
@@ -95,6 +97,34 @@ const api: DesktopAgentApi = {
 
   updatePackage(source: string): Promise<void> {
     return ipcRenderer.invoke("packages:update", source);
+  },
+
+  getToolsExpanded(): Promise<boolean> {
+    return ipcRenderer.invoke("extension-ui:get-tools-expanded");
+  },
+
+  reportToolsExpanded(value: boolean): Promise<void> {
+    return ipcRenderer.invoke("extension-ui:report-tools-expanded", value);
+  },
+
+  getEditorText(): Promise<string> {
+    return ipcRenderer.invoke("extension-ui:get-editor-text");
+  },
+
+  reportEditorText(text: string): Promise<void> {
+    return ipcRenderer.invoke("extension-ui:report-editor-text", text);
+  },
+
+  queryAutocomplete(text: string): Promise<AutocompleteSuggestion[]> {
+    return ipcRenderer.invoke("extension-ui:query-autocomplete", text);
+  },
+
+  listShortcuts(): Promise<ShortcutInfo[]> {
+    return ipcRenderer.invoke("shortcuts:list");
+  },
+
+  triggerShortcut(id: string): Promise<void> {
+    return ipcRenderer.invoke("shortcuts:trigger", id);
   },
 };
 

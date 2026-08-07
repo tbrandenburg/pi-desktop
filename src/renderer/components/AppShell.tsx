@@ -10,9 +10,14 @@ import { SelectDialog } from "./SelectDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { Sidebar } from "./Sidebar";
 import { desktopApi } from "../lib/desktop-api";
+import { normalizeShortcutEvent } from "../lib/shortcut-key";
 import { useChatStore } from "../state/chat-store";
 import { useExtensionUIStore } from "../state/extension-ui-store";
 import { useSettingsStore } from "../state/settings-store";
+import type { ExtensionUIRequest, ShortcutInfo } from "../../shared/events";
+
+type SetTitlePush = Extract<ExtensionUIRequest, { kind: "set-title" }>;
+type SetStatusPush = Extract<ExtensionUIRequest, { kind: "set-status" }>;
 
 export function AppShell() {
   const loadModels = useChatStore((state) => state.loadModels);
@@ -20,6 +25,8 @@ export function AppShell() {
   const errorMessage = useChatStore((state) => state.errorMessage);
   const openSettings = useSettingsStore((state) => state.open);
   const handleExtensionUIRequest = useExtensionUIStore((state) => state.handleRequest);
+  const titlePush = useExtensionUIStore((state) => state.dataPushes["set-title"]) as SetTitlePush | undefined;
+  const statusPush = useExtensionUIStore((state) => state.dataPushes["set-status"]) as SetStatusPush | undefined;
 
   // Theme is applied pre-paint by theme-init.ts (see main.tsx) to avoid FOUC,
   // so <html data-theme> is already correct on first render — seed state from
@@ -49,14 +56,75 @@ export function AppShell() {
     return desktopApi().onExtensionUIRequest(handleExtensionUIRequest);
   }, [handleExtensionUIRequest]);
 
+  // Extension-set window title (issue #137): the real OS title is set
+  // directly in the main process; this mirrors it into the in-app header,
+  // falling back to the default app name when no extension has called
+  // `setTitle()` yet.
+  const title = titlePush?.title ?? "Pi Desktop";
+
+  // Extension status area (issue #138): `set-status` pushes are keyed by
+  // `key`, and the store only retains the single most recent push overall,
+  // so multiple concurrent status keys are accumulated locally here.
+  // `text: undefined` clears that key's status.
+  const [statuses, setStatuses] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!statusPush) return;
+    setStatuses((prev) => {
+      if (statusPush.text === undefined) {
+        if (!(statusPush.key in prev)) return prev;
+        const next = { ...prev };
+        delete next[statusPush.key];
+        return next;
+      }
+      return { ...prev, [statusPush.key]: statusPush.text };
+    });
+  }, [statusPush]);
+
+  // Extension keyboard shortcuts (issue #142): the list is fetched once on
+  // mount -- currently always empty upstream (see handoff notes) -- and
+  // every real keydown is normalized and checked against it.
+  useEffect(() => {
+    let shortcuts: ShortcutInfo[] = [];
+    let cancelled = false;
+    void desktopApi()
+      .listShortcuts()
+      .then((list) => {
+        if (!cancelled) shortcuts = list;
+      });
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (shortcuts.length === 0) return;
+      const combo = normalizeShortcutEvent(event);
+      const match = shortcuts.find((shortcut) => shortcut.keys === combo);
+      if (!match) return;
+      event.preventDefault();
+      void desktopApi().triggerShortcut(match.id);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
   return (
     <div className="flex h-screen w-screen bg-surface text-white">
       <Sidebar />
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-surface-border px-6 py-3">
-          <span className="text-sm font-semibold tracking-wide text-white/80">
-            Pi Desktop
-          </span>
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-semibold tracking-wide text-white/80">{title}</span>
+            {Object.keys(statuses).length > 0 && (
+              <div className="flex items-center gap-3 text-xs text-white/50">
+                {Object.entries(statuses).map(([key, text]) => (
+                  <span key={key}>
+                    {key}: {text}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             <button
               type="button"
