@@ -3,10 +3,24 @@ import { lazy, Suspense, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { DisplayMessage } from "../state/chat-store";
+// Type-only import, erased entirely at build time (no runtime/bundle cost):
+// pulls @types/react-syntax-highlighter's ambient submodule declarations
+// into the program so the dynamic submodule imports below type-check,
+// without importing any runtime code from the package's barrel `index.js`.
+import type {} from "react-syntax-highlighter";
 
+// PrismAsyncLight is imported from its own submodule path (not the package's
+// barrel `index.js`) so bundlers don't also pull in the sibling `Prism`/
+// `PrismAsync` exports, which synchronously bundle all ~250 language
+// grammars regardless of which export is actually used. PrismAsyncLight
+// already loads each language grammar on demand internally (see
+// react-syntax-highlighter's async-syntax-highlighter.js) the first time a
+// given `language` prop is rendered, re-rendering once it's ready — no
+// manual registration needed here. An unsupported/unknown language name is
+// normalized to plain, unhighlighted text by the component itself.
 const HighlightedCode = lazy(async () => {
-  const [{ Prism: SyntaxHighlighter }, { default: oneDark }] = await Promise.all([
-    import("react-syntax-highlighter"),
+  const [{ default: SyntaxHighlighter }, { default: oneDark }] = await Promise.all([
+    import("react-syntax-highlighter/dist/esm/prism-async-light"),
     import("react-syntax-highlighter/dist/esm/styles/prism/one-dark"),
   ]);
 
