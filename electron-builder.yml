@@ -70,22 +70,25 @@ mac:
       arch: [universal]
     - target: zip
       arch: [universal]
-  # @earendil-works/pi-tui ships prebuilt native darwin addons per-arch under
-  # native/darwin/prebuilds/darwin-{arm64,x64}/*.node, and its own runtime
-  # loader picks the right one per-process arch dynamically -- npm installs
-  # all prebuilds unconditionally (no os/cpu package.json filtering), so both
+  # Several transitive deps (@earendil-works/pi-tui's own native/darwin/
+  # prebuilds/darwin-{arm64,x64}/*.node, @mariozechner/clipboard-darwin-arm64,
+  # ...) ship prebuilt native darwin addons as single-arch packages/files with
+  # their own runtime loader picking the right one per-process arch --
+  # `npm install` unpacks whichever arch-specific optional packages match the
+  # *build host's* arch (only arm64 ones on a macos-latest arm64 runner), so
   # the x64 and arm64 intermediate app bundles electron-builder builds before
-  # merging them into one universal binary end up containing byte-identical
-  # copies of files that are genuinely arch-specific (e.g. the arm64-only
-  # darwin-modifiers.node has no x64 counterpart at all). @electron/universal
-  # (electron-builder's universal-merge dependency) only exempts an
-  # identical-across-arches Mach-O file from its mismatch check via
-  # `x64ArchFiles` specifically -- `singleArchFiles` gates a *different*,
-  # unrelated code path (verified directly against
-  # node_modules/@electron/universal/dist/cjs/index.js's own check, which
-  # reads `opts.x64ArchFiles` only) -- so `x64ArchFiles` is the one that
-  # actually silences this error, despite the file itself being arm64-only.
-  x64ArchFiles: "**/@earendil-works/pi-tui/native/**/*.node"
+  # merging into one universal binary end up with byte-identical copies of
+  # files that are genuinely single-arch, one per real "unmergeable" package.
+  # Rather than allowlisting each such package by name as they're discovered
+  # (already hit twice: pi-tui, then @mariozechner/clipboard-darwin-arm64),
+  # match every native `.node` file: this check in
+  # @electron/universal's dist/cjs/index.js only ever fires when a Mach-O
+  # file's SHA is byte-identical across both intermediate builds -- any
+  # native module that's genuinely compiled per-arch differently produces
+  # different SHAs and gets merged via `lipo` on a completely separate code
+  # path instead, so this broad glob can never mask a real dual-arch
+  # mismatch, only exempt files that were already proven identical.
+  x64ArchFiles: "**/*.node"
 
 win:
   icon: assets/icon.png
