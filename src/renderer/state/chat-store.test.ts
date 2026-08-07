@@ -64,8 +64,10 @@ describe("chat-store sendMessage guard (issue #3)", () => {
 
     const state = useChatStore.getState();
     expect(state.status).toBe("error");
-    expect(state.errorMessage).toBe("IPC channel disconnected");
+    expect(state.errorMessage).toBeNull();
     expect(state.activeRequestId).toBeNull();
+    const assistantMessage = state.messages.find((m) => m.role === "assistant");
+    expect(assistantMessage?.error).toBe("IPC channel disconnected");
   });
 
   it("proceeds normally and stores the requestId when a model is selected and startChat resolves", async () => {
@@ -457,7 +459,7 @@ describe("chat-store.sendMessage streaming events", () => {
 
     const state = useChatStore.getState();
     expect(state.status).toBe("error");
-    expect(state.errorMessage).toBe("provider exploded");
+    expect(state.errorMessage).toBeNull();
     const assistantMessage = state.messages.find((m) => m.role === "assistant");
     expect(assistantMessage?.error).toBe("provider exploded");
     expect(assistantMessage?.streaming).toBe(false);
@@ -536,7 +538,7 @@ describe("chat-store.sendMessage streaming events", () => {
 
     const state = useChatStore.getState();
     expect(state.status).toBe("error");
-    expect(state.errorMessage).toBe("OAuth refresh failed for github-copilot");
+    expect(state.errorMessage).toBeNull();
     const assistantMessage = state.messages.find((m) => m.role === "assistant");
     expect(assistantMessage?.streaming).toBe(false);
     expect(assistantMessage?.error).toBe("OAuth refresh failed for github-copilot");
@@ -568,7 +570,7 @@ describe("chat-store.sendMessage streaming events", () => {
 
       state = useChatStore.getState();
       expect(state.status).toBe("error");
-      expect(state.errorMessage).toBe("No response received");
+      expect(state.errorMessage).toBeNull();
       const settled = state.messages.find((m) => m.role === "assistant");
       expect(settled?.streaming).toBe(false);
       expect(settled?.error).toBe("No response received");
