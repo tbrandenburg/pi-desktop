@@ -44,14 +44,18 @@
 // has this fix as of this writing, just not yet released to npm).
 import { execFileSync } from "node:child_process";
 
-// On Windows, `npm` resolves to the `npm.cmd` shim, which `execFileSync`
-// cannot execute directly without `shell: true` (Node.js/Windows only
-// auto-resolves `.exe`, not `.cmd`/`.bat`, for direct child_process spawns --
-// see https://nodejs.org/api/child_process.html#spawning-bat-and-cmd-files-on-windows).
-// Passing `shell: true` would work but re-introduces the shell-injection
-// surface `execFileSync` exists to avoid; naming the platform-correct binary
-// instead keeps the same safe, no-shell spawn on every OS.
+// On Windows, `npm` resolves to the `npm.cmd` shim. Node's own docs are
+// explicit that spawning a `.cmd`/`.bat` file requires `shell: true` --
+// naming the file as `npm.cmd` alone still throws `EINVAL`, since Windows
+// itself refuses to CreateProcess a `.cmd` without a shell to interpret it
+// (see https://nodejs.org/api/child_process.html#spawning-bat-and-cmd-files-on-windows).
+// `shell: true` normally reintroduces a shell-injection surface, but every
+// call site below only ever passes hardcoded, non-user-controlled argument
+// strings (fixed package specs like `undici@8.9.0`), so there is no
+// injectable input here -- safe to enable only on the one platform that
+// requires it.
 const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmSpawnOpts = process.platform === "win32" ? { shell: true } : {};
 import {
   existsSync,
   mkdtempSync,
@@ -112,7 +116,7 @@ for (const { nestedPath, lockKey, name, version } of patches) {
 
   const tmpDir = mkdtempSync(join(tmpdir(), "patch-nested-dep-"));
   try {
-    execFileSync(npmBin, ["pack", spec, "--silent"], { cwd: tmpDir, stdio: "pipe" });
+    execFileSync(npmBin, ["pack", spec, "--silent"], { cwd: tmpDir, stdio: "pipe", ...npmSpawnOpts });
     const tarball = readdirSync(tmpDir).find((f) => f.endsWith(".tgz"));
     if (!tarball) {
       throw new Error(`npm pack ${spec} produced no tarball`);
@@ -125,7 +129,7 @@ for (const { nestedPath, lockKey, name, version } of patches) {
 
     if (lock?.packages?.[lockKey]) {
       const dist = JSON.parse(
-        execFileSync(npmBin, ["view", spec, "dist", "--json"], { encoding: "utf8" }),
+        execFileSync(npmBin, ["view", spec, "dist", "--json"], { encoding: "utf8", ...npmSpawnOpts }),
       );
       const entry = lock.packages[lockKey];
       if (entry.version !== version) {
