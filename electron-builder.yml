@@ -70,6 +70,19 @@ mac:
       arch: [universal]
     - target: zip
       arch: [universal]
+  # @earendil-works/pi-tui ships prebuilt native darwin addons per-arch under
+  # native/darwin/prebuilds/darwin-{arm64,x64}/*.node, and its own runtime
+  # loader picks the right one per-process arch dynamically -- npm installs
+  # all prebuilds unconditionally (no os/cpu package.json filtering), so both
+  # the x64 and arm64 intermediate app bundles electron-builder builds before
+  # merging them into one universal binary end up containing byte-identical
+  # copies of files that are genuinely arch-specific (e.g. the arm64-only
+  # darwin-modifiers.node has no x64 counterpart at all). electron-builder's
+  # universal-merge step treats an identical file present in both arch trees
+  # as a red flag unless it's explicitly told the file is expected to differ
+  # per-arch (see electron-builder's "Handle arch-specific native modules"
+  # docs) -- singleArchFiles tells it to leave these alone rather than fail.
+  singleArchFiles: "**/@earendil-works/pi-tui/native/**/*.node"
 
 win:
   icon: assets/icon.png
