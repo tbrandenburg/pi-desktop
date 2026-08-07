@@ -10,6 +10,7 @@ const deleteSession = vi.fn();
 const cancelChat = vi.fn();
 const getWorkspace = vi.fn().mockResolvedValue({ dir: "/home/test" });
 const chooseWorkspace = vi.fn();
+const reportToolsExpanded = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../lib/desktop-api", () => ({
   desktopApi: () => ({
@@ -22,6 +23,7 @@ vi.mock("../lib/desktop-api", () => ({
     cancelChat,
     getWorkspace,
     chooseWorkspace,
+    reportToolsExpanded,
   }),
 }));
 
@@ -606,5 +608,61 @@ describe("chat-store.sendMessage streaming events", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// Coverage for issue #139: tool-call events are rendered as their own
+// timeline entry, and `setToolsExpanded` keeps main's cached
+// `getToolsExpanded()` in sync via `reportToolsExpanded`.
+describe("chat-store tool-call handling and toolsExpanded (issue #139)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    startChat.mockReset();
+    onChatEvent.mockReset().mockReturnValue(() => {});
+    listModels.mockReset();
+    listSessions.mockReset().mockResolvedValue([]);
+    getSession.mockReset();
+    deleteSession.mockReset();
+    cancelChat.mockReset();
+    getWorkspace.mockReset().mockResolvedValue({ dir: "/home/test" });
+    chooseWorkspace.mockReset();
+    reportToolsExpanded.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("defaults toolsExpanded to false and toggles it via setToolsExpanded, reporting the change to main", async () => {
+    const { useChatStore } = await import("./chat-store");
+    expect(useChatStore.getState().toolsExpanded).toBe(false);
+
+    useChatStore.getState().setToolsExpanded(true);
+
+    expect(useChatStore.getState().toolsExpanded).toBe(true);
+    expect(reportToolsExpanded).toHaveBeenCalledWith(true);
+  });
+
+  it("pushes a tool-call entry into messages without clearing the streaming assistant bubble", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-tool" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("run a tool");
+    capturedHandler?.({
+      type: "tool-call",
+      requestId: "req-tool",
+      toolName: "read_file",
+      arguments: { path: "/tmp/foo.txt" },
+    });
+    capturedHandler?.({ type: "text-delta", requestId: "req-tool", text: "done" });
+
+    const state = useChatStore.getState();
+    const toolCallEntry = state.messages.find((m) => m.toolCall);
+    expect(toolCallEntry?.toolCall).toEqual({ toolName: "read_file", arguments: { path: "/tmp/foo.txt" } });
+
+    const assistantMessage = state.messages.find((m) => m.role === "assistant" && !m.toolCall);
+    expect(assistantMessage?.content).toBe("done");
   });
 });

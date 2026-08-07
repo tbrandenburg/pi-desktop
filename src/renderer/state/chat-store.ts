@@ -8,6 +8,8 @@ export interface DisplayMessage extends ChatMessage {
   streaming?: boolean;
   error?: string;
   retrying?: { attempt: number; maxAttempts: number };
+  /** Present only for a rendered tool-call event (issue #139); `ChatTimeline` renders a `ToolCallBubble` instead of `MessageBubble` when set. */
+  toolCall?: { toolName: string; arguments: unknown };
 }
 
 interface ChatState {
@@ -21,6 +23,7 @@ interface ChatState {
   status: "idle" | "thinking" | "streaming" | "error";
   errorMessage: string | null;
   workspaceDir: string;
+  toolsExpanded: boolean;
   loadModels: () => Promise<void>;
   loadCommands: () => Promise<void>;
   selectModel: (modelId: string) => void;
@@ -32,6 +35,7 @@ interface ChatState {
   deleteSession: (id: string) => Promise<void>;
   loadWorkspace: () => Promise<void>;
   chooseWorkspace: () => Promise<void>;
+  setToolsExpanded: (value: boolean) => void;
 }
 
 let unsubscribe: (() => void) | null = null;
@@ -53,6 +57,12 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
   status: "idle",
   errorMessage: null,
   workspaceDir: "",
+  toolsExpanded: false,
+
+  setToolsExpanded: (value: boolean) => {
+    set({ toolsExpanded: value });
+    void desktopApi().reportToolsExpanded(value);
+  },
 
   loadModels: async () => {
     const models = await desktopApi().listModels();
@@ -154,6 +164,18 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
     const handleEvent = (event: (typeof pendingEvents)[number]) => {
       clearStuckTimeout();
 
+      if (event.type === "tool-call") {
+        set((draft) => {
+          draft.messages.push({
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "",
+            toolCall: { toolName: event.toolName, arguments: event.arguments },
+          });
+        });
+        return;
+      }
+
       if (event.type === "retrying") {
         set((draft) => {
           const message = draft.messages.find((m) => m.id === assistantMessage.id);
@@ -213,7 +235,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
       handleEvent(event);
     });
 
-    const history = [...get().messages.filter((m) => !m.streaming), userMessage].map(
+    const history = [...get().messages.filter((m) => !m.streaming && !m.toolCall), userMessage].map(
       ({ role, content }) => ({ role, content }),
     );
 
