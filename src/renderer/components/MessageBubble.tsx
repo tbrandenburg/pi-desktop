@@ -1,10 +1,40 @@
 import { AlertTriangle, Check, Copy } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import type { DisplayMessage } from "../state/chat-store";
+
+const HighlightedCode = lazy(async () => {
+  const [{ Prism: SyntaxHighlighter }, { default: oneDark }] = await Promise.all([
+    import("react-syntax-highlighter"),
+    import("react-syntax-highlighter/dist/esm/styles/prism/one-dark"),
+  ]);
+
+  return {
+    default: function HighlightedCodeInner({
+      language,
+      value,
+    }: {
+      language: string;
+      value: string;
+    }) {
+      return (
+        <SyntaxHighlighter
+          language={language}
+          style={oneDark}
+          customStyle={{
+            margin: 0,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: "13px",
+            padding: "12px 14px",
+          }}
+        >
+          {value}
+        </SyntaxHighlighter>
+      );
+    },
+  };
+});
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
@@ -46,18 +76,18 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
         </span>
         <CopyButton text={value} />
       </div>
-      <SyntaxHighlighter
-        language={language || "text"}
-        style={oneDark}
-        customStyle={{
-          margin: 0,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: "13px",
-          padding: "12px 14px",
-        }}
+      <Suspense
+        fallback={
+          <pre
+            className="m-0 overflow-x-auto p-3 text-[13px]"
+            style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+          >
+            <code>{value}</code>
+          </pre>
+        }
       >
-        {value}
-      </SyntaxHighlighter>
+        <HighlightedCode language={language || "text"} value={value} />
+      </Suspense>
     </div>
   );
 }
