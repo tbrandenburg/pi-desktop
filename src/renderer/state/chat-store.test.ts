@@ -666,3 +666,131 @@ describe("chat-store tool-call handling and toolsExpanded (issue #139)", () => {
     expect(assistantMessage?.content).toBe("done");
   });
 });
+
+// Coverage for issue #145: a short, ephemeral status caption tracks the
+// current step (thinking/tool-call) on the assistant bubble itself, and is
+// cleared the instant real content starts streaming in.
+describe("chat-store step-label tracking for the typewriter caption (issue #145)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    startChat.mockReset();
+    onChatEvent.mockReset().mockReturnValue(() => {});
+    listModels.mockReset();
+    listSessions.mockReset().mockResolvedValue([]);
+    getSession.mockReset();
+    deleteSession.mockReset();
+    cancelChat.mockReset();
+    getWorkspace.mockReset().mockResolvedValue({ dir: "/home/test" });
+    chooseWorkspace.mockReset();
+    reportToolsExpanded.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("starts the assistant bubble with a 'Thinking…' step label as soon as the message is sent", async () => {
+    const { useChatStore } = await import("./chat-store");
+    startChat.mockResolvedValue({ requestId: "req-label" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("hello");
+
+    const assistantMessage = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant" && !m.toolCall);
+    expect(assistantMessage?.stepLabel).toBe("Thinking…");
+    expect(assistantMessage?.content).toBe("");
+  });
+
+  it("sets a short, humanized step label per tool category on tool-call, never the raw tool name", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-tool-label" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("edit a file");
+    capturedHandler?.({
+      type: "tool-call",
+      requestId: "req-tool-label",
+      toolName: "bash",
+      arguments: { command: "ls" },
+    });
+
+    const assistantMessage = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant" && !m.toolCall);
+    expect(assistantMessage?.stepLabel).toBe("Running a command…");
+    expect(assistantMessage?.stepLabel).not.toContain("bash");
+  });
+
+  it("clears the step label the instant the first text-delta arrives", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-clear" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("hi");
+    capturedHandler?.({
+      type: "tool-call",
+      requestId: "req-clear",
+      toolName: "read",
+      arguments: { path: "foo.ts" },
+    });
+    capturedHandler?.({ type: "text-delta", requestId: "req-clear", text: "Hello" });
+
+    const assistantMessage = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant" && !m.toolCall);
+    expect(assistantMessage?.stepLabel).toBeUndefined();
+    expect(assistantMessage?.content).toBe("Hello");
+  });
+
+  it("keeps the 'Thinking…' step label on a reasoning-delta event, ignoring the actual reasoning text", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-reasoning" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("solve this");
+    capturedHandler?.({
+      type: "reasoning-delta",
+      requestId: "req-reasoning",
+      text: "The user wants X, so I should consider Y and Z in detail...",
+    });
+
+    const assistantMessage = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant" && !m.toolCall);
+    expect(assistantMessage?.stepLabel).toBe("Thinking…");
+    expect(assistantMessage?.content).toBe("");
+  });
+
+  it("clears the step label when an error arrives before any text was streamed", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-error" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("fail please");
+    capturedHandler?.({ type: "error", requestId: "req-error", message: "boom" });
+
+    const assistantMessage = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant" && !m.toolCall);
+    expect(assistantMessage?.stepLabel).toBeUndefined();
+    expect(assistantMessage?.error).toBe("boom");
+  });
+});

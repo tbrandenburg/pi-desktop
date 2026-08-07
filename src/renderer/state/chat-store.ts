@@ -10,6 +10,35 @@ export interface DisplayMessage extends ChatMessage {
   retrying?: { attempt: number; maxAttempts: number };
   /** Present only for a rendered tool-call event (issue #139); `ChatTimeline` renders a `ToolCallBubble` instead of `MessageBubble` when set. */
   toolCall?: { toolName: string; arguments: unknown };
+  /**
+   * Ephemeral, short, humanized status caption shown at the streaming cursor
+   * while this assistant message has no real content yet (issue #145) — e.g.
+   * "Thinking…" or "Running a command…". Cleared the instant the first
+   * `text-delta` arrives; never persisted as part of the message record.
+   */
+  stepLabel?: string;
+}
+
+/**
+ * Maps a tool name to a short, generic, humanized status label for the
+ * live typewriter caption (issue #145). Deliberately never shows the raw
+ * tool name or arguments — just enough to convey "the agent is working".
+ */
+function toolStepLabel(toolName: string): string {
+  switch (toolName) {
+    case "read":
+      return "Reading files…";
+    case "write":
+      return "Writing files…";
+    case "edit":
+      return "Editing files…";
+    case "bash":
+      return "Running a command…";
+    case "list":
+      return "Browsing files…";
+    default:
+      return "Working…";
+  }
 }
 
 interface ChatState {
@@ -133,6 +162,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
       role: "assistant",
       content: "",
       streaming: true,
+      stepLabel: "Thinking…",
     };
 
     set((draft) => {
@@ -153,6 +183,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
         draft.activeRequestId = null;
         message.streaming = false;
         message.error = "No response received";
+        message.stepLabel = undefined;
       });
     }, STUCK_MESSAGE_TIMEOUT_MS);
     const clearStuckTimeout = () => {
@@ -172,6 +203,19 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
             content: "",
             toolCall: { toolName: event.toolName, arguments: event.arguments },
           });
+          const message = draft.messages.find((m) => m.id === assistantMessage.id);
+          if (message) message.stepLabel = toolStepLabel(event.toolName);
+        });
+        return;
+      }
+
+      if (event.type === "reasoning-delta") {
+        set((draft) => {
+          const message = draft.messages.find((m) => m.id === assistantMessage.id);
+          // Deliberately ignore the actual reasoning text (issue #145): a
+          // synthesized summary risks being misleading, so the caption
+          // always stays the same simple "Thinking…" label.
+          if (message && !message.content) message.stepLabel = "Thinking…";
         });
         return;
       }
@@ -191,6 +235,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
           if (message) {
             message.content += event.text;
             message.retrying = undefined;
+            message.stepLabel = undefined;
           }
         });
         return;
@@ -204,6 +249,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
           if (message) {
             message.streaming = false;
             message.retrying = undefined;
+            message.stepLabel = undefined;
           }
         });
         void get().loadSessions();
@@ -219,6 +265,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
             message.streaming = false;
             message.error = event.message;
             message.retrying = undefined;
+            message.stepLabel = undefined;
           }
         });
         void get().loadSessions();
@@ -277,7 +324,10 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
       draft.status = "idle";
       draft.activeRequestId = null;
       for (const message of draft.messages) {
-        if (message.streaming) message.streaming = false;
+        if (message.streaming) {
+          message.streaming = false;
+          message.stepLabel = undefined;
+        }
       }
     });
     void get().loadSessions();

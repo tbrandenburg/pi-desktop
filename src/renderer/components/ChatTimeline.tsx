@@ -4,12 +4,10 @@ import { useChatStore } from "../state/chat-store";
 import { useExtensionUIStore } from "../state/extension-ui-store";
 import { EmptyState } from "./EmptyState";
 import { MessageBubble } from "./MessageBubble";
-import { ThinkingIndicator } from "./ThinkingIndicator";
 import { ToolCallBubble } from "./ToolCallBubble";
 
 export function ChatTimeline() {
   const messages = useChatStore((state) => state.messages);
-  const status = useChatStore((state) => state.status);
   const toolsExpanded = useChatStore((state) => state.toolsExpanded);
   const setToolsExpanded = useChatStore((state) => state.setToolsExpanded);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -61,7 +59,6 @@ export function ChatTimeline() {
           <MessageBubble key={message.id} message={message} />
         ),
       )}
-      {status === "thinking" && <ThinkingIndicator />}
     </div>
   );
 }
