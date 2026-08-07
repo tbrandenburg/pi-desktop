@@ -5,7 +5,7 @@ import path from "node:path";
 import { AgentRuntime } from "./runtime";
 import { IpcUIContextBridge } from "./ui-context";
 import { realCodingAgentLoaders } from "./test-support/real-coding-agent-loaders";
-import { buildFakeModelRuntime, FAKE_PROVIDER_ID } from "./test-support/fake-model-runtime";
+import { buildFakeModelRuntime, buildFakeFailingModelRuntime, FAKE_PROVIDER_ID } from "./test-support/fake-model-runtime";
 import { buildTestResourceLoader, type TestExtensionLog } from "./test-support/inline-test-extension";
 import { PackageService } from "../packages/service";
 import type { ChatEvent, ExtensionUIRequest, StartChatRequest } from "../../shared/events";
@@ -126,6 +126,38 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
     expect(events).toHaveLength(1);
     expect(events[0]).toEqual({ type: "error", requestId: "req-2", message: "No user message to send." });
     expect(events.some((e) => e.type === "started")).toBe(false);
+  });
+
+  it("emits a 'error' ChatEvent (not 'completed') when session.prompt() resolves with a stopReason:'error' assistant message -- e.g. a real suspended-account 403 mid-call, found via production verification of #118/#119/#120", async () => {
+    const request: StartChatRequest = {
+      conversationId: "conv-provider-error",
+      model: "fake/fake-model",
+      messages: [{ role: "user", content: "Hello, ping" }],
+    };
+
+    const events: ChatEvent[] = [];
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    const providerErrorMessage =
+      'OAuth refresh failed for github-copilot: 403 Forbidden: {\n  "message": "Sorry. Your account was suspended"\n}';
+    const { modelRuntime, model } = await buildFakeFailingModelRuntime(agentDir, providerErrorMessage);
+
+    await runtime.run({
+      requestId: "req-provider-error",
+      request,
+      cwd,
+      providerId: FAKE_PROVIDER_ID,
+      model,
+      modelRuntime,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+    });
+
+    expect(events.some((e) => e.type === "completed")).toBe(false);
+    expect(events.at(-1)).toEqual({
+      type: "error",
+      requestId: "req-provider-error",
+      message: providerErrorMessage,
+    });
   });
 
   it("finds the last user message when the request has multiple, using the most recent one", async () => {

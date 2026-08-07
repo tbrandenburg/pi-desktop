@@ -210,7 +210,25 @@ export class AgentRuntime {
 
     try {
       await session.prompt(lastUserMessage.content);
-      emit({ type: "completed", requestId });
+
+      // `session.prompt()` deliberately never throws for a request/model/
+      // runtime failure (see pi-agent-core's `StreamFn` contract) -- a
+      // failed turn (e.g. a real provider 403/OAuth error surfaced mid-call,
+      // as opposed to the OAuth *resolution* failure thrown before any
+      // request is even attempted, handled by the `catch` below) instead
+      // resolves normally with a final assistant message whose
+      // `stopReason` is `"error"`/`"aborted"` and `errorMessage` set. The
+      // `agent_end`/`usage` forwarding above never inspects this, so
+      // without this check the desktop UI would silently emit `completed`
+      // for a turn that produced zero content and a real provider error
+      // (issue found via manual production verification of #118/#119/#120,
+      // reproduced with a real suspended github-copilot account).
+      const last = session.messages.at(-1);
+      if (last?.role === "assistant" && last.stopReason === "error" && last.errorMessage) {
+        emit({ type: "error", requestId, message: last.errorMessage });
+      } else {
+        emit({ type: "completed", requestId });
+      }
     } catch (error) {
       emit({
         type: "error",
