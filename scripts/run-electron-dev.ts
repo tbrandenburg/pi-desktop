@@ -4,7 +4,7 @@
  * bound dev server URL. Used only by `npm run dev`.
  *
  * No port is hardcoded: Vite picks its own starting port (see
- * vite.config.ts) and auto-increments to the next free one if taken, since
+ * vite.config.mts) and auto-increments to the next free one if taken, since
  * `strictPort` is not set. The actual bound URL is read back from
  * `server.resolvedUrls` after `listen()` resolves.
  */
@@ -16,7 +16,7 @@ const MAIN_ENTRY = "dist-main/main/index.js";
 
 async function startViteDevServer(): Promise<string> {
   const server = await createServer({
-    configFile: "vite.config.ts",
+    configFile: "vite.config.mts",
   });
   await server.listen();
 
