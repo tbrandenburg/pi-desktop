@@ -50,6 +50,73 @@ export const FAKE_PROVIDER_ID = "fake";
 export const FAKE_MODEL_ID = "fake-model";
 
 /**
+ * A fake stream whose final assistant message resolves with `stopReason:
+ * "error"` and a real `errorMessage` set, but is never thrown -- mirrors the
+ * documented `StreamFn` contract ("failures must be encoded in the returned
+ * stream via ... a final AssistantMessage with stopReason 'error' ... and
+ * errorMessage", `pi-agent-core`'s `types.d.ts`) and the real shape observed
+ * from a genuinely suspended `github-copilot` account mid-conversation
+ * (`stopReason: "error"`, empty `content`, a real `errorMessage` string).
+ * Used to prove `AgentRuntime.run` surfaces this as a `ChatEvent` of type
+ * `"error"` instead of silently emitting `"completed"` for an empty,
+ * failed turn.
+ */
+export function fakeFailedAssistantStream(errorMessage: string): AssistantMessageEventStream {
+  const base = {
+    role: "assistant" as const,
+    content: [] as { type: "text"; text: string }[],
+    api: "openai-completions" as const,
+    provider: "fake",
+    model: "fake-model",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "error" as const,
+    errorMessage,
+    timestamp: Date.now(),
+  };
+  const stream = createAssistantMessageEventStream();
+  queueMicrotask(() => {
+    stream.push({ type: "start", partial: { ...base } });
+    stream.push({ type: "error", reason: "error", error: { ...base } });
+    stream.end({ ...base });
+  });
+  return stream;
+}
+
+/**
+ * Registers `fakeFailedAssistantStream` on a real `ModelRuntime` instead of
+ * the default `fakeAssistantStream` -- see `buildFakeModelRuntime`'s own doc
+ * comment for why a real, injected `ModelRuntime` is required here.
+ */
+export async function buildFakeFailingModelRuntime(agentDir: string, errorMessage: string) {
+  const { ModelRuntime } = await realCodingAgentLoaders.loadCodingAgent!();
+  const modelRuntime = await ModelRuntime.create({
+    authPath: path.join(agentDir, "auth.json"),
+    modelsPath: null,
+    allowModelNetwork: false,
+  });
+  modelRuntime.registerProvider(FAKE_PROVIDER_ID, {
+    baseUrl: "https://fake.local",
+    api: "openai-completions",
+    apiKey: "fake-key",
+    streamSimple: () => fakeFailedAssistantStream(errorMessage),
+    models: [
+      {
+        id: FAKE_MODEL_ID,
+        name: FAKE_MODEL_ID,
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128_000,
+        maxTokens: 4096,
+      },
+    ],
+  });
+  const model = modelRuntime.getModel(FAKE_PROVIDER_ID, FAKE_MODEL_ID);
+  if (!model) throw new Error("fake model failed to register");
+  return { modelRuntime, model: model as unknown as Model<Api> };
+}
+
+/**
  * Builds a real `ModelRuntime` (isolated to `agentDir` via an explicit
  * `authPath`, no network refresh) with a single fake, network-free
  * provider/model registered on it. Tests inject this `modelRuntime`
