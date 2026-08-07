@@ -35,6 +35,10 @@ export function registerIpcHandlers(
   const uiContextBridge = new IpcUIContextBridge((request) => {
     const win = getWindow();
     if (!win || win.isDestroyed()) return;
+    // Issue #137: setTitle() must change the real OS window title, not just
+    // the in-renderer header text -- this is the literal acceptance
+    // criterion, so it's applied directly here alongside the renderer push.
+    if (request.kind === "set-title") win.setTitle(request.title);
     win.webContents.send("extension-ui:request", request);
   });
 
