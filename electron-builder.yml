@@ -77,12 +77,15 @@ mac:
   # the x64 and arm64 intermediate app bundles electron-builder builds before
   # merging them into one universal binary end up containing byte-identical
   # copies of files that are genuinely arch-specific (e.g. the arm64-only
-  # darwin-modifiers.node has no x64 counterpart at all). electron-builder's
-  # universal-merge step treats an identical file present in both arch trees
-  # as a red flag unless it's explicitly told the file is expected to differ
-  # per-arch (see electron-builder's "Handle arch-specific native modules"
-  # docs) -- singleArchFiles tells it to leave these alone rather than fail.
-  singleArchFiles: "**/@earendil-works/pi-tui/native/**/*.node"
+  # darwin-modifiers.node has no x64 counterpart at all). @electron/universal
+  # (electron-builder's universal-merge dependency) only exempts an
+  # identical-across-arches Mach-O file from its mismatch check via
+  # `x64ArchFiles` specifically -- `singleArchFiles` gates a *different*,
+  # unrelated code path (verified directly against
+  # node_modules/@electron/universal/dist/cjs/index.js's own check, which
+  # reads `opts.x64ArchFiles` only) -- so `x64ArchFiles` is the one that
+  # actually silences this error, despite the file itself being arm64-only.
+  x64ArchFiles: "**/@earendil-works/pi-tui/native/**/*.node"
 
 win:
   icon: assets/icon.png

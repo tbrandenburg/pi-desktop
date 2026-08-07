@@ -24,6 +24,15 @@ permissions:
 jobs:
   build:
     strategy:
+      # Each OS builds/publishes a completely independent artifact -- a
+      # real failure on one platform (e.g. #117's macOS universal-build
+      # issue) has no bearing on whether the other two platforms' builds
+      # are valid, so the default fail-fast behavior (cancelling the
+      # still-running jobs the moment any one matrix entry fails) only
+      # hides real, independent results behind a misleading "cancelled"
+      # status instead of "success"/"failure" for jobs that would have
+      # otherwise completed on their own.
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
