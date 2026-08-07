@@ -5,10 +5,9 @@ import { loadCodingAgent, type CodingAgentLoaders } from "../agent/coding-agent-
 /** Candidate package-manager binaries `DefaultPackageManager` may shell out to for an `npm:` source (default "npm", overridable via settings' `npmCommand`). */
 const NPM_CAPABLE_BINARIES = ["npm", "bun", "pnpm"];
 
-function isBinaryAvailable(command: string): boolean {
-  const probe = process.platform === "win32" ? "where" : "command";
-  const args = process.platform === "win32" ? [command] : ["-v", command];
-  const result = spawnSync(probe, args, { stdio: "ignore", shell: process.platform !== "win32" });
+export function isBinaryAvailable(command: string): boolean {
+  const probe = process.platform === "win32" ? "where" : "which";
+  const result = spawnSync(probe, [command], { stdio: "ignore" });
   return result.status === 0;
 }
 

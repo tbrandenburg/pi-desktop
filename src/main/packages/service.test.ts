@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PackageService } from "./service";
+import { PackageService, isBinaryAvailable } from "./service";
 import { realCodingAgentLoaders } from "../agent/test-support/real-coding-agent-loaders";
 
 /**
@@ -252,5 +252,16 @@ describe("PackageService (real DefaultPackageManager + real shared agentDir, thr
     await service.remove(source);
 
     expect(await service.list()).toEqual([]);
+  });
+});
+
+describe("isBinaryAvailable", () => {
+  it("returns true for a real binary that is present on PATH", () => {
+    const knownBinary = process.platform === "win32" ? "cmd" : "sh";
+    expect(isBinaryAvailable(knownBinary)).toBe(true);
+  });
+
+  it("returns false for a binary name that does not exist on PATH", () => {
+    expect(isBinaryAvailable("definitely-not-a-real-binary-xyz123")).toBe(false);
   });
 });
