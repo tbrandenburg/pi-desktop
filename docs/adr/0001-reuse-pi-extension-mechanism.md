@@ -287,10 +287,30 @@ from `ModelRuntime` (or kept as the pre-resolution step feeding
 
 ### 3.3 Built-in tools
 
-The existing read-only tools (`createReadOnlyTools`) are preserved as
-`customTools` on `createAgentSession` (converted to pi-coding-agent's
-`ToolDefinition` — a thin adapter, same `parameters`/`execute` shape). Extension
-tools are additive on top.
+`createAgentSession` is called with pi-coding-agent's default built-in tool
+set enabled (`read`, `bash`, `edit`, `write`, `list`) — no `noTools` option is
+passed for real chat sessions (issue #132). This supersedes the earlier
+read-only-only scope (issue #41's `noTools: "builtin"` plus a bundled
+first-party `read-only-tools` pi-package providing `read_file`/`list_files`),
+which has been removed entirely along with its wiring
+(`src/main/agent/runtime.ts`'s `piPackagesDir` constructor param, `ipc.ts`'s
+`resolvePiPackagesReadOnlyToolsDir`, and the `resources/pi-packages/
+read-only-tools` package itself). Extension-registered tools remain additive
+on top of these built-ins.
+
+Enabling the real `bash`/`edit`/`write` built-ins also fixes an unrelated
+side effect of the old scope: pi-coding-agent's own system-prompt builder
+(`system-prompt.js`) only injects discovered `~/.pi/agent/skills` content
+when its `hasRead` check (`tools.includes("read")`) passes — the renamed
+`read_file` tool never satisfied this, so skills were silently never surfaced
+to the model. The real built-in `read` tool name now satisfies this check by
+construction.
+
+There is currently **no per-call approval/confirmation UI** gating
+`bash`/`edit`/`write` execution — every tool call the model makes runs
+immediately. This is an accepted, deliberate risk for now; see §4.2 and issue
+#133, which tracks adding a real execution-profile/approval UI as a
+follow-up.
 
 ### 3.4 Staged rollout (the "start small")
 
@@ -496,6 +516,11 @@ still listed.
   in the packaged app" — end-to-end via `scripts/cdp-drive.ts`.
 - **Version lockstep:** `pi-coding-agent`/`pi-ai`/`pi-agent-core` must move
   together (shared `0.x` line). Bumps are coordinated + re-validated.
+- **No per-call approval/confirmation dialog exists for `bash`/`edit`/`write`.**
+  All of pi-coding-agent's built-in tools are enabled (§3.3, issue #132) and
+  execute immediately with no interactive gate — accepted for now. Full
+  interactive per-call approval (an execution-profile/confirmation UI) is
+  tracked as a follow-up in issue #133.
 
 > **Resolved (2026-08-05 spike, evidence-based):** the repo has **no**
 > Dependabot/Renovate config today (checked `.github/`) — dependency bumps are

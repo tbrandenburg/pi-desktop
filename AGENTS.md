@@ -65,6 +65,12 @@ exists.
    works end-to-end in dev mode.
 8. Keep STATUS.md updated with completed milestones and blockers.
 9. Test the production package, not only dev mode, before declaring packaging done.
+10. Tool-permission model: every chat session runs pi-coding-agent's full
+    built-in tool set (`bash`/`edit`/`write`/`read`/`list`) with **no
+    per-call approval/confirmation UI** — tool calls execute immediately
+    (issue #132). This is an accepted, deliberate risk; a real interactive
+    execution-profile/approval UI is tracked as a follow-up in issue #133,
+    not implemented yet.
 
 ## How to add X (copy-the-sibling recipes)
 

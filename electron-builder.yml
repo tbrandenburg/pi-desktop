@@ -13,15 +13,6 @@ files:
   - "!dist-main/**/test-support/**"
   - package.json
 
-# First-party pi-package (ADR 0001 §3.5, issue #97): bundles pi-desktop's own
-# `read_file`/`list_files` tools as a real, pre-transpiled local pi-package,
-# proving the build-time extension-bundling/discovery pipeline end-to-end.
-# Resolved at runtime via `process.resourcesPath/pi-packages/*`
-# (`src/main/ipc.ts`'s `resolvePiPackagesReadOnlyToolsDir`).
-extraResources:
-  - from: resources/pi-packages
-    to: pi-packages
-
 asar: true
 # @earendil-works/pi-ai is ESM-only and loaded via a genuine dynamic
 # import() (see the `nativeDynamicImport` comment in chat-service.ts for why

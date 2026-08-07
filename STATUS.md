@@ -236,3 +236,17 @@ Real display, real IPC, real provider smoke test (CDP-driven, no OS input
   session lists (both are covered by real-disk automated tests instead --
   `tools.test.ts` and the `workspace:choose` case in `ipc.test.ts` -- but
   not re-demonstrated live in the packaged app in this milestone).
+
+- **2026-08-07 (issue #132):** Full built-in tools (`bash`/`edit`/`write`/
+  `read`/`list`) enabled for every chat session; the read-only scope
+  (`noTools: "builtin"`) and the bundled `resources/pi-packages/
+  read-only-tools` package are removed, along with all their wiring
+  (`runtime.ts`'s `piPackagesDir`, `ipc.ts`'s
+  `resolvePiPackagesReadOnlyToolsDir`, `electron-builder.yml`'s
+  `extraResources`). No per-call approval/confirmation gate exists yet for
+  `bash`/`edit`/`write` -- tracked as a follow-up in issue #133. Confirmed
+  via a real script against `system-prompt.js`'s `buildSystemPrompt` that
+  the library's own `hasRead` gate now passes with the default built-in
+  tool set, so discovered `~/.pi/agent/skills` are injected into the
+  system prompt (previously silently never injected, since the renamed
+  `read_file` tool never satisfied `tools.includes("read")`).
