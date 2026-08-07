@@ -251,4 +251,29 @@ describe("IPC settings round-trip integration", () => {
       fs.rmSync(otherDir, { recursive: true, force: true });
     }
   });
+
+  it("round-trips tools-expanded state through the IPC boundary (issue #139)", async () => {
+    expect(await invoke("extension-ui:get-tools-expanded")).toBe(false);
+
+    await invoke("extension-ui:report-tools-expanded", true);
+
+    expect(await invoke("extension-ui:get-tools-expanded")).toBe(true);
+  });
+
+  it("round-trips editor text state through the IPC boundary (issue #141)", async () => {
+    expect(await invoke("extension-ui:get-editor-text")).toBe("");
+
+    await invoke("extension-ui:report-editor-text", "hello from the composer");
+
+    expect(await invoke("extension-ui:get-editor-text")).toBe("hello from the composer");
+  });
+
+  it("returns no autocomplete suggestions when no extension has registered a provider (issue #140)", async () => {
+    expect(await invoke("extension-ui:query-autocomplete", "some text")).toEqual([]);
+  });
+
+  it("returns an empty shortcut list and a no-op trigger, honestly reflecting no supported discovery API (issue #142)", async () => {
+    expect(await invoke("shortcuts:list")).toEqual([]);
+    await expect(invoke("shortcuts:trigger", "any-id")).resolves.toBeUndefined();
+  });
 });

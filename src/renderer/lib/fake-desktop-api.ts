@@ -27,6 +27,8 @@ export function createFakeDesktopApi(): DesktopAgentApi {
   // enough shape (source) to keep the Settings UI's package list
   // section exercisable in the browser dev harness (see AGENTS.md lesson #14).
   const packages: PackageInfo[] = [];
+  let toolsExpanded = false;
+  let editorText = "";
 
   return {
     async listModels() {
@@ -146,5 +148,33 @@ export function createFakeDesktopApi(): DesktopAgentApi {
     },
 
     async updatePackage() {},
+
+    async getToolsExpanded() {
+      return toolsExpanded;
+    },
+
+    async reportToolsExpanded(value) {
+      toolsExpanded = value;
+    },
+
+    async getEditorText() {
+      return editorText;
+    },
+
+    async reportEditorText(text) {
+      editorText = text;
+    },
+
+    async queryAutocomplete() {
+      // No extensions run in this harness, so no provider ever registers --
+      // an empty list is the honest fake (mirrors `listCommands()` above).
+      return [];
+    },
+
+    async listShortcuts() {
+      return [];
+    },
+
+    async triggerShortcut() {},
   };
 }

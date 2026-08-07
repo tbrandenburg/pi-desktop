@@ -171,4 +171,40 @@ export function registerIpcHandlers(
   ipcMain.handle("packages:update", async (_event, source: string): Promise<void> => {
     await packageService.update(source);
   });
+
+  ipcMain.handle("extension-ui:get-tools-expanded", (): boolean => {
+    return uiContextBridge.uiContext.getToolsExpanded();
+  });
+
+  ipcMain.handle("extension-ui:report-tools-expanded", (_event, value: boolean): void => {
+    uiContextBridge.reportToolsExpanded(value);
+  });
+
+  ipcMain.handle("extension-ui:get-editor-text", (): string => {
+    return uiContextBridge.uiContext.getEditorText();
+  });
+
+  ipcMain.handle("extension-ui:report-editor-text", (_event, text: string): void => {
+    uiContextBridge.reportEditorText(text);
+  });
+
+  ipcMain.handle("extension-ui:query-autocomplete", async (_event, text: string) => {
+    return uiContextBridge.queryAutocomplete(text);
+  });
+
+  // `registerShortcut` is registered on the extension context (alongside
+  // `registerCommand`), not on `ExtensionUIContext` -- and unlike `commands`,
+  // pi-coding-agent's public `extensionsResult.extensions[]` shape exposes no
+  // equivalent `shortcuts` collection to discover or invoke against (verified
+  // by grepping `@earendil-works/pi-coding-agent`'s own `.d.ts` output: no
+  // "shortcuts" property exists anywhere in its public types). There is
+  // currently no supported way to list or trigger extension-registered
+  // shortcuts from outside a live TUI session, so these honestly report
+  // "none registered" rather than fabricating support pi-coding-agent
+  // doesn't expose (see issue #142's handoff notes / follow-up issue).
+  ipcMain.handle("shortcuts:list", () => {
+    return [];
+  });
+
+  ipcMain.handle("shortcuts:trigger", () => {});
 }
