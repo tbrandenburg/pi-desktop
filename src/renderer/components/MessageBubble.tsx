@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { AlertTriangle, Check, Copy } from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -65,6 +65,17 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
 export function MessageBubble({ message }: { message: DisplayMessage }) {
   const isUser = message.role === "user";
 
+  if (message.error) {
+    return (
+      <div className="flex justify-start">
+        <div className="flex max-w-[80%] items-start gap-2.5 rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm leading-relaxed text-red-200">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-400" />
+          <p>{message.error}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={isUser ? "flex justify-end" : "flex justify-start"}>
       <div
@@ -96,8 +107,10 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
           {message.content}
         </ReactMarkdown>
         {message.streaming && <span className="streaming-cursor" />}
-        {message.error && (
-          <p className="mt-2 text-xs text-red-400">{message.error}</p>
+        {message.retrying && (
+          <p className="mt-1 text-xs text-white/40">
+            Retrying… ({message.retrying.attempt}/{message.retrying.maxAttempts})
+          </p>
         )}
         {!isUser && !message.streaming && message.content && (
           <div className="mt-2 flex justify-end pt-2">

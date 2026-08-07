@@ -219,6 +219,43 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
     expect(allSessions).toHaveLength(2);
     expect(allSessions.map((s) => s.id).sort()).toEqual(["conv-other", "conv-reused"]);
   });
+
+  it("issue #120: forwards a real auto_retry_start AgentSessionEvent as a 'retrying' ChatEvent with the real attempt/maxAttempts fields", () => {
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    const events: ChatEvent[] = [];
+
+    // `forward` is private; `AgentSessionEvent` is a third-party union this
+    // app doesn't control (issue #111), so this exercises the exact shape
+    // `agent-session.d.ts` documents for `auto_retry_start` rather than
+    // going through a full simulated network retry.
+    (runtime as unknown as { forward: (requestId: string, event: unknown, emit: (e: ChatEvent) => void) => void }).forward(
+      "req-retry",
+      {
+        type: "auto_retry_start",
+        attempt: 2,
+        maxAttempts: 3,
+        delayMs: 4000,
+        errorMessage: "429 rate limited",
+      },
+      (event) => events.push(event),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({ type: "retrying", requestId: "req-retry", attempt: 2, maxAttempts: 3 });
+  });
+
+  it("issue #120: does NOT emit any ChatEvent for auto_retry_end -- the renderer clears the indicator itself on the next event", () => {
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    const events: ChatEvent[] = [];
+
+    (runtime as unknown as { forward: (requestId: string, event: unknown, emit: (e: ChatEvent) => void) => void }).forward(
+      "req-retry-end",
+      { type: "auto_retry_end", success: true, attempt: 2 },
+      (event) => events.push(event),
+    );
+
+    expect(events).toHaveLength(0);
+  });
 });
 
 describe("AgentRuntime UI bridge (ADR 0001 §3.4 Phase 2, issue #91)", () => {

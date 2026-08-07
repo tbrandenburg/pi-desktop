@@ -462,4 +462,147 @@ describe("chat-store.sendMessage streaming events", () => {
     expect(assistantMessage?.error).toBe("provider exploded");
     expect(assistantMessage?.streaming).toBe(false);
   });
+
+  it("sets message.retrying on a 'retrying' event and clears it once a text-delta arrives for the same request (issue #120)", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-retry" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("hello");
+    capturedHandler?.({ type: "retrying", requestId: "req-retry", attempt: 1, maxAttempts: 3 });
+
+    let assistantMessage = useChatStore.getState().messages.find((m) => m.role === "assistant");
+    expect(assistantMessage?.retrying).toEqual({ attempt: 1, maxAttempts: 3 });
+
+    capturedHandler?.({ type: "text-delta", requestId: "req-retry", text: "back " });
+
+    assistantMessage = useChatStore.getState().messages.find((m) => m.role === "assistant");
+    expect(assistantMessage?.retrying).toBeUndefined();
+    expect(assistantMessage?.content).toBe("back ");
+  });
+
+  it("clears message.retrying on a completed event (issue #120)", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-retry-done" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("hello");
+    capturedHandler?.({ type: "retrying", requestId: "req-retry-done", attempt: 2, maxAttempts: 3 });
+    capturedHandler?.({ type: "completed", requestId: "req-retry-done" });
+
+    const assistantMessage = useChatStore.getState().messages.find((m) => m.role === "assistant");
+    expect(assistantMessage?.retrying).toBeUndefined();
+    expect(assistantMessage?.streaming).toBe(false);
+  });
+
+  // Regression coverage for https://github.com/tbrandenburg/pi-desktop/issues/118:
+  // an event (e.g. a fast OAuth-refresh "error") that arrives before
+  // startChat's promise resolves (and thus before activeRequestId is set)
+  // must be buffered and replayed, not silently dropped.
+  it("buffers and replays a chat:event that arrives before startChat resolves (issue #118)", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          // Fire the error event synchronously, before startChat's own
+          // promise resolves and activeRequestId gets set.
+          capturedHandler?.({
+            type: "error",
+            requestId: "req-fast-fail",
+            message: "OAuth refresh failed for github-copilot",
+          });
+          // Resolve on a later microtask so the race is exercised.
+          queueMicrotask(() => resolve({ requestId: "req-fast-fail" }));
+        }),
+    );
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("hello");
+
+    const state = useChatStore.getState();
+    expect(state.status).toBe("error");
+    expect(state.errorMessage).toBe("OAuth refresh failed for github-copilot");
+    const assistantMessage = state.messages.find((m) => m.role === "assistant");
+    expect(assistantMessage?.streaming).toBe(false);
+    expect(assistantMessage?.error).toBe("OAuth refresh failed for github-copilot");
+    expect(assistantMessage?.content).toBe("");
+  });
+
+  // Coverage for issue #119's stuck-bubble safety net: if no event at all
+  // arrives for an assistant message (dead IPC channel, main process crash
+  // before responding, etc.), it must flip to an error state after the
+  // timeout instead of staying "streaming" forever.
+  it("flips a stuck streaming message to error after the timeout with no events (issue #119)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { useChatStore } = await import("./chat-store");
+      onChatEvent.mockImplementation(() => () => {});
+      startChat.mockResolvedValue({ requestId: "req-stuck" });
+      useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+      const sendPromise = useChatStore.getState().sendMessage("hello");
+      await vi.advanceTimersByTimeAsync(0);
+      await sendPromise;
+
+      let state = useChatStore.getState();
+      const assistantMessage = state.messages.find((m) => m.role === "assistant");
+      expect(assistantMessage?.streaming).toBe(true);
+      expect(assistantMessage?.error).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(20000);
+
+      state = useChatStore.getState();
+      expect(state.status).toBe("error");
+      expect(state.errorMessage).toBe("No response received");
+      const settled = state.messages.find((m) => m.role === "assistant");
+      expect(settled?.streaming).toBe(false);
+      expect(settled?.error).toBe("No response received");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not fire the stuck-bubble timeout once a completed event has already resolved the message (issue #119)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { useChatStore } = await import("./chat-store");
+      let capturedHandler: ((event: ChatEvent) => void) | undefined;
+      onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+        capturedHandler = handler;
+        return () => {};
+      });
+      startChat.mockResolvedValue({ requestId: "req-fast" });
+      useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+      const sendPromise = useChatStore.getState().sendMessage("hello");
+      await vi.advanceTimersByTimeAsync(0);
+      await sendPromise;
+      capturedHandler?.({ type: "completed", requestId: "req-fast" });
+
+      await vi.advanceTimersByTimeAsync(20000);
+
+      const state = useChatStore.getState();
+      expect(state.status).toBe("idle");
+      const assistantMessage = state.messages.find((m) => m.role === "assistant");
+      expect(assistantMessage?.streaming).toBe(false);
+      expect(assistantMessage?.error).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

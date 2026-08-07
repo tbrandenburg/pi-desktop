@@ -348,9 +348,22 @@ export class AgentRuntime {
         }
         return;
       }
+      case "auto_retry_start":
+        emit({
+          type: "retrying",
+          requestId,
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+        });
+        return;
       // Deliberate no-ops: this app has no `ChatEvent` counterpart for these
       // yet (no turn/message boundary UI, no tool-progress/end UI beyond the
-      // initial `tool-call`, no queue/compaction/retry/bash-streaming UI).
+      // initial `tool-call`, no queue/compaction/bash-streaming UI). Note:
+      // `auto_retry_end` is intentionally a no-op here -- the renderer
+      // (`chat-store.ts`) clears the "retrying" indicator itself as soon as
+      // any subsequent event (e.g. `text-delta`, `completed`, `error`)
+      // arrives for the same message, so no explicit "retry resolved"
+      // `ChatEvent` is needed.
       // Each is listed explicitly (rather than falling through to a bare
       // `default`) so the exhaustiveness check below actually forces a
       // decision the next time this union grows.
@@ -368,7 +381,6 @@ export class AgentRuntime {
       case "session_info_changed":
       case "thinking_level_changed":
       case "compaction_end":
-      case "auto_retry_start":
       case "auto_retry_end":
       case "summarization_retry_scheduled":
       case "summarization_retry_attempt_start":

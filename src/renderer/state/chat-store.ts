@@ -7,6 +7,7 @@ export interface DisplayMessage extends ChatMessage {
   id: string;
   streaming?: boolean;
   error?: string;
+  retrying?: { attempt: number; maxAttempts: number };
 }
 
 interface ChatState {
@@ -34,6 +35,12 @@ interface ChatState {
 }
 
 let unsubscribe: (() => void) | null = null;
+
+// Safety net for #119: if an assistant message never receives any event at
+// all (text-delta/completed/error) — e.g. a dead IPC channel or a main
+// process crash before responding — flip it to an error state after this
+// timeout instead of leaving the bubble stuck "streaming" forever.
+const STUCK_MESSAGE_TIMEOUT_MS = 18000;
 
 export const useChatStore = create<ChatState>()(immer((set, get) => ({
   conversationId: crypto.randomUUID(),
@@ -124,15 +131,46 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
       draft.errorMessage = null;
     });
 
-    unsubscribe?.();
-    unsubscribe = desktopApi().onChatEvent((event) => {
-      if (event.requestId !== get().activeRequestId) return;
+    let knownRequestId: string | null = null;
+    const pendingEvents: Parameters<Parameters<ReturnType<typeof desktopApi>["onChatEvent"]>[0]>[0][] = [];
+
+    let stuckTimeout: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      stuckTimeout = null;
+      set((draft) => {
+        const message = draft.messages.find((m) => m.id === assistantMessage.id);
+        if (!message || !message.streaming) return;
+        draft.status = "error";
+        draft.activeRequestId = null;
+        draft.errorMessage = "No response received";
+        message.streaming = false;
+        message.error = "No response received";
+      });
+    }, STUCK_MESSAGE_TIMEOUT_MS);
+    const clearStuckTimeout = () => {
+      if (stuckTimeout === null) return;
+      clearTimeout(stuckTimeout);
+      stuckTimeout = null;
+    };
+
+    const handleEvent = (event: (typeof pendingEvents)[number]) => {
+      clearStuckTimeout();
+
+      if (event.type === "retrying") {
+        set((draft) => {
+          const message = draft.messages.find((m) => m.id === assistantMessage.id);
+          if (message) message.retrying = { attempt: event.attempt, maxAttempts: event.maxAttempts };
+        });
+        return;
+      }
 
       if (event.type === "text-delta") {
         set((draft) => {
           draft.status = "streaming";
           const message = draft.messages.find((m) => m.id === assistantMessage.id);
-          if (message) message.content += event.text;
+          if (message) {
+            message.content += event.text;
+            message.retrying = undefined;
+          }
         });
         return;
       }
@@ -142,7 +180,10 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
           draft.status = "idle";
           draft.activeRequestId = null;
           const message = draft.messages.find((m) => m.id === assistantMessage.id);
-          if (message) message.streaming = false;
+          if (message) {
+            message.streaming = false;
+            message.retrying = undefined;
+          }
         });
         void get().loadSessions();
         return;
@@ -157,10 +198,21 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
           if (message) {
             message.streaming = false;
             message.error = event.message;
+            message.retrying = undefined;
           }
         });
         void get().loadSessions();
       }
+    };
+
+    unsubscribe?.();
+    unsubscribe = desktopApi().onChatEvent((event) => {
+      if (knownRequestId === null) {
+        pendingEvents.push(event);
+        return;
+      }
+      if (event.requestId !== knownRequestId) return;
+      handleEvent(event);
     });
 
     const history = [...get().messages.filter((m) => !m.streaming), userMessage].map(
@@ -173,8 +225,15 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
         model: get().selectedModel,
         messages: history,
       });
+      knownRequestId = requestId;
       set({ activeRequestId: requestId });
+      const buffered = pendingEvents.splice(0, pendingEvents.length);
+      for (const event of buffered) {
+        if (event.requestId !== requestId) continue;
+        handleEvent(event);
+      }
     } catch (error) {
+      clearStuckTimeout();
       unsubscribe?.();
       unsubscribe = null;
       const errorMessage = error instanceof Error ? error.message : String(error);

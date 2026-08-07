@@ -98,7 +98,8 @@ export type ChatEvent =
       outputTokens?: number;
     }
   | { type: "completed"; requestId: string }
-  | { type: "error"; requestId: string; message: string };
+  | { type: "error"; requestId: string; message: string }
+  | { type: "retrying"; requestId: string; attempt: number; maxAttempts: number };
 
 export interface DesktopAgentApi {
   listModels(): Promise<ModelInfo[]>;
