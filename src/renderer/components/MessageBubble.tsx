@@ -3,6 +3,7 @@ import { lazy, Suspense, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { DisplayMessage } from "../state/chat-store";
+import { TypewriterCaption } from "./TypewriterCaption";
 // Type-only import, erased entirely at build time (no runtime/bundle cost):
 // pulls @types/react-syntax-highlighter's ambient submodule declarations
 // into the program so the dynamic submodule imports below type-check,
@@ -150,7 +151,12 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
         >
           {message.content}
         </ReactMarkdown>
-        {message.streaming && <span className="streaming-cursor" />}
+        {message.streaming && !message.content && message.stepLabel && (
+          <TypewriterCaption label={message.stepLabel} />
+        )}
+        {message.streaming && (message.content || !message.stepLabel) && (
+          <span className="streaming-cursor" />
+        )}
         {message.retrying && (
           <p className="mt-1 text-xs text-white/40">
             Retrying… ({message.retrying.attempt}/{message.retrying.maxAttempts})
