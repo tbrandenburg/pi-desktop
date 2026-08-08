@@ -1074,8 +1074,23 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   logic only checks "fits below?" and unconditionally flips upward if not,
   with no check that upward actually fits either — a real screenshot showed
   the panel clipped off the top of the viewport in a borderline case (#159).
-  Neither gap was reachable from unit tests alone (they exercise the
-  formatting function and the flip decision in isolation, not a full
-  rendered layout against a real viewport) — reinforcing the standing rule
-  that a real screenshot of the actual rendered feature, not just green
-  tests, is required before closing out a UI polish issue.
+   Neither gap was reachable from unit tests alone (they exercise the
+   formatting function and the flip decision in isolation, not a full
+   rendered layout against a real viewport) — reinforcing the standing rule
+   that a real screenshot of the actual rendered feature, not just green
+   tests, is required before closing out a UI polish issue.
+- 2026-08-08: For a small single-cohesive follow-up (#161, 3 sub-items in
+  the same 2-3 files), correctly chose a single subagent/package instead of
+  forcing a parallel split — but then, out of habit from prior multi-package
+  merges, ran `git checkout main && git merge <worktree-branch>` directly
+  against the local tracking branch of `main` instead of creating a fresh
+  feature branch from the worktree branch first. Caught before pushing
+  (`git status`/`git log` review showed the merge commit sitting directly on
+  `main`), fixed with `git reset --hard origin/main` followed by
+  `git checkout -b <feature-branch> <worktree-branch>`. Rule: even for a
+  single-package (non-parallel) fix, always create and check out a named
+  feature branch from the worktree branch *before* any merge/validation
+  step — never run `git checkout main` immediately after a subagent
+  finishes, regardless of how small or single-threaded the change was;
+  the muscle-memory risk of merging onto `main` locally is exactly the same
+  whether the graph had 1 package or 5.

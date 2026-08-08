@@ -3,7 +3,7 @@ import { lazy, Suspense, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { DisplayMessage } from "../state/chat-store";
-import { useChatStore } from "../state/chat-store";
+
 import { AgentActivity } from "./AgentActivity";
 import { TypewriterCaption } from "./TypewriterCaption";
 // Type-only import, erased entirely at build time (no runtime/bundle cost):
@@ -111,7 +111,6 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
 
 export function MessageBubble({ message }: { message: DisplayMessage }) {
   const isUser = message.role === "user";
-  const toolsExpanded = useChatStore((state) => state.toolsExpanded);
 
   if (message.error) {
     return (
@@ -178,7 +177,6 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
             activity={message.activity}
             streaming={message.streaming}
             hasContent={Boolean(message.content)}
-            detailsDefaultExpanded={toolsExpanded}
           />
         )}
       </div>
