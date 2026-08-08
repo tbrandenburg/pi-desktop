@@ -20,9 +20,10 @@ function makeActivity(overrides: Partial<Activity> = {}): Activity {
 }
 
 describe("AgentActivity complete footer", () => {
-  it("shows a step-count footer when no activity has sources", () => {
+  it("shows just the activity summary, with no step-count prefix, when no activity has sources", () => {
     render(<AgentActivity activity={[makeActivity()]} />);
-    expect(screen.getByText(/1 step · Searched the web/)).toBeTruthy();
+    expect(screen.getByText("Searched the web")).toBeTruthy();
+    expect(screen.queryByText(/step/)).toBeNull();
     expect(screen.queryByText(/source/)).toBeNull();
   });
 

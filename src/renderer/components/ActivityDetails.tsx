@@ -22,21 +22,19 @@ export function ActivityDetails({
   activity,
   open,
   onClose,
-  defaultTraceExpanded,
 }: {
   activity: Activity[];
   open: boolean;
   onClose: () => void;
-  defaultTraceExpanded: boolean;
 }) {
-  const [traceExpanded, setTraceExpanded] = useState(defaultTraceExpanded);
+  const [traceExpanded, setTraceExpanded] = useState(false);
   const [anchorUp, setAnchorUp] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setTraceExpanded(defaultTraceExpanded);
-  }, [open, defaultTraceExpanded]);
+    setTraceExpanded(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -76,7 +74,7 @@ export function ActivityDetails({
   return (
     <div
       ref={panelRef}
-      className={`absolute z-40 ${anchorUp ? "bottom-full mb-2" : "mt-2"} max-h-[420px] w-[400px] overflow-y-auto rounded-2xl border border-surface-border bg-surface-panel p-4 text-sm shadow-xl`}
+      className={`absolute z-40 right-0 ${anchorUp ? "bottom-full mb-2" : "mt-2"} max-h-[420px] w-[400px] overflow-y-auto rounded-2xl border border-surface-border bg-surface-panel p-4 text-sm shadow-xl`}
     >
       <div className="mb-3 flex items-center justify-between">
         <h3 className="font-semibold text-white">How this answer was made</h3>
@@ -99,7 +97,7 @@ export function ActivityDetails({
             {item.status === "error" && <AlertTriangle size={13} className="text-amber-400" />}
             <span className="flex-1">{item.label}</span>
             {item.durationMs !== undefined && (
-              <span className="text-[11px] text-white/40">{item.durationMs}ms</span>
+              <span className="text-[11px] text-white/40">{formatDurationSeconds(item.durationMs)}</span>
             )}
           </div>
         ))}

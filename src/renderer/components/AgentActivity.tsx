@@ -24,12 +24,10 @@ export function AgentActivity({
   activity,
   streaming,
   hasContent,
-  detailsDefaultExpanded,
 }: {
   activity: Activity[] | undefined;
   streaming?: boolean;
   hasContent?: boolean;
-  detailsDefaultExpanded?: boolean;
 }) {
   const [showAllCompleted, setShowAllCompleted] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -97,7 +95,7 @@ export function AgentActivity({
     ? `${count} step${count === 1 ? "" : "s"} · 1 failed`
     : sourceCount > 0
       ? `${summary} · ${sourceCount} source${sourceCount === 1 ? "" : "s"}`
-      : `${count} step${count === 1 ? "" : "s"} · ${summary}`;
+      : summary;
 
   return (
     <div className="mt-3 border-t border-surface-border/60 pt-2 text-[12px]">
@@ -116,7 +114,6 @@ export function AgentActivity({
         activity={activity}
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}
-        defaultTraceExpanded={detailsDefaultExpanded ?? false}
       />
     </div>
   );

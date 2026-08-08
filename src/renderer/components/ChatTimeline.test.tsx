@@ -70,7 +70,7 @@ describe("ChatTimeline message rendering (issue #151)", () => {
 
     expect(screen.getByText("hi")).toBeTruthy();
     expect(screen.getByText("done reading")).toBeTruthy();
-    expect(screen.getByText(/1 step · Reading files…/)).toBeTruthy();
+    expect(screen.getByText("Reading files…")).toBeTruthy();
   });
 
   it("no longer renders a global expand/collapse tool-calls header button", async () => {
