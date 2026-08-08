@@ -1007,6 +1007,27 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   whether that override also disables a real production code branch (here,
   the `agentDir`-driven default-construction path) -- if so, add at least
   one test that deliberately does NOT use the override, to cover the actual
-  production call shape. A green full test suite is not sufficient proof by
-  itself; a real, non-test script driving the exact production entry point
-  end-to-end caught what 233 passing unit tests missed.
+   production call shape. A green full test suite is not sufficient proof by
+   itself; a real, non-test script driving the exact production entry point
+   end-to-end caught what 233 passing unit tests missed.
+- 2026-08-08: For #151 (Agent Activity & Traceability UI), splitting one large
+  issue into 3 file-disjoint work-packages (contracts: `runtime.ts`/
+  `events.ts`; renderer: `chat-store.ts`/components; persistence:
+  `projection.ts`) run as a sequential-then-parallel worktree graph merged
+  with zero conflicts, confirming the file-ownership-not-logical-layer
+  splitting rule from the 2026-07-25 lesson generalizes cleanly beyond
+  single-file-per-agent tasks. Separately, the real packaged-app CDP
+  validation (not just unit tests) found two real things unit tests missed:
+  (1) `scripts/cdp-drive.ts`'s `send` action's synthetic `Enter` keydown did
+  not reliably submit on the very first attempt in this run even though it
+  reported `SENT` — a second `send` call on the same composer went through
+  normally; treat a `SENT` result as "keydown dispatched", not "message
+  necessarily submitted", and re-screenshot to confirm before concluding a
+  hang. (2) A real tool call's completed `Activity` row displayed the
+  ephemeral present-progressive typewriter caption text verbatim (e.g.
+  "Running a command…", trailing ellipsis) instead of a finished-state
+  phrasing — invisible to any unit test because `toolStepLabel()` is
+  deliberately reused for both the live caption and the persisted label;
+  filed as a separate low-priority follow-up (#152) rather than fixed inline,
+  per the "don't opportunistically fix unrelated details" rule for scoped
+  subagent/coordinator work.
