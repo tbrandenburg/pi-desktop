@@ -213,6 +213,95 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
     ]);
   });
 
+  it("projects a matched toolCall/toolResult pair into the following assistant message's activity", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s13" });
+    await session.appendMessage({ role: "user", content: "list files", timestamp: Date.now() });
+    await session.appendMessage({
+      role: "assistant",
+      content: [{ type: "toolCall", id: "call-1", name: "bash", arguments: { command: "ls" } }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+    });
+    await session.appendMessage({
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "bash",
+      content: [{ type: "text", text: "file1.txt" }],
+      isError: false,
+      timestamp: Date.now(),
+    });
+    await session.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "Found one file." }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    });
+
+    const metadata = await session.getMetadata();
+    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+
+    const finalAssistant = record.messages.find(
+      (message) => message.role === "assistant" && message.content === "Found one file.",
+    );
+    expect(finalAssistant?.activity).toHaveLength(1);
+    expect(finalAssistant?.activity?.[0]?.toolName).toBe("bash");
+  });
+
+  it("does not add an activity field to a plain-text assistant message with no tool calls", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s14" });
+    await session.appendMessage({ role: "user", content: "hello", timestamp: Date.now() });
+    await session.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "hi there" }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    });
+
+    const metadata = await session.getMetadata();
+    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+
+    const assistantMessage = record.messages.find((message) => message.role === "assistant");
+    expect(assistantMessage?.content).toBe("hi there");
+    expect(assistantMessage?.activity).toBeUndefined();
+  });
+
+  it("does not throw on an unmatched toolCall with no corresponding toolResult", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s15" });
+    await session.appendMessage({ role: "user", content: "do something", timestamp: Date.now() });
+    await session.appendMessage({
+      role: "assistant",
+      content: [{ type: "toolCall", id: "call-orphan", name: "bash", arguments: { command: "ls" } }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+    });
+
+    const metadata = await session.getMetadata();
+    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+
+    const assistantMessage = record.messages.find((message) => message.role === "assistant");
+    expect(assistantMessage?.content).toBe("");
+    expect(assistantMessage?.activity).toBeUndefined();
+  });
+
   it("projects a user message whose content is content blocks (not a string) into joined text", async () => {
     const repo = await makeRepo();
     const session = await repo.create({ cwd, id: "s12" });

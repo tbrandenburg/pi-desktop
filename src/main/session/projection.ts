@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import type { Session, SessionTreeEntry } from "@earendil-works/pi-agent-core";
 import { qualifyModelId, asBareModelId } from "../model/registry";
-import type { ChatMessage, SessionRecord, SessionSummary } from "../../shared/events";
+import type { ActivityRecord, ChatMessage, SessionRecord, SessionSummary } from "../../shared/events";
 
 /**
  * Adapts `@earendil-works/pi-agent-core`'s `JsonlSessionRepo` (session tree
@@ -59,8 +59,41 @@ function deriveModel(entries: readonly SessionTreeEntry[]): string {
   return "";
 }
 
+interface PendingToolCall {
+  toolName: string;
+  args: unknown;
+}
+
+/**
+ * `entriesToMessages` walks the flat, chronological session tree and needs to
+ * pair up two separately-persisted entry kinds: an assistant message's
+ * `toolCall` content blocks (the request) and a later, separate `toolResult`
+ * `Message` entry (the response), matched by `toolCall.id` /
+ * `toolResult.toolCallId`. `pendingToolCalls` holds requests not yet matched
+ * to a result; `pendingActivity` holds matched pairs, projected into
+ * `ActivityRecord`s, not yet attached to a `ChatMessage` -- they're flushed
+ * onto the next assistant message pushed (or, if the session ends before
+ * another assistant message arrives, onto a final synthetic empty-text one).
+ *
+ * Note: the persisted session format has no timestamp pair to compute a real
+ * tool-call duration from (that's only ever tracked transiently in
+ * `runtime.ts` while a chat is live), so `durationMs` is always `0` here for
+ * restored sessions -- not a fabricated value, just "unknown".
+ */
 function entriesToMessages(entries: readonly SessionTreeEntry[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
+  const pendingToolCalls = new Map<string, PendingToolCall>();
+  let pendingActivity: ActivityRecord[] = [];
+
+  const pushAssistant = (content: string) => {
+    const message: ChatMessage = { role: "assistant", content };
+    if (pendingActivity.length > 0) {
+      message.activity = pendingActivity;
+      pendingActivity = [];
+    }
+    messages.push(message);
+  };
+
   for (const entry of entries) {
     if (entry.type === "message") {
       const { message } = entry;
@@ -73,7 +106,22 @@ function entriesToMessages(entries: readonly SessionTreeEntry[]): ChatMessage[] 
           .filter((block): block is { type: "text"; text: string } => block.type === "text")
           .map((block) => block.text)
           .join("");
-        messages.push({ role: "assistant", content });
+        for (const block of message.content) {
+          if (block.type === "toolCall") {
+            pendingToolCalls.set(block.id, { toolName: block.name, args: block.arguments });
+          }
+        }
+        pushAssistant(content);
+      } else if (message.role === "toolResult") {
+        const pending = pendingToolCalls.get(message.toolCallId);
+        pendingToolCalls.delete(message.toolCallId);
+        pendingActivity.push({
+          id: message.toolCallId,
+          toolName: pending?.toolName ?? message.toolName,
+          isError: message.isError ?? false,
+          durationMs: 0,
+          args: pending?.args,
+        });
       }
       continue;
     }
@@ -81,6 +129,11 @@ function entriesToMessages(entries: readonly SessionTreeEntry[]): ChatMessage[] 
       messages.push({ role: "system", content: entry.summary });
     }
   }
+
+  if (pendingActivity.length > 0) {
+    pushAssistant("");
+  }
+
   return messages;
 }
 
