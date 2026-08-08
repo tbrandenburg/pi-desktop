@@ -301,6 +301,56 @@ describe("chat-store.loadConversation", () => {
     expect(state.selectedModel).toBe("kept-model");
     expect(state.conversationId).toBe("session-no-model");
   });
+
+  // Coverage for issue #151: a restored session's persisted `ActivityRecord[]`
+  // is mapped onto `DisplayMessage.activity`, always as "done"/"error" (never
+  // "running", since a restored turn is by definition finished).
+  it("maps persisted ChatMessage.activity onto DisplayMessage.activity with a resolved status and a humanized label", async () => {
+    const { useChatStore } = await import("./chat-store");
+    getSession.mockResolvedValue({
+      id: "session-with-activity",
+      model: "model-x",
+      messages: [
+        {
+          role: "assistant",
+          content: "here you go",
+          activity: [
+            { id: "call-1", toolName: "read", isError: false, durationMs: 10, args: { path: "a.ts" } },
+            { id: "call-2", toolName: "bash", isError: true, durationMs: 5, args: { command: "false" } },
+          ],
+        },
+      ],
+    });
+
+    await useChatStore.getState().loadConversation("session-with-activity");
+
+    const message = useChatStore.getState().messages[0];
+    expect(message.activity).toHaveLength(2);
+    expect(message.activity?.[0]).toEqual({
+      id: "call-1",
+      toolName: "read",
+      label: "Reading files…",
+      args: { path: "a.ts" },
+      status: "done",
+      durationMs: 10,
+    });
+    expect(message.activity?.[1].status).toBe("error");
+  });
+
+  it("leaves activity undefined for a restored message with no persisted activity", async () => {
+    const { useChatStore } = await import("./chat-store");
+    getSession.mockResolvedValue({
+      id: "session-no-activity",
+      model: "model-x",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    await useChatStore.getState().loadConversation("session-no-activity");
+
+    const message = useChatStore.getState().messages[0];
+    expect(message.activity).toBeUndefined();
+    expect(message.content).toBe("hi");
+  });
 });
 
 describe("chat-store.deleteSession", () => {
@@ -611,10 +661,11 @@ describe("chat-store.sendMessage streaming events", () => {
   });
 });
 
-// Coverage for issue #139: tool-call events are rendered as their own
-// timeline entry, and `setToolsExpanded` keeps main's cached
-// `getToolsExpanded()` in sync via `reportToolsExpanded`.
-describe("chat-store tool-call handling and toolsExpanded (issue #139)", () => {
+// Coverage for issue #151: tool-call/tool-result events are grouped as
+// `Activity` entries on the streaming assistant message, and
+// `setToolsExpanded` keeps main's cached `getToolsExpanded()` in sync via
+// `reportToolsExpanded`.
+describe("chat-store tool-call/tool-result activity grouping and toolsExpanded (issue #151)", () => {
   beforeEach(() => {
     vi.resetModules();
     startChat.mockReset();
@@ -639,7 +690,7 @@ describe("chat-store tool-call handling and toolsExpanded (issue #139)", () => {
     expect(reportToolsExpanded).toHaveBeenCalledWith(true);
   });
 
-  it("pushes a tool-call entry into messages without clearing the streaming assistant bubble", async () => {
+  it("groups a tool-call + tool-result(isError:false) into exactly one done Activity on the streaming message, with no sibling message created", async () => {
     const { useChatStore } = await import("./chat-store");
     let capturedHandler: ((event: ChatEvent) => void) | undefined;
     onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
@@ -653,19 +704,119 @@ describe("chat-store tool-call handling and toolsExpanded (issue #139)", () => {
     capturedHandler?.({
       type: "tool-call",
       requestId: "req-tool",
+      toolCallId: "call-req-tool-1",
       toolName: "read_file",
       arguments: { path: "/tmp/foo.txt" },
+    });
+    capturedHandler?.({
+      type: "tool-result",
+      requestId: "req-tool",
+      toolCallId: "call-req-tool-1",
+      isError: false,
+      durationMs: 42,
     });
     capturedHandler?.({ type: "text-delta", requestId: "req-tool", text: "done" });
 
     const state = useChatStore.getState();
-    const toolCallEntry = state.messages.find((m) => m.toolCall);
-    expect(toolCallEntry?.toolCall).toEqual({ toolName: "read_file", arguments: { path: "/tmp/foo.txt" } });
-
-    const assistantMessage = state.messages.find((m) => m.role === "assistant" && !m.toolCall);
+    // Exactly the 2 messages sent originally (user + assistant); no extra
+    // sibling pseudo-message was created for the tool call.
+    expect(state.messages).toHaveLength(2);
+    const assistantMessage = state.messages.find((m) => m.role === "assistant");
     expect(assistantMessage?.content).toBe("done");
+    expect(assistantMessage?.activity).toHaveLength(1);
+    expect(assistantMessage?.activity?.[0]).toEqual({
+      id: "call-req-tool-1",
+      toolName: "read_file",
+      label: "Working…",
+      args: { path: "/tmp/foo.txt" },
+      status: "done",
+      durationMs: 42,
+    });
+  });
+
+  it("marks the Activity status 'error' when the tool-result has isError:true", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-tool-err" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("run a failing tool");
+    capturedHandler?.({
+      type: "tool-call",
+      requestId: "req-tool-err",
+      toolCallId: "call-req-tool-err-1",
+      toolName: "bash",
+      arguments: { command: "false" },
+    });
+    capturedHandler?.({
+      type: "tool-result",
+      requestId: "req-tool-err",
+      toolCallId: "call-req-tool-err-1",
+      isError: true,
+      durationMs: 7,
+    });
+
+    const assistantMessage = useChatStore.getState().messages.find((m) => m.role === "assistant");
+    expect(assistantMessage?.activity?.[0].status).toBe("error");
+    expect(assistantMessage?.activity?.[0].durationMs).toBe(7);
+  });
+
+  it("force-resolves an activity still 'running' to 'done' once 'completed' fires", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-stuck-tool" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("run a tool that never resolves");
+    capturedHandler?.({
+      type: "tool-call",
+      requestId: "req-stuck-tool",
+      toolCallId: "call-req-stuck-tool-1",
+      toolName: "read",
+      arguments: { path: "x" },
+    });
+    // No tool-result arrives before completed.
+    capturedHandler?.({ type: "completed", requestId: "req-stuck-tool" });
+
+    const assistantMessage = useChatStore.getState().messages.find((m) => m.role === "assistant");
+    expect(assistantMessage?.activity?.[0].status).toBe("done");
+    expect(assistantMessage?.activity?.[0].status).not.toBe("running");
+  });
+
+  it("force-resolves a still-running activity to 'error' when the turn itself errors", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-error-tool" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("run a tool then crash");
+    capturedHandler?.({
+      type: "tool-call",
+      requestId: "req-error-tool",
+      toolCallId: "call-req-error-tool-1",
+      toolName: "bash",
+      arguments: { command: "sleep 100" },
+    });
+    capturedHandler?.({ type: "error", requestId: "req-error-tool", message: "provider crashed" });
+
+    const assistantMessage = useChatStore.getState().messages.find((m) => m.role === "assistant");
+    expect(assistantMessage?.activity?.[0].status).toBe("error");
+    expect(assistantMessage?.error).toBe("provider crashed");
   });
 });
+
 
 // Coverage for issue #145: a short, ephemeral status caption tracks the
 // current step (thinking/tool-call) on the assistant bubble itself, and is
@@ -694,7 +845,7 @@ describe("chat-store step-label tracking for the typewriter caption (issue #145)
 
     const assistantMessage = useChatStore
       .getState()
-      .messages.find((m) => m.role === "assistant" && !m.toolCall);
+      .messages.find((m) => m.role === "assistant");
     expect(assistantMessage?.stepLabel).toBe("Thinking…");
     expect(assistantMessage?.content).toBe("");
   });
@@ -713,13 +864,14 @@ describe("chat-store step-label tracking for the typewriter caption (issue #145)
     capturedHandler?.({
       type: "tool-call",
       requestId: "req-tool-label",
+      toolCallId: "call-req-tool-label-1",
       toolName: "bash",
       arguments: { command: "ls" },
     });
 
     const assistantMessage = useChatStore
       .getState()
-      .messages.find((m) => m.role === "assistant" && !m.toolCall);
+      .messages.find((m) => m.role === "assistant");
     expect(assistantMessage?.stepLabel).toBe("Running a command…");
     expect(assistantMessage?.stepLabel).not.toContain("bash");
   });
@@ -738,6 +890,7 @@ describe("chat-store step-label tracking for the typewriter caption (issue #145)
     capturedHandler?.({
       type: "tool-call",
       requestId: "req-clear",
+      toolCallId: "call-req-clear-1",
       toolName: "read",
       arguments: { path: "foo.ts" },
     });
@@ -745,7 +898,7 @@ describe("chat-store step-label tracking for the typewriter caption (issue #145)
 
     const assistantMessage = useChatStore
       .getState()
-      .messages.find((m) => m.role === "assistant" && !m.toolCall);
+      .messages.find((m) => m.role === "assistant");
     expect(assistantMessage?.stepLabel).toBeUndefined();
     expect(assistantMessage?.content).toBe("Hello");
   });
@@ -769,7 +922,7 @@ describe("chat-store step-label tracking for the typewriter caption (issue #145)
 
     const assistantMessage = useChatStore
       .getState()
-      .messages.find((m) => m.role === "assistant" && !m.toolCall);
+      .messages.find((m) => m.role === "assistant");
     expect(assistantMessage?.stepLabel).toBe("Thinking…");
     expect(assistantMessage?.content).toBe("");
   });
@@ -789,7 +942,7 @@ describe("chat-store step-label tracking for the typewriter caption (issue #145)
 
     const assistantMessage = useChatStore
       .getState()
-      .messages.find((m) => m.role === "assistant" && !m.toolCall);
+      .messages.find((m) => m.role === "assistant");
     expect(assistantMessage?.stepLabel).toBeUndefined();
     expect(assistantMessage?.error).toBe("boom");
   });

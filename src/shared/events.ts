@@ -12,6 +12,22 @@ export interface StartChatRequest {
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  /** Completed tool-call activity for this message, populated by the session projection (issue #151). */
+  activity?: ActivityRecord[];
+}
+
+/**
+ * A single completed tool-call, projected from a `tool-call`/`tool-result`
+ * `ChatEvent` pair (issue #151). Kept minimal to exactly what pi-agent-core's
+ * `tool_execution_start`/`tool_execution_end` events actually expose --
+ * no fields invented beyond that.
+ */
+export interface ActivityRecord {
+  id: string;
+  toolName: string;
+  isError: boolean;
+  durationMs: number;
+  args: unknown;
 }
 
 export interface ProviderSettings {
@@ -112,8 +128,16 @@ export type ChatEvent =
   | {
       type: "tool-call";
       requestId: string;
+      toolCallId: string;
       toolName: string;
       arguments: unknown;
+    }
+  | {
+      type: "tool-result";
+      requestId: string;
+      toolCallId: string;
+      isError: boolean;
+      durationMs: number;
     }
   | {
       type: "usage";
