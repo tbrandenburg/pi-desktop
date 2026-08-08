@@ -963,5 +963,50 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   a check is "probably fine" or because a previous, unrelated protection
   bug is already on file. If Actions repeatedly fails to trigger for a
   specific PR/branch with no code-side explanation, treat it as an
-  infra-level anomaly to route around this way, not as license to skip
-  local verification.
+   infra-level anomaly to route around this way, not as license to skip
+   local verification.
+- 2026-08-08: Two initial RCAs for a reported "pi-free models missing from
+  the picker" bug (issues #148/#149) were filed from static code reading
+  alone and turned out to be factually wrong once tested against the real
+  `@earendil-works/pi-coding-agent` package: `pi.registerTool`/
+  `pi.registerProvider` calls made by an extension are ALREADY
+  automatically wired into every real `AgentSession` by the library's own
+  internal `_buildRuntime()`/`_bindExtensionCore()`/`_refreshToolRegistry()`
+  -- confirmed by building a real inline extension calling both and running
+  it through `createAgentSession()`, then checking `session.getActiveToolNames()`
+  and `modelRuntime.getModel(...)` directly. Both issues were closed as
+  not-a-bug/superseded once this was proven, narrowing 3 filed issues down
+  to 1 real, correctly-scoped one (#147, only the model *picker*, which
+  never runs `resourceLoader.reload()` at all). Rule: before filing an
+  architecture-level bug/issue about a third-party library's behavior
+  ("X is never wired up"), write a small throwaway script that actually
+  exercises the real library API end-to-end -- 10 minutes of real
+  verification here prevented an entire unnecessary multi-agent
+  architecture-rewrite workflow from being dispatched against a false
+  premise.
+- 2026-08-08: The subagent fix for #147 (`extensionProviderSource` in
+  `registry.ts`) passed 17/17 of its own new unit tests, `npm run check`,
+  and the full 232-test suite -- but a real end-to-end run (a genuine
+  on-disk `npm:`-style package + `settings.json`, driven through
+  `buildModelsRegistry()` directly via `npx tsx`, no vitest) still found a
+  real bug: `createAgentSession(...)` was called without an explicit
+  `agentDir`, so it silently fell back to `PI_CODING_AGENT_DIR`/
+  `os.homedir()` instead of respecting the `homeDir` parameter
+  `buildModelsRegistry` was explicitly given -- inconsistent with every
+  other source in `SOURCES` (`agentDirSource`, `AuthJsonCredentialStore`),
+  which all explicitly use `ctx.globalDir`. This was invisible to every
+  existing unit test because all three of them inject an explicit
+  `extensionResourceLoader` override, which makes `createAgentSession`'s
+  `agentDir` option a documented no-op per its own source
+  (`options.resourceLoader` short-circuits the `agentDir`-driven default
+  construction entirely). Fixed with one line (`agentDir: ctx.globalDir`)
+  plus a new regression test that deliberately omits the
+  `extensionResourceLoader` override to actually exercise the default-path
+  branch. Rule: when every test for a new code path injects the same
+  override/fixture to keep things realistic-but-isolated, explicitly check
+  whether that override also disables a real production code branch (here,
+  the `agentDir`-driven default-construction path) -- if so, add at least
+  one test that deliberately does NOT use the override, to cover the actual
+  production call shape. A green full test suite is not sufficient proof by
+  itself; a real, non-test script driving the exact production entry point
+  end-to-end caught what 233 passing unit tests missed.
