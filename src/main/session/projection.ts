@@ -51,6 +51,57 @@ function textFromContentBlocks(content: { type: string; text?: string }[]): stri
     .join(" ");
 }
 
+/**
+ * Conservative, best-effort extraction of a "sources" list (title + url
+ * pairs) from an opaque tool-result payload (issue #157). Behavior kept
+ * identical to the renderer's `extractSources` in
+ * `src/renderer/state/chat-store.ts` -- colocated here rather than
+ * cross-imported since this is main-process code and that's renderer state.
+ * Never fabricates: returns `undefined` unless it finds a recognizable list
+ * of items each carrying both a title-like and a url-like string field.
+ */
+function extractSources(result: unknown): { title: string; url: string }[] | undefined {
+  const candidates = candidateArray(result);
+  if (!candidates) return undefined;
+
+  const sources: { title: string; url: string }[] = [];
+  for (const item of candidates) {
+    const source = asSource(item);
+    if (source) sources.push(source);
+  }
+  return sources.length > 0 ? sources : undefined;
+}
+
+function candidateArray(result: unknown): unknown[] | undefined {
+  if (Array.isArray(result)) return result;
+  if (result === null || typeof result !== "object") return undefined;
+
+  for (const key of ["results", "sources", "items"]) {
+    const value = (result as Record<string, unknown>)[key];
+    if (Array.isArray(value)) return value;
+  }
+  return undefined;
+}
+
+function asSource(item: unknown): { title: string; url: string } | undefined {
+  if (item === null || typeof item !== "object") return undefined;
+  const record = item as Record<string, unknown>;
+
+  const url = firstStringField(record, ["url", "link"]);
+  const title = firstStringField(record, ["title", "name"]);
+  if (!url || !title) return undefined;
+  return { title, url };
+}
+
+function firstStringField(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const [key, value] of Object.entries(record)) {
+    if (keys.includes(key.toLowerCase()) && typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function deriveModel(entries: readonly SessionTreeEntry[]): string {
   const modelChange = [...entries].reverse().find((entry) => entry.type === "model_change");
   if (modelChange?.type === "model_change") {
@@ -121,6 +172,7 @@ function entriesToMessages(entries: readonly SessionTreeEntry[]): ChatMessage[] 
           isError: message.isError ?? false,
           durationMs: 0,
           args: pending?.args,
+          sources: extractSources(message.details),
         });
       }
       continue;

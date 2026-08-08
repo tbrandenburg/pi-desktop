@@ -28,6 +28,14 @@ export interface ActivityRecord {
   isError: boolean;
   durationMs: number;
   args: unknown;
+  /**
+   * Best-effort, conservatively-extracted list of "sources" (e.g. web-search
+   * results, fetched URLs) found in the tool's result payload (issue #157).
+   * Only ever populated when a recognizable title+url shape was found --
+   * never fabricated from step count or tool name alone. Absent (not an
+   * empty array) when nothing recognizable was found.
+   */
+  sources?: { title: string; url: string }[];
 }
 
 export interface ProviderSettings {
@@ -138,6 +146,15 @@ export type ChatEvent =
       toolCallId: string;
       isError: boolean;
       durationMs: number;
+      /**
+       * Raw, opaque tool-result payload forwarded from pi-agent-core's
+       * `AgentToolResult.details` (issue #157) -- an arbitrary,
+       * tool-specific structure, not a typed contract. The renderer applies
+       * a conservative, best-effort `extractSources` heuristic to this to
+       * populate `Activity.sources`/`ActivityRecord.sources`; never assume
+       * any particular shape here beyond "possibly `unknown`".
+       */
+      result?: unknown;
     }
   | {
       type: "usage";
