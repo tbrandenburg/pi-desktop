@@ -8,8 +8,13 @@ import type {
   Provider,
   ProviderStreams,
 } from "@earendil-works/pi-ai";
+import type { ResourceLoader } from "@earendil-works/pi-coding-agent";
 
 import { nativeDynamicImport } from "../native-import";
+import {
+  loadCodingAgent,
+  type CodingAgentLoaders,
+} from "../agent/coding-agent-loaders";
 import {
   AuthJsonCredentialStore,
   placeholderModel,
@@ -85,6 +90,25 @@ export interface ModelsLoaders {
   loadPiAi?: () => Promise<PiAiModule>;
   loadApiModule?: (api: string) => Promise<ProviderStreams>;
   loadBuiltinProviders?: () => Promise<BuiltinProvidersModule>;
+  /**
+   * Injectable `@earendil-works/pi-coding-agent` loader for
+   * `extensionProviderSource` below -- reuses `src/main/agent/coding-agent-
+   * loaders.ts`'s exact same `nativeDynamicImport`-hidden production loader
+   * (and its injection seam) rather than duplicating it. See that module's
+   * own doc comment for why the real loader is invisible to Vitest.
+   */
+  codingAgentLoaders?: CodingAgentLoaders;
+  /**
+   * Test-only: overrides `extensionProviderSource`'s `ResourceLoader`,
+   * mirroring `AgentRuntimeRunArgs.resourceLoader` (`src/main/agent/
+   * runtime.ts`) -- lets tests load a real inline test extension via
+   * `extensionFactories` without touching any real global/project extension
+   * directory. Production code never sets this: omitting it lets
+   * `createAgentSession` construct its own default `DefaultResourceLoader`,
+   * which applies the same real project-trust gating `AgentRuntime.
+   * listCommands()` already relies on for the identical discovery pattern.
+   */
+  extensionResourceLoader?: ResourceLoader;
 }
 
 /** The app's own single-slot `settings.json` config (via SettingsStore). */
@@ -130,9 +154,12 @@ export interface ModelsRegistry {
 interface ProviderSourceContext {
   globalDir: string;
   projectDir: string;
+  cwd: string;
   appSettings?: AppSettingsProviderInput;
   loadApiModule: (api: string) => Promise<ProviderStreams>;
   loadBuiltinProviders: () => Promise<BuiltinProvidersModule>;
+  codingAgentLoaders: CodingAgentLoaders;
+  extensionResourceLoader?: ResourceLoader;
 }
 
 /**
@@ -154,6 +181,64 @@ type RegistryEntry = { kind: "provider"; provider: Provider } | { kind: "options
 interface ProviderSource {
   load(ctx: ProviderSourceContext): Promise<RegistryEntry[]>;
 }
+
+/**
+ * Models contributed by extensions configured via `settings.json`'s
+ * `"packages"` array (e.g. `npm:pi-free`) that call `pi.registerProvider(...)`
+ * at activation time (issue #147). Structurally this needs a real
+ * pi-coding-agent `ModelRuntime` + extension-activation pass -- raw
+ * `@earendil-works/pi-ai` APIs (used by every other source here) have no
+ * concept of extensions at all.
+ *
+ * Reuses the exact throwaway-session pattern `AgentRuntime.listCommands()`
+ * (`src/main/agent/runtime.ts`) already established for the identical
+ * purpose (discovering `pi.registerCommand` commands): a fresh
+ * `ModelRuntime.create()` + `SessionManager.inMemory(cwd)` +
+ * `createAgentSession({ ..., noTools: "all" })` call, with no persisted
+ * session and no resolved model needed. `createAgentSession`'s own
+ * `_buildRuntime` flushes every extension's `pi.registerProvider`/
+ * `registerNativeProvider` call directly onto the `modelRuntime` passed in
+ * (confirmed against the real installed package, see issue #147), so
+ * `extensionRuntime.getRegisteredProviderIds()` afterwards is exactly the
+ * set of providers extensions registered -- not the runtime's own
+ * `auth.json`/builtin-catalog providers, which are read back separately by
+ * `builtinProviderSource`/`agentDirSource` below.
+ *
+ * `resourceLoader` is intentionally left to `createAgentSession`'s own
+ * default construction (a `DefaultResourceLoader`) unless a test injects
+ * one via `ctx.extensionResourceLoader` -- that default already applies
+ * the same real project-trust gating `listCommands()` relies on for
+ * exactly this reason (see the trust/perf discussion in issue #147; adding
+ * new trust-gating or caching logic here is explicitly out of scope).
+ *
+ * Any failure while activating extensions (e.g. a broken third-party
+ * package) must not brick the rest of the model picker -- caught and
+ * treated as "this source contributes nothing", same as every other
+ * source here silently contributing nothing when its own optional config
+ * is absent/invalid.
+ */
+const extensionProviderSource: ProviderSource = {
+  async load(ctx) {
+    try {
+      const { createAgentSession, ModelRuntime, SessionManager } = await loadCodingAgent(ctx.codingAgentLoaders);
+      const extensionRuntime = await ModelRuntime.create({ allowModelNetwork: false });
+      await createAgentSession({
+        cwd: ctx.cwd,
+        modelRuntime: extensionRuntime,
+        sessionManager: SessionManager.inMemory(ctx.cwd),
+        noTools: "all",
+        resourceLoader: ctx.extensionResourceLoader,
+      });
+      return extensionRuntime
+        .getRegisteredProviderIds()
+        .map((providerId) => extensionRuntime.getProvider(providerId))
+        .filter((provider): provider is Provider => provider !== undefined)
+        .map((provider) => ({ kind: "provider", provider }) as const);
+    } catch {
+      return [];
+    }
+  },
+};
 
 /**
  * Every pi-ai built-in provider (37 known providers, e.g. "openrouter",
@@ -195,8 +280,12 @@ function agentDirSource(dirKey: "globalDir" | "projectDir"): ProviderSource {
  * wins. See each source above for what it contributes. `models.json`/
  * `auth.json` are optional at every level -- a source that has none simply
  * contributes no providers, and built-ins still work off `auth.json` alone.
+ * `extensionProviderSource` is the absolute lowest precedence: an explicit
+ * user config (`app-settings`/`.pi/agent/models.json`) must never be
+ * silently overridden by a third-party extension (issue #147).
  */
 const SOURCES: ProviderSource[] = [
+  extensionProviderSource,
   builtinProviderSource,
   appSettingsSource,
   agentDirSource("globalDir"),
@@ -224,9 +313,12 @@ export async function buildModelsRegistry(
   const ctx: ProviderSourceContext = {
     globalDir,
     projectDir,
+    cwd,
     appSettings,
     loadApiModule,
     loadBuiltinProviders,
+    codingAgentLoaders: loaders.codingAgentLoaders ?? {},
+    extensionResourceLoader: loaders.extensionResourceLoader,
   };
 
   for (const source of SOURCES) {

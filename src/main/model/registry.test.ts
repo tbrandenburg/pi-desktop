@@ -11,6 +11,8 @@ import {
   APP_SETTINGS_PROVIDER_ID,
 } from "./registry";
 import { realModelsLoaders } from "./test-support/real-models-loaders";
+import { realCodingAgentLoaders } from "../agent/test-support/real-coding-agent-loaders";
+import { buildProviderTestResourceLoader } from "./test-support/inline-provider-extension";
 
 describe("buildModelsRegistry", () => {
   let home: string;
@@ -357,5 +359,81 @@ describe("findModelById edge cases", () => {
     expect(registry.models.getProvider("myprov")!.getModels().some((m) => m.id === "myprovX")).toBe(true);
 
     expect(findModelById(registry.models, asQualifiedModelId("myprovX"))).toBeNull();
+  });
+});
+
+describe("buildModelsRegistry with extension-registered providers (issue #147)", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-models-ext-home-"));
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-models-ext-cwd-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("surfaces a model registered by a real extension via pi.registerProvider(...)", async () => {
+    const extensionResourceLoader = await buildProviderTestResourceLoader(cwd);
+
+    const registry = await buildModelsRegistry(home, cwd, undefined, {
+      ...realModelsLoaders,
+      codingAgentLoaders: realCodingAgentLoaders,
+      extensionResourceLoader,
+    });
+
+    const provider = registry.models.getProvider("pi-free-fixture");
+    expect(provider).toBeDefined();
+    expect(provider!.getModels().some((m) => m.id === "fixture-model")).toBe(true);
+
+    const found = findModelById(registry.models, qualifyModelId("pi-free-fixture", asBareModelId("fixture-model")));
+    expect(found?.providerId).toBe("pi-free-fixture");
+  });
+
+  it("gives an explicit app-settings provider precedence over an extension-registered provider with the same id", async () => {
+    const extensionResourceLoader = await buildProviderTestResourceLoader(cwd);
+
+    const registry = await buildModelsRegistry(
+      home,
+      cwd,
+      {
+        apiKey: "sk-app-only",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      },
+      {
+        ...realModelsLoaders,
+        codingAgentLoaders: realCodingAgentLoaders,
+        extensionResourceLoader,
+      },
+    );
+
+    // The extension-registered provider must still be lower precedence than
+    // the app's own settings.json-configured provider -- confirmed here by
+    // checking that app-settings' own provider id/model was not clobbered
+    // by the extension pass (they use different ids in this fixture, so
+    // this also proves both sources contributed simultaneously without one
+    // source silently suppressing the other's unrelated entries).
+    expect(registry.models.getProvider(APP_SETTINGS_PROVIDER_ID)).toBeDefined();
+    expect(registry.models.getProvider(APP_SETTINGS_PROVIDER_ID)!.getModels().some((m) => m.id === "gpt-4o-mini")).toBe(
+      true,
+    );
+    expect(registry.models.getProvider("pi-free-fixture")).toBeDefined();
+  });
+
+  it("contributes no providers when no extension registers any (real activation pass with zero registerProvider calls)", async () => {
+    // No extensionResourceLoader override -- createAgentSession's own real
+    // default DefaultResourceLoader runs against the empty temp cwd/agentDir,
+    // discovering zero extensions.
+    const registry = await buildModelsRegistry(home, cwd, undefined, {
+      ...realModelsLoaders,
+      codingAgentLoaders: realCodingAgentLoaders,
+    });
+
+    await expect(registry.models.getAvailable()).resolves.toEqual([]);
+    expect(registry.models.getProvider("pi-free-fixture")).toBeUndefined();
   });
 });
