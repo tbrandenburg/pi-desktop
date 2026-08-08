@@ -68,6 +68,16 @@ export interface AgentRuntimeRunArgs {
  * calls are wired yet (Phase 2, issue #91).
  */
 export class AgentRuntime {
+  /**
+   * Tracks the start timestamp of an in-flight tool call (keyed by
+   * `toolCallId`) so `tool_execution_end` can compute `durationMs` --
+   * pi-agent-core does not surface a duration itself. Entries are removed
+   * as soon as the matching `tool_execution_end` arrives; any left orphaned
+   * by an aborted/crashed turn are swept in `run()`'s `finally` block so
+   * this map can never grow unbounded across turns.
+   */
+  private readonly toolCallStartedAt = new Map<string, number>();
+
   constructor(private readonly loaders: CodingAgentLoaders = {}) {}
 
   async run({
@@ -158,7 +168,9 @@ export class AgentRuntime {
       await session.bindExtensions({ uiContext, mode: "rpc" });
     }
 
+    const startedToolCallIds = new Set<string>();
     const unsubscribe = session.subscribe((event) => {
+      if (event.type === "tool_execution_start") startedToolCallIds.add(event.toolCallId);
       this.forward(requestId, event, emit);
     });
     const onAbort = () => {
@@ -199,6 +211,10 @@ export class AgentRuntime {
     } finally {
       signal.removeEventListener("abort", onAbort);
       unsubscribe();
+      // Sweep any tool calls started during this turn whose
+      // `tool_execution_end` never arrived (aborted/crashed turn) so
+      // `toolCallStartedAt` never leaks entries across turns.
+      for (const toolCallId of startedToolCallIds) this.toolCallStartedAt.delete(toolCallId);
     }
   }
 
@@ -256,13 +272,28 @@ export class AgentRuntime {
         return;
       }
       case "tool_execution_start":
+        this.toolCallStartedAt.set(event.toolCallId, Date.now());
         emit({
           type: "tool-call",
           requestId,
+          toolCallId: event.toolCallId,
           toolName: event.toolName,
           arguments: event.args,
         });
         return;
+      case "tool_execution_end": {
+        const startedAt = this.toolCallStartedAt.get(event.toolCallId);
+        this.toolCallStartedAt.delete(event.toolCallId);
+        const durationMs = startedAt === undefined ? 0 : Date.now() - startedAt;
+        emit({
+          type: "tool-result",
+          requestId,
+          toolCallId: event.toolCallId,
+          isError: event.isError,
+          durationMs,
+        });
+        return;
+      }
       case "agent_end": {
         const last = event.messages.at(-1);
         if (last && last.role === "assistant") {
@@ -284,8 +315,9 @@ export class AgentRuntime {
         });
         return;
       // Deliberate no-ops: this app has no `ChatEvent` counterpart for these
-      // yet (no turn/message boundary UI, no tool-progress/end UI beyond the
-      // initial `tool-call`, no queue/compaction/bash-streaming UI). Note:
+      // yet (no turn/message boundary UI, no tool-progress UI beyond the
+      // `tool-call`/`tool-result` pair, no queue/compaction/bash-streaming
+      // UI). Note:
       // `auto_retry_end` is intentionally a no-op here -- the renderer
       // (`chat-store.ts`) clears the "retrying" indicator itself as soon as
       // any subsequent event (e.g. `text-delta`, `completed`, `error`)
@@ -300,7 +332,6 @@ export class AgentRuntime {
       case "message_start":
       case "message_end":
       case "tool_execution_update":
-      case "tool_execution_end":
       case "agent_settled":
       case "queue_update":
       case "compaction_start":

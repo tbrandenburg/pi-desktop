@@ -653,6 +653,7 @@ describe("chat-store tool-call handling and toolsExpanded (issue #139)", () => {
     capturedHandler?.({
       type: "tool-call",
       requestId: "req-tool",
+      toolCallId: "call-req-tool-1",
       toolName: "read_file",
       arguments: { path: "/tmp/foo.txt" },
     });
@@ -713,6 +714,7 @@ describe("chat-store step-label tracking for the typewriter caption (issue #145)
     capturedHandler?.({
       type: "tool-call",
       requestId: "req-tool-label",
+      toolCallId: "call-req-tool-label-1",
       toolName: "bash",
       arguments: { command: "ls" },
     });
@@ -738,6 +740,7 @@ describe("chat-store step-label tracking for the typewriter caption (issue #145)
     capturedHandler?.({
       type: "tool-call",
       requestId: "req-clear",
+      toolCallId: "call-req-clear-1",
       toolName: "read",
       arguments: { path: "foo.ts" },
     });
