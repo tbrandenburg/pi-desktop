@@ -28,23 +28,11 @@ export function ActivityDetails({
   onClose: () => void;
 }) {
   const [traceExpanded, setTraceExpanded] = useState(false);
-  const [anchorUp, setAnchorUp] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setTraceExpanded(false);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const panel = panelRef.current;
-    if (!panel) return;
-    const parent = panel.parentElement;
-    const anchorRect = (parent ?? panel).getBoundingClientRect();
-    const estimatedHeight = 420;
-    const spaceBelow = window.innerHeight - anchorRect.bottom;
-    setAnchorUp(spaceBelow < estimatedHeight && anchorRect.top > spaceBelow);
   }, [open]);
 
   useEffect(() => {
@@ -74,7 +62,7 @@ export function ActivityDetails({
   return (
     <div
       ref={panelRef}
-      className={`absolute z-40 right-0 ${anchorUp ? "bottom-full mb-2" : "mt-2"} max-h-[420px] w-[400px] overflow-y-auto rounded-2xl border border-surface-border bg-surface-panel p-4 text-sm shadow-xl`}
+      className="absolute z-40 right-0 mt-2 max-h-[420px] w-[400px] overflow-y-auto rounded-2xl border border-surface-border bg-surface-panel p-4 text-sm shadow-xl"
     >
       <div className="mb-3 flex items-center justify-between">
         <h3 className="font-semibold text-white">How this answer was made</h3>

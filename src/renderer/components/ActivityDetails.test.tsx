@@ -87,8 +87,8 @@ describe("ActivityDetails ACTIVITY row duration formatting (closes #158)", () =>
   });
 });
 
-describe("ActivityDetails viewport-aware positioning", () => {
-  it("flips the panel upward when there is not enough room below the anchor", () => {
+describe("ActivityDetails fixed anchor position (closes #159)", () => {
+  it("never flips upward even when simulating the exact 'not enough room below' condition that used to trigger the flip", () => {
     const getBoundingClientRectSpy = vi
       .spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockReturnValue({ top: 700, bottom: 720, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
@@ -96,13 +96,13 @@ describe("ActivityDetails viewport-aware positioning", () => {
 
     const { container } = render(<ActivityDetails activity={[makeActivity()]} open onClose={() => {}} />);
     const panel = container.querySelector("div.absolute");
-    expect(panel?.className).toContain("bottom-full");
-    expect(panel?.className).not.toContain("mt-2");
+    expect(panel?.className).toContain("mt-2");
+    expect(panel?.className).not.toContain("bottom-full");
 
     getBoundingClientRectSpy.mockRestore();
   });
 
-  it("anchors downward (default) when there is enough room below", () => {
+  it("anchors downward (mt-2) regardless of available viewport room", () => {
     const getBoundingClientRectSpy = vi
       .spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockReturnValue({ top: 10, bottom: 30, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
@@ -116,7 +116,7 @@ describe("ActivityDetails viewport-aware positioning", () => {
     getBoundingClientRectSpy.mockRestore();
   });
 
-  it("anchors the panel's right edge to its trigger (right-0), regardless of up/down flip", () => {
+  it("anchors the panel's right edge to its trigger (right-0)", () => {
     const { container } = render(<ActivityDetails activity={[makeActivity()]} open onClose={() => {}} />);
     const panel = container.querySelector("div.absolute");
     expect(panel?.className).toContain("right-0");
