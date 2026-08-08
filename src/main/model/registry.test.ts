@@ -436,4 +436,54 @@ describe("buildModelsRegistry with extension-registered providers (issue #147)",
     await expect(registry.models.getAvailable()).resolves.toEqual([]);
     expect(registry.models.getProvider("pi-free-fixture")).toBeUndefined();
   });
+
+  it("discovers a real on-disk npm-style package (e.g. pi-free) via the given homeDir's own .pi/agent/settings.json -- no extensionResourceLoader override, no PI_CODING_AGENT_DIR env var", async () => {
+    // Regression test for a real bug caught by a manual end-to-end repro
+    // (not by any of the tests above, since they all inject
+    // `extensionResourceLoader` directly, which makes `createAgentSession`'s
+    // own `agentDir` option a no-op per its own source -- see sdk.js:
+    // `resourceLoader = options.resourceLoader; if (!resourceLoader) { ...
+    // uses agentDir... }`). Without explicitly passing `agentDir: ctx.globalDir`
+    // into `createAgentSession`, `extensionProviderSource` would silently
+    // resolve against `PI_CODING_AGENT_DIR`/`os.homedir()` instead of the
+    // `home` directory this test (and any real multi-profile caller) explicitly
+    // passes to `buildModelsRegistry` -- exactly the divergence every other
+    // source here (`agentDirSource`, `AuthJsonCredentialStore`) already avoids
+    // by using `ctx.globalDir` directly.
+    const packageDir = path.join(home, ".pi", "agent", "npm", "node_modules", "pi-free-fixture-ondisk");
+    fs.mkdirSync(packageDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(packageDir, "package.json"),
+      JSON.stringify({ name: "pi-free-fixture-ondisk", version: "1.0.0", pi: { extensions: ["./index.js"] } }, null, 2),
+    );
+    fs.writeFileSync(
+      path.join(packageDir, "index.js"),
+      `module.exports = function (pi) {
+        pi.registerProvider("pi-free-ondisk-provider", {
+          baseUrl: "https://fixture.example/v1",
+          api: "openai-completions",
+          models: [{ id: "ondisk-model", name: "On-disk Model" }],
+        });
+      };`,
+    );
+    fs.mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, ".pi", "agent", "settings.json"),
+      JSON.stringify({ packages: ["npm:pi-free-fixture-ondisk"] }, null, 2),
+    );
+
+    const registry = await buildModelsRegistry(home, cwd, undefined, {
+      ...realModelsLoaders,
+      codingAgentLoaders: realCodingAgentLoaders,
+      // Deliberately no `extensionResourceLoader` override -- this exercises
+      // createAgentSession's own real default DefaultResourceLoader
+      // construction, the exact path production's `model:list` IPC handler
+      // (via `listConfiguredModels`/`resolvePiDefault`, always called with
+      // `homeDir = os.homedir()`) actually goes through.
+    });
+
+    const provider = registry.models.getProvider("pi-free-ondisk-provider");
+    expect(provider).toBeDefined();
+    expect(provider!.getModels().some((m) => m.id === "ondisk-model")).toBe(true);
+  });
 });

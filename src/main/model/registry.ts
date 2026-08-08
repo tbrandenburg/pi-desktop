@@ -224,6 +224,17 @@ const extensionProviderSource: ProviderSource = {
       const extensionRuntime = await ModelRuntime.create({ allowModelNetwork: false });
       await createAgentSession({
         cwd: ctx.cwd,
+        // Explicitly pin the global agent dir to the same `globalDir` every
+        // other source here uses (`agentDirSource`/`AuthJsonCredentialStore`),
+        // rather than relying on `createAgentSession`'s own implicit default
+        // (`getAgentDir()`, driven by `PI_CODING_AGENT_DIR`/`os.homedir()`).
+        // Without this, a caller that explicitly passes a non-default
+        // `homeDir` to `buildModelsRegistry` (e.g. a test, or any future
+        // multi-profile support) would have this source silently look at
+        // the wrong directory while every other source correctly used the
+        // given `homeDir` -- confirmed by a real end-to-end repro with a
+        // real on-disk `npm:`-style package before this line was added.
+        agentDir: ctx.globalDir,
         modelRuntime: extensionRuntime,
         sessionManager: SessionManager.inMemory(ctx.cwd),
         noTools: "all",
