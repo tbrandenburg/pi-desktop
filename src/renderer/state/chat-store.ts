@@ -3,13 +3,25 @@ import { immer } from "zustand/middleware/immer";
 import type { ChatMessage, CommandInfo, ModelInfo, SessionSummary } from "../../shared/events";
 import { desktopApi } from "../lib/desktop-api";
 
-export interface DisplayMessage extends ChatMessage {
+/** A single tool-call/tool-result pair grouped onto its assistant message (issue #151). */
+export interface Activity {
+  /** = the tool-call's `toolCallId`. */
+  id: string;
+  toolName: string;
+  /** Short, humanized label from `toolStepLabel`/`activityLabel`. */
+  label: string;
+  args: unknown;
+  status: "running" | "done" | "error";
+  durationMs?: number;
+}
+
+export interface DisplayMessage extends Omit<ChatMessage, "activity"> {
   id: string;
   streaming?: boolean;
   error?: string;
   retrying?: { attempt: number; maxAttempts: number };
-  /** Present only for a rendered tool-call event (issue #139); `ChatTimeline` renders a `ToolCallBubble` instead of `MessageBubble` when set. */
-  toolCall?: { toolName: string; arguments: unknown };
+  /** Grouped tool-call activity for this message (issue #151), replacing the old sibling-pseudo-message model. */
+  activity?: Activity[];
   /**
    * Ephemeral, short, humanized status caption shown at the streaming cursor
    * while this assistant message has no real content yet (issue #145) — e.g.
@@ -20,9 +32,10 @@ export interface DisplayMessage extends ChatMessage {
 }
 
 /**
- * Maps a tool name to a short, generic, humanized status label for the
- * live typewriter caption (issue #145). Deliberately never shows the raw
- * tool name or arguments — just enough to convey "the agent is working".
+ * Maps a tool name to a short, generic, humanized status label, used both
+ * for the live typewriter caption (issue #145) and as an `Activity.label`
+ * (issue #151). Deliberately never shows the raw tool name or arguments —
+ * just enough to convey "the agent is working".
  */
 function toolStepLabel(toolName: string): string {
   switch (toolName) {
@@ -134,6 +147,17 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
       messages: session.messages.map((message) => ({
         ...message,
         id: crypto.randomUUID(),
+        // A restored session's activity is by definition already finished
+        // (issue #151); the persistence package may not have populated it
+        // for old sessions, so this is defensive.
+        activity: message.activity?.map((record) => ({
+          id: record.id,
+          toolName: record.toolName,
+          label: toolStepLabel(record.toolName),
+          args: record.args,
+          status: record.isError ? ("error" as const) : ("done" as const),
+          durationMs: record.durationMs,
+        })),
       })),
       status: "idle",
       activeRequestId: null,
@@ -197,14 +221,28 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
 
       if (event.type === "tool-call") {
         set((draft) => {
-          draft.messages.push({
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: "",
-            toolCall: { toolName: event.toolName, arguments: event.arguments },
-          });
           const message = draft.messages.find((m) => m.id === assistantMessage.id);
-          if (message) message.stepLabel = toolStepLabel(event.toolName);
+          if (!message) return;
+          message.activity ??= [];
+          message.activity.push({
+            id: event.toolCallId,
+            toolName: event.toolName,
+            label: toolStepLabel(event.toolName),
+            args: event.arguments,
+            status: "running",
+          });
+          message.stepLabel = toolStepLabel(event.toolName);
+        });
+        return;
+      }
+
+      if (event.type === "tool-result") {
+        set((draft) => {
+          const message = draft.messages.find((m) => m.id === assistantMessage.id);
+          const activity = message?.activity?.find((a) => a.id === event.toolCallId);
+          if (!activity) return;
+          activity.status = event.isError ? "error" : "done";
+          activity.durationMs = event.durationMs;
         });
         return;
       }
@@ -250,6 +288,9 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
             message.streaming = false;
             message.retrying = undefined;
             message.stepLabel = undefined;
+            for (const activity of message.activity ?? []) {
+              if (activity.status === "running") activity.status = "done";
+            }
           }
         });
         void get().loadSessions();
@@ -266,6 +307,9 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
             message.error = event.message;
             message.retrying = undefined;
             message.stepLabel = undefined;
+            for (const activity of message.activity ?? []) {
+              if (activity.status === "running") activity.status = "error";
+            }
           }
         });
         void get().loadSessions();
@@ -282,7 +326,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
       handleEvent(event);
     });
 
-    const history = [...get().messages.filter((m) => !m.streaming && !m.toolCall), userMessage].map(
+    const history = [...get().messages.filter((m) => !m.streaming), userMessage].map(
       ({ role, content }) => ({ role, content }),
     );
 

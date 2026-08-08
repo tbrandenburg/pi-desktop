@@ -2,7 +2,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import type { DisplayMessage } from "../state/chat-store";
 
 const setToolsExpanded = vi.fn();
@@ -30,7 +29,10 @@ vi.mock("../state/extension-ui-store", () => ({
   useExtensionUIStore: (selector: (state: typeof baseExtensionUiState) => unknown) => selector(currentExtensionUiState),
 }));
 
-describe("ChatTimeline tool-call rendering and expand toggle (issue #139)", () => {
+// Coverage for issue #151: activity is now rendered inline per-message via
+// `MessageBubble`/`AgentActivity`, not as sibling `ToolCallBubble` entries,
+// and there is no more global expand/collapse header button.
+describe("ChatTimeline message rendering (issue #151)", () => {
   beforeEach(() => {
     setToolsExpanded.mockClear();
     currentChatState = { ...baseChatState };
@@ -41,33 +43,45 @@ describe("ChatTimeline tool-call rendering and expand toggle (issue #139)", () =
     cleanup();
   });
 
-  it("renders a tool-call entry as a ToolCallBubble alongside regular messages", async () => {
+  it("renders every message via MessageBubble, including one with grouped activity", async () => {
     currentChatState = {
       ...baseChatState,
       messages: [
         { id: "1", role: "user", content: "hi" },
-        { id: "2", role: "assistant", content: "", toolCall: { toolName: "read_file", arguments: { path: "x" } } },
+        {
+          id: "2",
+          role: "assistant",
+          content: "done reading",
+          activity: [
+            {
+              id: "call-1",
+              toolName: "read",
+              label: "Reading files…",
+              args: { path: "x" },
+              status: "done",
+              durationMs: 12,
+            },
+          ],
+        },
       ],
     };
     const { ChatTimeline } = await import("./ChatTimeline");
     render(<ChatTimeline />);
 
     expect(screen.getByText("hi")).toBeTruthy();
-    expect(screen.getByText("read_file")).toBeTruthy();
+    expect(screen.getByText("done reading")).toBeTruthy();
+    expect(screen.getByText(/1 step · Reading files…/)).toBeTruthy();
   });
 
-  it("calls setToolsExpanded with the toggled value when the expand button is clicked", async () => {
+  it("no longer renders a global expand/collapse tool-calls header button", async () => {
     currentChatState = {
       ...baseChatState,
       messages: [{ id: "1", role: "user", content: "hi" }],
-      toolsExpanded: false,
     };
-    const user = userEvent.setup();
     const { ChatTimeline } = await import("./ChatTimeline");
     render(<ChatTimeline />);
 
-    await user.click(screen.getByText("Expand tool calls"));
-
-    expect(setToolsExpanded).toHaveBeenCalledWith(true);
+    expect(screen.queryByText(/expand tool calls/i)).toBeNull();
+    expect(screen.queryByText(/collapse tool calls/i)).toBeNull();
   });
 });

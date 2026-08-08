@@ -3,6 +3,8 @@ import { lazy, Suspense, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { DisplayMessage } from "../state/chat-store";
+import { useChatStore } from "../state/chat-store";
+import { AgentActivity } from "./AgentActivity";
 import { TypewriterCaption } from "./TypewriterCaption";
 // Type-only import, erased entirely at build time (no runtime/bundle cost):
 // pulls @types/react-syntax-highlighter's ambient submodule declarations
@@ -109,6 +111,7 @@ function CodeBlock({ language, value }: { language: string; value: string }) {
 
 export function MessageBubble({ message }: { message: DisplayMessage }) {
   const isUser = message.role === "user";
+  const toolsExpanded = useChatStore((state) => state.toolsExpanded);
 
   if (message.error) {
     return (
@@ -127,7 +130,7 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
         className={
           isUser
             ? "max-w-[70%] rounded-2xl bg-accent/15 px-4 py-2.5 text-sm text-white"
-            : "max-w-[80%] rounded-2xl border border-surface-border bg-surface-panel px-5 py-4 text-sm leading-relaxed text-white/90"
+            : "relative max-w-[80%] rounded-2xl border border-surface-border bg-surface-panel px-5 py-4 text-sm leading-relaxed text-white/90"
         }
       >
         <ReactMarkdown
@@ -169,6 +172,14 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
               className="flex items-center gap-1 text-[11px] text-white/40 transition hover:text-white"
             />
           </div>
+        )}
+        {!isUser && (
+          <AgentActivity
+            activity={message.activity}
+            streaming={message.streaming}
+            hasContent={Boolean(message.content)}
+            detailsDefaultExpanded={toolsExpanded}
+          />
         )}
       </div>
     </div>
