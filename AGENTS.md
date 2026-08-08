@@ -1026,8 +1026,33 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   hang. (2) A real tool call's completed `Activity` row displayed the
   ephemeral present-progressive typewriter caption text verbatim (e.g.
   "Running a command…", trailing ellipsis) instead of a finished-state
-  phrasing — invisible to any unit test because `toolStepLabel()` is
-  deliberately reused for both the live caption and the persisted label;
-  filed as a separate low-priority follow-up (#152) rather than fixed inline,
-  per the "don't opportunistically fix unrelated details" rule for scoped
-  subagent/coordinator work.
+   phrasing — invisible to any unit test because `toolStepLabel()` is
+   deliberately reused for both the live caption and the persisted label;
+   filed as a separate low-priority follow-up (#152) rather than fixed inline,
+   per the "don't opportunistically fix unrelated details" rule for scoped
+   subagent/coordinator work.
+- 2026-08-08: Fixing #152/#154/#155 together confirmed two practical
+  sequencing points for splitting one issue-graph into worktree packages.
+  (1) Two issues (#152, #155) touching the *same* file (`chat-store.ts`,
+  different functions) were deliberately merged into one subagent package
+  instead of two parallel ones, per the file-ownership-not-logical-layer
+  rule — zero conflicts on merge, confirming this is the right call whenever
+  candidate issues share a file, even if their fixes are logically
+  unrelated. (2) A test-file line-count split (#154) that depends on
+  another package's new tests (#152/#155 add tests to the same file) must
+  run strictly *after* that package merges, not in true parallel — modeled
+  here as sequential Phase 1 (parallel, disjoint files) → Phase 2 (the
+  test-split that reads Phase 1's final file content). Also: a mechanical
+  test-file split is not guaranteed to fully clear a line-count threshold
+  when the file's real, legitimate test surface is inherently large
+  (`chat-store.test.ts` went 1024 -> 573, still over the 500-line warning
+  threshold) — accept a large, honest reduction with a clearly logical
+  split boundary over forcing an awkward second split just to hit a number;
+  the warning is non-blocking (`make lint` exits 0) specifically to allow
+  this judgment call. Finally, the exact same `cdp-drive.ts` `send`-then-
+  `SENT`-but-not-submitted flakiness from the 2026-08-08 #151 entry
+  recurred identically during #152's E2E verification, on the very same
+  script, same day, different launch — reinforcing that this is a real,
+  reproducible property of synthetic same-tick `Enter` dispatch (not a
+  one-off), so always screenshot-verify a `send` actually submitted before
+  trusting `SENT` alone, every single time, not just "when in doubt."

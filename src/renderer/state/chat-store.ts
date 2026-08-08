@@ -32,12 +32,12 @@ export interface DisplayMessage extends Omit<ChatMessage, "activity"> {
 }
 
 /**
- * Maps a tool name to a short, generic, humanized status label, used both
- * for the live typewriter caption (issue #145) and as an `Activity.label`
- * (issue #151). Deliberately never shows the raw tool name or arguments —
- * just enough to convey "the agent is working".
+ * Maps a tool name to a short, generic, humanized in-progress caption, used
+ * for the live typewriter caption (issue #145) and for a `running`
+ * `Activity.label` (issue #151). Deliberately never shows the raw tool name
+ * or arguments — just enough to convey "the agent is working".
  */
-function toolStepLabel(toolName: string): string {
+function toolCaptionLabel(toolName: string): string {
   switch (toolName) {
     case "read":
       return "Reading files…";
@@ -51,6 +51,29 @@ function toolStepLabel(toolName: string): string {
       return "Browsing files…";
     default:
       return "Working…";
+  }
+}
+
+/**
+ * Maps a tool name to a short, generic, finished-state label, used for a
+ * `done`/`error` `Activity.label` (issue #152) — distinct past-tense
+ * phrasing with no ellipsis, so completed activity rows don't read as still
+ * in progress.
+ */
+function toolCompletedLabel(toolName: string): string {
+  switch (toolName) {
+    case "read":
+      return "Read files";
+    case "write":
+      return "Wrote files";
+    case "edit":
+      return "Edited files";
+    case "bash":
+      return "Ran a command";
+    case "list":
+      return "Browsed files";
+    default:
+      return "Worked";
   }
 }
 
@@ -153,7 +176,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
         activity: message.activity?.map((record) => ({
           id: record.id,
           toolName: record.toolName,
-          label: toolStepLabel(record.toolName),
+          label: toolCompletedLabel(record.toolName),
           args: record.args,
           status: record.isError ? ("error" as const) : ("done" as const),
           durationMs: record.durationMs,
@@ -227,11 +250,11 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
           message.activity.push({
             id: event.toolCallId,
             toolName: event.toolName,
-            label: toolStepLabel(event.toolName),
+            label: toolCaptionLabel(event.toolName),
             args: event.arguments,
             status: "running",
           });
-          message.stepLabel = toolStepLabel(event.toolName);
+          message.stepLabel = toolCaptionLabel(event.toolName);
         });
         return;
       }
@@ -242,6 +265,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
           const activity = message?.activity?.find((a) => a.id === event.toolCallId);
           if (!activity) return;
           activity.status = event.isError ? "error" : "done";
+          activity.label = toolCompletedLabel(activity.toolName);
           activity.durationMs = event.durationMs;
         });
         return;
@@ -289,7 +313,10 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
             message.retrying = undefined;
             message.stepLabel = undefined;
             for (const activity of message.activity ?? []) {
-              if (activity.status === "running") activity.status = "done";
+              if (activity.status === "running") {
+                activity.status = "done";
+                activity.label = toolCompletedLabel(activity.toolName);
+              }
             }
           }
         });
@@ -308,7 +335,10 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
             message.retrying = undefined;
             message.stepLabel = undefined;
             for (const activity of message.activity ?? []) {
-              if (activity.status === "running") activity.status = "error";
+              if (activity.status === "running") {
+                activity.status = "error";
+                activity.label = toolCompletedLabel(activity.toolName);
+              }
             }
           }
         });
@@ -371,6 +401,12 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
         if (message.streaming) {
           message.streaming = false;
           message.stepLabel = undefined;
+          for (const activity of message.activity ?? []) {
+            if (activity.status === "running") {
+              activity.status = "done";
+              activity.label = toolCompletedLabel(activity.toolName);
+            }
+          }
         }
       }
     });
