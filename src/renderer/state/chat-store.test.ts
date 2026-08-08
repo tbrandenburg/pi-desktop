@@ -304,8 +304,9 @@ describe("chat-store.loadConversation", () => {
 
   // Coverage for issue #151: a restored session's persisted `ActivityRecord[]`
   // is mapped onto `DisplayMessage.activity`, always as "done"/"error" (never
-  // "running", since a restored turn is by definition finished).
-  it("maps persisted ChatMessage.activity onto DisplayMessage.activity with a resolved status and a humanized label", async () => {
+  // "running", since a restored turn is by definition finished). Uses the
+  // finished-state label variant (issue #152), not the in-progress caption.
+  it("maps persisted ChatMessage.activity onto DisplayMessage.activity with a resolved status and a finished-state label", async () => {
     const { useChatStore } = await import("./chat-store");
     getSession.mockResolvedValue({
       id: "session-with-activity",
@@ -329,7 +330,7 @@ describe("chat-store.loadConversation", () => {
     expect(message.activity?.[0]).toEqual({
       id: "call-1",
       toolName: "read",
-      label: "Reading files…",
+      label: "Read files",
       args: { path: "a.ts" },
       status: "done",
       durationMs: 10,
@@ -432,6 +433,42 @@ describe("chat-store.stopGeneration", () => {
     expect(state.status).toBe("idle");
     expect(state.activeRequestId).toBeNull();
     expect(state.messages.find((m) => m.id === "a1")?.streaming).toBe(false);
+  });
+
+  it("force-resolves a still-running Activity to a terminal status (issue #155)", async () => {
+    const { useChatStore } = await import("./chat-store");
+    useChatStore.setState({
+      activeRequestId: "req-2",
+      status: "streaming",
+      messages: [
+        { id: "u1", role: "user", content: "hi" },
+        {
+          id: "a1",
+          role: "assistant",
+          content: "",
+          streaming: true,
+          activity: [
+            {
+              id: "call-1",
+              toolName: "bash",
+              label: "Running a command…",
+              args: { command: "sleep 100" },
+              status: "running",
+            },
+          ],
+        },
+      ],
+    });
+    cancelChat.mockResolvedValue(undefined);
+    listSessions.mockResolvedValue([]);
+
+    await useChatStore.getState().stopGeneration();
+
+    const activity = useChatStore
+      .getState()
+      .messages.find((m) => m.id === "a1")?.activity?.[0];
+    expect(activity?.status).toBe("done");
+    expect(activity?.status).not.toBe("running");
   });
 });
 
@@ -727,7 +764,7 @@ describe("chat-store tool-call/tool-result activity grouping and toolsExpanded (
     expect(assistantMessage?.activity?.[0]).toEqual({
       id: "call-req-tool-1",
       toolName: "read_file",
-      label: "Working…",
+      label: "Worked",
       args: { path: "/tmp/foo.txt" },
       status: "done",
       durationMs: 42,
@@ -814,6 +851,44 @@ describe("chat-store tool-call/tool-result activity grouping and toolsExpanded (
     const assistantMessage = useChatStore.getState().messages.find((m) => m.role === "assistant");
     expect(assistantMessage?.activity?.[0].status).toBe("error");
     expect(assistantMessage?.error).toBe("provider crashed");
+  });
+
+  it("gives a completed Activity a distinct finished-state label from its running-state caption (issue #152)", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-label-tool" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("run bash");
+    capturedHandler?.({
+      type: "tool-call",
+      requestId: "req-label-tool",
+      toolCallId: "call-req-label-tool-1",
+      toolName: "bash",
+      arguments: { command: "ls" },
+    });
+    const runningLabel = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant")?.activity?.[0].label;
+
+    capturedHandler?.({
+      type: "tool-result",
+      requestId: "req-label-tool",
+      toolCallId: "call-req-label-tool-1",
+      isError: false,
+      durationMs: 12,
+    });
+    const doneLabel = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant")?.activity?.[0].label;
+
+    expect(runningLabel).toBe("Running a command…");
+    expect(doneLabel).toBe("Ran a command");
+    expect(doneLabel).not.toBe(runningLabel);
   });
 });
 
