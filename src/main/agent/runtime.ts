@@ -291,6 +291,7 @@ export class AgentRuntime {
           toolCallId: event.toolCallId,
           isError: event.isError,
           durationMs,
+          result: event.result?.details,
         });
         return;
       }

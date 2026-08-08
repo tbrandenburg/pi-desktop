@@ -91,20 +91,23 @@ export function AgentActivity({
   const hasError = activity.some((item) => item.status === "error");
   const summary = distinctLabels(activity);
   const count = activity.length;
+  const sourceCount = activity.reduce((total, item) => total + (item.sources?.length ?? 0), 0);
+
+  const footerText = hasError
+    ? `${count} step${count === 1 ? "" : "s"} · 1 failed`
+    : sourceCount > 0
+      ? `${summary} · ${sourceCount} source${sourceCount === 1 ? "" : "s"}`
+      : `${count} step${count === 1 ? "" : "s"} · ${summary}`;
 
   return (
-    <div className="mt-3 border-t border-surface-border pt-2 text-[12px]">
-      <div className={hasError ? "flex items-center gap-2 text-amber-400" : "flex items-center gap-2 text-white/40"}>
+    <div className="mt-3 border-t border-surface-border/60 pt-2 text-[12px]">
+      <div className={hasError ? "flex items-center gap-2 text-amber-400" : "flex items-center gap-2 text-white/30"}>
         {hasError ? <AlertTriangle size={12} /> : <Check size={12} />}
-        <span>
-          {hasError
-            ? `${count} step${count === 1 ? "" : "s"} · 1 failed`
-            : `${count} step${count === 1 ? "" : "s"} · ${summary}`}
-        </span>
+        <span>{footerText}</span>
         <button
           type="button"
           onClick={() => setDetailsOpen(true)}
-          className="ml-auto text-white/40 underline decoration-dotted transition hover:text-white"
+          className="ml-auto text-white/30 underline decoration-dotted transition hover:text-white/70"
         >
           Details
         </button>

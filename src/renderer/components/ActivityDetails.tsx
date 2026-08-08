@@ -1,6 +1,16 @@
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, ExternalLink, Loader2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Activity } from "../state/chat-store";
+
+const CIRCLED_DIGITS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"];
+
+function circledNumber(index: number): string {
+  return CIRCLED_DIGITS[index] ?? `(${index + 1})`;
+}
+
+function formatDurationSeconds(durationMs: number): string {
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
 
 /**
  * A small, hand-rolled anchored popover showing the full trace of one
@@ -20,12 +30,24 @@ export function ActivityDetails({
   defaultTraceExpanded: boolean;
 }) {
   const [traceExpanded, setTraceExpanded] = useState(defaultTraceExpanded);
+  const [anchorUp, setAnchorUp] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setTraceExpanded(defaultTraceExpanded);
   }, [open, defaultTraceExpanded]);
+
+  useEffect(() => {
+    if (!open) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const parent = panel.parentElement;
+    const anchorRect = (parent ?? panel).getBoundingClientRect();
+    const estimatedHeight = 420;
+    const spaceBelow = window.innerHeight - anchorRect.bottom;
+    setAnchorUp(spaceBelow < estimatedHeight && anchorRect.top > spaceBelow);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -49,10 +71,12 @@ export function ActivityDetails({
 
   if (!open) return null;
 
+  const allSources = activity.flatMap((item) => item.sources ?? []);
+
   return (
     <div
       ref={panelRef}
-      className="absolute z-40 mt-2 max-h-[420px] w-[400px] overflow-y-auto rounded-2xl border border-surface-border bg-surface-panel p-4 text-sm shadow-xl"
+      className={`absolute z-40 ${anchorUp ? "bottom-full mb-2" : "mt-2"} max-h-[420px] w-[400px] overflow-y-auto rounded-2xl border border-surface-border bg-surface-panel p-4 text-sm shadow-xl`}
     >
       <div className="mb-3 flex items-center justify-between">
         <h3 className="font-semibold text-white">How this answer was made</h3>
@@ -81,6 +105,25 @@ export function ActivityDetails({
         ))}
       </div>
 
+      {allSources.length > 0 && (
+        <div className="mt-3 space-y-2">
+          <p className="text-[11px] uppercase tracking-wide text-white/40">Sources</p>
+          {allSources.map((source, index) => (
+            <a
+              key={`${source.url}-${index}`}
+              href={source.url}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 text-white/70 transition hover:text-white"
+            >
+              <span className="text-[12px] text-white/40">{circledNumber(index)}</span>
+              <span className="flex-1 truncate">{source.title}</span>
+              <ExternalLink size={12} className="shrink-0 text-white/40" />
+            </a>
+          ))}
+        </div>
+      )}
+
       <button
         type="button"
         onClick={() => setTraceExpanded((value) => !value)}
@@ -96,12 +139,18 @@ export function ActivityDetails({
             <div key={item.id} className="rounded-lg border border-surface-border bg-black/20 p-3">
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[12px] text-white/80">{item.toolName}</span>
-                <span className="text-[11px] text-white/40">
-                  {item.status === "error" ? "isError: true" : "isError: false"}
-                  {item.durationMs !== undefined ? ` · ${item.durationMs}ms` : ""}
-                </span>
+                {item.status === "error" ? (
+                  <span className="flex items-center gap-1 text-[11px] text-amber-400">
+                    <AlertTriangle size={11} />
+                    Failed
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-white/40">
+                    {item.durationMs !== undefined ? `✓ ${formatDurationSeconds(item.durationMs)}` : "✓"}
+                  </span>
+                )}
               </div>
-              <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-black/30 p-3 text-[12px] text-white/60">
+              <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-black/10 p-3 text-[10px] text-white/30">
                 {JSON.stringify(item.args, null, 2)}
               </pre>
             </div>

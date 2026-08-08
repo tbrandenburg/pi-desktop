@@ -142,4 +142,40 @@ describe("AgentRuntime tool-call/tool-result event forwarding (issue #151)", () 
       durationMs: 0,
     });
   });
+
+  it("issue #157: forwards a real AgentToolResult's 'details' payload on the emitted 'tool-result' ChatEvent", () => {
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    const events: ChatEvent[] = [];
+    const forward = (runtime as unknown as {
+      forward: (requestId: string, event: unknown, emit: (e: ChatEvent) => void) => void;
+    }).forward;
+
+    // Hand-computed expected payload -- not derived by calling the code
+    // under test to build its own expectation.
+    const expectedDetails = { results: [{ title: "Exa Weather", url: "https://example.com/weather" }] };
+
+    forward.call(
+      runtime,
+      "req-tool-5",
+      { type: "tool_execution_start", toolCallId: "call-search-1", toolName: "web_search", args: { query: "weather" } },
+      (event) => events.push(event),
+    );
+    forward.call(
+      runtime,
+      "req-tool-5",
+      {
+        type: "tool_execution_end",
+        toolCallId: "call-search-1",
+        toolName: "web_search",
+        result: { content: [], details: expectedDetails },
+        isError: false,
+      },
+      (event) => events.push(event),
+    );
+
+    expect(events).toHaveLength(2);
+    const toolResult = events[1] as { type: "tool-result"; result?: unknown };
+    expect(toolResult.result).toEqual(expectedDetails);
+    expect(toolResult.result).toBe(expectedDetails);
+  });
 });

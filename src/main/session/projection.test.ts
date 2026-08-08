@@ -256,6 +256,96 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
     expect(finalAssistant?.activity?.[0]?.toolName).toBe("bash");
   });
 
+  it("projects a toolResult with a source-shaped 'details' payload into ActivityRecord.sources (issue #157)", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s13b" });
+    await session.appendMessage({ role: "user", content: "search the web", timestamp: Date.now() });
+    await session.appendMessage({
+      role: "assistant",
+      content: [{ type: "toolCall", id: "call-search-1", name: "web_search", arguments: { query: "weather" } }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+    });
+    await session.appendMessage({
+      role: "toolResult",
+      toolCallId: "call-search-1",
+      toolName: "web_search",
+      content: [{ type: "text", text: "1 result" }],
+      details: { results: [{ title: "Exa Weather", url: "https://example.com/weather" }] },
+      isError: false,
+      timestamp: Date.now(),
+    });
+    await session.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "It's sunny." }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    });
+
+    const metadata = await session.getMetadata();
+    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+
+    const finalAssistant = record.messages.find(
+      (message) => message.role === "assistant" && message.content === "It's sunny.",
+    );
+    expect(finalAssistant?.activity?.[0]?.sources).toEqual([
+      { title: "Exa Weather", url: "https://example.com/weather" },
+    ]);
+    expect(finalAssistant?.activity?.[0]?.sources).toHaveLength(1);
+  });
+
+  it("leaves ActivityRecord.sources absent (not an empty array) when the toolResult's 'details' payload has no recognizable source shape", async () => {
+    const repo = await makeRepo();
+    const session = await repo.create({ cwd, id: "s13c" });
+    await session.appendMessage({ role: "user", content: "list files", timestamp: Date.now() });
+    await session.appendMessage({
+      role: "assistant",
+      content: [{ type: "toolCall", id: "call-bash-1", name: "bash", arguments: { command: "ls" } }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+    });
+    await session.appendMessage({
+      role: "toolResult",
+      toolCallId: "call-bash-1",
+      toolName: "bash",
+      content: [{ type: "text", text: "file1.txt" }],
+      details: "file1.txt",
+      isError: false,
+      timestamp: Date.now(),
+    });
+    await session.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "Found one file." }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    });
+
+    const metadata = await session.getMetadata();
+    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+
+    const finalAssistant = record.messages.find(
+      (message) => message.role === "assistant" && message.content === "Found one file.",
+    );
+    expect(finalAssistant?.activity?.[0]?.sources).toBeUndefined();
+    expect(finalAssistant?.activity?.[0]?.toolName).toBe("bash");
+  });
+
   it("does not add an activity field to a plain-text assistant message with no tool calls", async () => {
     const repo = await makeRepo();
     const session = await repo.create({ cwd, id: "s14" });

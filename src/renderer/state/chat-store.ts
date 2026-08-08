@@ -13,6 +13,72 @@ export interface Activity {
   args: unknown;
   status: "running" | "done" | "error";
   durationMs?: number;
+  /**
+   * Best-effort, conservatively-extracted "sources" list (issue #157), see
+   * `ActivityRecord.sources` in `src/shared/events.ts` for the full contract.
+   * Populated from `extractSources` on `tool-result`/live sessions, or
+   * carried through as-is from a restored `ActivityRecord`.
+   */
+  sources?: { title: string; url: string }[];
+}
+
+/**
+ * Conservative, best-effort extraction of a "sources" list (title + url
+ * pairs) from an opaque tool-result payload (issue #157). Deliberately never
+ * fabricates: returns `undefined` unless it finds a recognizable list of
+ * items each carrying both a title-like and a url-like string field.
+ *
+ * Recognized shapes:
+ * - a top-level array of candidate items
+ * - an object with a `results`/`sources`/`items` array property of candidate items
+ *
+ * A candidate item qualifies only if it has both a url-like field
+ * (`url`/`link`, case-insensitive) and a title-like field (`title`/`name`,
+ * case-insensitive) that are both non-empty strings. Non-qualifying items in
+ * an otherwise-array are skipped (not treated as an all-or-nothing failure);
+ * if zero items across the whole payload qualify, returns `undefined`, never
+ * an empty array.
+ */
+export function extractSources(result: unknown): { title: string; url: string }[] | undefined {
+  const candidates = candidateArray(result);
+  if (!candidates) return undefined;
+
+  const sources: { title: string; url: string }[] = [];
+  for (const item of candidates) {
+    const source = asSource(item);
+    if (source) sources.push(source);
+  }
+  return sources.length > 0 ? sources : undefined;
+}
+
+function candidateArray(result: unknown): unknown[] | undefined {
+  if (Array.isArray(result)) return result;
+  if (result === null || typeof result !== "object") return undefined;
+
+  for (const key of ["results", "sources", "items"]) {
+    const value = (result as Record<string, unknown>)[key];
+    if (Array.isArray(value)) return value;
+  }
+  return undefined;
+}
+
+function asSource(item: unknown): { title: string; url: string } | undefined {
+  if (item === null || typeof item !== "object") return undefined;
+  const record = item as Record<string, unknown>;
+
+  const url = firstStringField(record, ["url", "link"]);
+  const title = firstStringField(record, ["title", "name"]);
+  if (!url || !title) return undefined;
+  return { title, url };
+}
+
+function firstStringField(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const [key, value] of Object.entries(record)) {
+    if (keys.includes(key.toLowerCase()) && typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 export interface DisplayMessage extends Omit<ChatMessage, "activity"> {
@@ -49,9 +115,15 @@ function toolCaptionLabel(toolName: string): string {
       return "Running a command…";
     case "list":
       return "Browsing files…";
-    default:
-      return "Working…";
+    case "web_search":
+      return "Searching the web…";
   }
+  const name = toolName.toLowerCase();
+  if (name.includes("fetch") || name.includes("browser")) return "Reading sources…";
+  if (name.includes("calendar")) return "Checking your calendar…";
+  if (name.includes("sql") || name.includes("query")) return "Checking the data…";
+  if (name.includes("python") || name.includes("exec") || name.includes("code")) return "Calculating results…";
+  return "Working…";
 }
 
 /**
@@ -72,9 +144,15 @@ function toolCompletedLabel(toolName: string): string {
       return "Ran a command";
     case "list":
       return "Browsed files";
-    default:
-      return "Worked";
+    case "web_search":
+      return "Searched the web";
   }
+  const name = toolName.toLowerCase();
+  if (name.includes("fetch") || name.includes("browser")) return "Read sources";
+  if (name.includes("calendar")) return "Checked your calendar";
+  if (name.includes("sql") || name.includes("query")) return "Checked the data";
+  if (name.includes("python") || name.includes("exec") || name.includes("code")) return "Calculated results";
+  return "Worked";
 }
 
 interface ChatState {
@@ -180,6 +258,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
           args: record.args,
           status: record.isError ? ("error" as const) : ("done" as const),
           durationMs: record.durationMs,
+          sources: record.sources,
         })),
       })),
       status: "idle",
@@ -267,6 +346,7 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
           activity.status = event.isError ? "error" : "done";
           activity.label = toolCompletedLabel(activity.toolName);
           activity.durationMs = event.durationMs;
+          activity.sources = extractSources(event.result);
         });
         return;
       }

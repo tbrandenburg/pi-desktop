@@ -484,3 +484,147 @@ describe("chat-store step-label tracking for the typewriter caption (issue #145)
     expect(assistantMessage?.error).toBe("boom");
   });
 });
+
+describe("chat-store tool label vocabulary (issue #157 item 1)", () => {
+  const runTool = async (requestId: string, toolName: string) => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("do it");
+    capturedHandler?.({
+      type: "tool-call",
+      requestId,
+      toolCallId: `call-${requestId}`,
+      toolName,
+      arguments: {},
+    });
+    const runningLabel = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant")?.activity?.[0]?.label;
+
+    capturedHandler?.({
+      type: "tool-result",
+      requestId,
+      toolCallId: `call-${requestId}`,
+      isError: false,
+      durationMs: 1,
+    });
+    const completedLabel = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant")?.activity?.[0]?.label;
+
+    return { runningLabel, completedLabel };
+  };
+
+  it("labels 'web_search' with the exact in-progress and completed strings", async () => {
+    const { runningLabel, completedLabel } = await runTool("req-web-search", "web_search");
+    expect(runningLabel).toBe("Searching the web…");
+    expect(completedLabel).toBe("Searched the web");
+  });
+
+  it("substring-matches a real-world extension tool name like 'google_calendar_read' to the calendar labels", async () => {
+    const { runningLabel, completedLabel } = await runTool("req-calendar", "google_calendar_read");
+    expect(runningLabel).toBe("Checking your calendar…");
+    expect(completedLabel).toBe("Checked your calendar");
+  });
+
+  it("falls back to the generic label for an unrecognized tool name, not a substring match on something unrelated", async () => {
+    const { runningLabel, completedLabel } = await runTool("req-unknown", "totally_unrecognized_tool");
+    expect(runningLabel).toBe("Working…");
+    expect(completedLabel).toBe("Worked");
+  });
+});
+
+describe("chat-store extractSources (issue #157 item 2)", () => {
+  it("populates Activity.sources when the tool-result payload has a recognizable 'results' shape", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-sources" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("search the web");
+    capturedHandler?.({
+      type: "tool-call",
+      requestId: "req-sources",
+      toolCallId: "call-req-sources",
+      toolName: "web_search",
+      arguments: { query: "weather" },
+    });
+    capturedHandler?.({
+      type: "tool-result",
+      requestId: "req-sources",
+      toolCallId: "call-req-sources",
+      isError: false,
+      durationMs: 5,
+      result: { results: [{ title: "Exa Weather", url: "https://example.com/weather" }] },
+    });
+
+    const activity = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant")?.activity?.[0];
+    expect(activity?.sources).toEqual([{ title: "Exa Weather", url: "https://example.com/weather" }]);
+    expect(activity?.sources).toHaveLength(1);
+  });
+
+  it("leaves Activity.sources undefined when the tool-result payload has no recognizable source shape", async () => {
+    const { useChatStore } = await import("./chat-store");
+    let capturedHandler: ((event: ChatEvent) => void) | undefined;
+    onChatEvent.mockImplementation((handler: (event: ChatEvent) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+    startChat.mockResolvedValue({ requestId: "req-no-sources" });
+    useChatStore.setState({ selectedModel: "gpt-4o-mini", messages: [] });
+
+    await useChatStore.getState().sendMessage("run bash");
+    capturedHandler?.({
+      type: "tool-call",
+      requestId: "req-no-sources",
+      toolCallId: "call-req-no-sources",
+      toolName: "bash",
+      arguments: { command: "ls" },
+    });
+    capturedHandler?.({
+      type: "tool-result",
+      requestId: "req-no-sources",
+      toolCallId: "call-req-no-sources",
+      isError: false,
+      durationMs: 3,
+      result: "just a plain string stdout, not a source list",
+    });
+
+    const activity = useChatStore
+      .getState()
+      .messages.find((m) => m.role === "assistant")?.activity?.[0];
+    expect(activity?.sources).toBeUndefined();
+    expect(activity?.status).toBe("done");
+  });
+
+  it("directly: extractSources returns only qualifying items and skips non-qualifying ones", async () => {
+    const { extractSources } = await import("./chat-store");
+    const mixed = extractSources([
+      { title: "Good Source", url: "https://good.example" },
+      { title: "Missing URL" },
+      { url: "https://missing-title.example" },
+    ]);
+    expect(mixed).toEqual([{ title: "Good Source", url: "https://good.example" }]);
+    expect(mixed).toHaveLength(1);
+  });
+
+  it("directly: extractSources returns undefined (not []) when zero items qualify", async () => {
+    const { extractSources } = await import("./chat-store");
+    const none = extractSources([{ title: "No URL here" }, { url: "https://no-title.example" }]);
+    expect(none).toBeUndefined();
+    expect(extractSources("a plain string")).toBeUndefined();
+  });
+});

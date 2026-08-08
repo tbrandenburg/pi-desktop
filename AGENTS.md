@@ -1051,8 +1051,31 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   the warning is non-blocking (`make lint` exits 0) specifically to allow
   this judgment call. Finally, the exact same `cdp-drive.ts` `send`-then-
   `SENT`-but-not-submitted flakiness from the 2026-08-08 #151 entry
-  recurred identically during #152's E2E verification, on the very same
-  script, same day, different launch — reinforcing that this is a real,
-  reproducible property of synthetic same-tick `Enter` dispatch (not a
-  one-off), so always screenshot-verify a `send` actually submitted before
-  trusting `SENT` alone, every single time, not just "when in doubt."
+   recurred identically during #152's E2E verification, on the very same
+   script, same day, different launch — reinforcing that this is a real,
+   reproducible property of synthetic same-tick `Enter` dispatch (not a
+   one-off), so always screenshot-verify a `send` actually submitted before
+   trusting `SENT` alone, every single time, not just "when in doubt."
+- 2026-08-08: For #157 (Agent Traceability Polish), a real dependent-type
+  split (package A "data" defines `Activity.sources`/label vocabulary;
+  package B "presentation" renders it) worked cleanly as strictly sequential
+  worktrees rather than true parallel, since B could not even typecheck
+  against A's new fields until A merged — confirming that when a feature's
+  sub-items share a hard compile-time dependency (not just a shared file),
+  the graph should be modeled as sequential phases up front rather than
+  forcing artificial parallelism. Separately, real packaged-app E2E (not
+  just the 265 passing unit tests) found two real, independently-reproduced
+  gaps neither package's own tests caught: (1) the CR's own mockup showed
+  the ACTIVITY row's duration as `22.1s`, but only the Technical trace row
+  got the new `formatDurationSeconds` treatment — the ACTIVITY row above it
+  still rendered raw `22093ms`; a green test suite proved the *tested*
+  formatting path worked, not that *every* row using that data was
+  consistent with the issue's own example (#158). (2) The new viewport-flip
+  logic only checks "fits below?" and unconditionally flips upward if not,
+  with no check that upward actually fits either — a real screenshot showed
+  the panel clipped off the top of the viewport in a borderline case (#159).
+  Neither gap was reachable from unit tests alone (they exercise the
+  formatting function and the flip decision in isolation, not a full
+  rendered layout against a real viewport) — reinforcing the standing rule
+  that a real screenshot of the actual rendered feature, not just green
+  tests, is required before closing out a UI polish issue.
