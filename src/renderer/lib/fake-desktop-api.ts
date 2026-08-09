@@ -35,8 +35,8 @@ export function createFakeDesktopApi(): DesktopAgentApi {
     async listModels() {
       if (fakeModelsOverride() === "empty") return [];
       return [
-        { id: "fake-mini", label: "Fake Mini (browser test)" },
-        { id: "fake-pro", label: "Fake Pro (browser test)" },
+        { id: "fake-mini", label: "Fake Mini (browser test)", providerId: "fake", configured: true },
+        { id: "fake-pro", label: "Fake Pro (browser test)", providerId: "fake", configured: true },
       ];
     },
 
@@ -50,7 +50,7 @@ export function createFakeDesktopApi(): DesktopAgentApi {
       modelListListener = callback;
       if (fakeModelsOverride() !== "empty") {
         setTimeout(() => {
-          modelListListener?.([{ id: "fake-mini", label: "Fake Mini (browser test)" }]);
+          modelListListener?.([{ id: "fake-mini", label: "Fake Mini (browser test)", providerId: "fake", configured: true }]);
         }, 5);
       }
       return () => {
