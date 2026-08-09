@@ -28,6 +28,10 @@ exists.
 - `make run-linux` / `make run-win` — Run a specific already-built artifact
   directly (Linux AppImage / Windows exe, the latter via `wine` when
   cross-running).
+- `make install-app` / `make uninstall-app` — Install/remove the built Linux
+  AppImage as the `pi-desktop` command (`~/.local/bin`) plus an app-launcher
+  entry (`~/.local/share/applications`); no root required. Linux only for
+  now (`make dist-linux` must have run first).
 - `make version-patch` / `version-minor` / `version-major` — Run `check` +
   `test` first, then bump `package.json`/`package-lock.json`, commit
   `chore(release): vX.Y.Z`, and git-tag it. Nothing pushed yet.

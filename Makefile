@@ -9,6 +9,7 @@ VERSION = $(shell node -p "require('./package.json').version")
 .PHONY: help install run stop test lint check audit build build-renderer build-main clean \
         dist dist-linux dist-win dist-mac pack \
         run-bundled run-linux run-win run-mac \
+        install-app install-app-linux uninstall-app uninstall-app-linux \
         version-patch version-minor version-major release publish \
         release-patch release-minor release-major
 
@@ -37,6 +38,12 @@ help:
 	@echo "  make run-win     Run the built Windows app (native .exe, or via"
 	@echo "                   'wine' when cross-running from Linux/macOS)"
 	@echo "  make run-mac     Run the built macOS app (macOS only)"
+	@echo "  make install-app Install the built Linux AppImage as the 'pi-desktop'"
+	@echo "                   command (~/.local/bin) + app launcher entry"
+	@echo "                   (make dist-linux must have run first; Linux only)"
+	@echo "  make uninstall-app"
+	@echo "                   Remove the 'pi-desktop' command + launcher entry"
+	@echo "                   installed by 'make install-app' (Linux only)"
 	@echo "  make version-patch/-minor/-major"
 	@echo "                   Bump version (package.json + package-lock.json),"
 	@echo "                   commit 'chore(release): vX.Y.Z' and git tag it"
@@ -226,6 +233,78 @@ run-mac:
 	fi; \
 	echo "Running: $$app"; \
 	open "$$app"
+
+## --- Install/uninstall the bundled app as a 'pi-desktop' command ----------
+##
+## Linux only for now (Windows/macOS install-as-CLI-command need a different,
+## platform-native approach -- nsis PATH registration and a mac .app-bundle
+## symlink respectively -- and are tracked as follow-ups, not implemented
+## here). Never needs root: everything lives under the current user's XDG
+## dirs (~/.local/bin, ~/.local/share), matching the freedesktop.org
+## Base Directory spec so it composes cleanly with any distro's existing
+## PATH/app-launcher setup instead of writing into /usr or /opt.
+
+## Dispatch 'make install-app'/'make uninstall-app' by host platform.
+install-app:
+	@case "$$(uname -s)" in \
+		Linux*) $(MAKE) install-app-linux ;; \
+		*) echo "error: 'make install-app' currently only supports Linux (got $$(uname -s))."; \
+		   exit 1 ;; \
+	esac
+
+uninstall-app:
+	@case "$$(uname -s)" in \
+		Linux*) $(MAKE) uninstall-app-linux ;; \
+		*) echo "error: 'make uninstall-app' currently only supports Linux (got $$(uname -s))."; \
+		   exit 1 ;; \
+	esac
+
+## Install the built Linux AppImage as the 'pi-desktop' command.
+## Copies the AppImage into ~/.local/share/pi-desktop/ (so re-running
+## 'make dist-linux' + 'make install-app' cleanly overwrites the old one),
+## symlinks ~/.local/bin/pi-desktop to it, and writes a .desktop launcher
+## entry under ~/.local/share/applications/ so it also shows up in app
+## menus/launchers, not just the shell.
+install-app-linux:
+	@appimage=$$(ls -t release/*.AppImage 2>/dev/null | head -n1); \
+	if [ -z "$$appimage" ]; then \
+		echo "error: no .AppImage found under release/. Run 'make dist-linux' first."; \
+		exit 1; \
+	fi; \
+	share_dir="$$HOME/.local/share/pi-desktop"; \
+	bin_dir="$$HOME/.local/bin"; \
+	apps_dir="$$HOME/.local/share/applications"; \
+	mkdir -p "$$share_dir" "$$bin_dir" "$$apps_dir"; \
+	cp "$$appimage" "$$share_dir/pi-desktop.AppImage"; \
+	chmod +x "$$share_dir/pi-desktop.AppImage"; \
+	cp -f assets/icon.png "$$share_dir/icon.png" 2>/dev/null || true; \
+	ln -sf "$$share_dir/pi-desktop.AppImage" "$$bin_dir/pi-desktop"; \
+	printf '%s\n' \
+		"[Desktop Entry]" \
+		"Type=Application" \
+		"Name=Pi Desktop Demo" \
+		"Comment=Electron + React chat app powered by pi-ai" \
+		"Exec=$$share_dir/pi-desktop.AppImage --no-sandbox %U" \
+		"Icon=$$share_dir/icon.png" \
+		"Categories=Development;" \
+		"Terminal=false" \
+		> "$$apps_dir/dev.pi.desktop.demo.desktop"; \
+	echo "Installed: $$bin_dir/pi-desktop -> $$share_dir/pi-desktop.AppImage"; \
+	echo "Installed launcher entry: $$apps_dir/dev.pi.desktop.demo.desktop"; \
+	case ":$$PATH:" in \
+		*":$$bin_dir:"*) ;; \
+		*) echo "warning: $$bin_dir is not on your PATH -- add e.g. 'export PATH=\"$$bin_dir:\$$PATH\"' to your shell rc file to run 'pi-desktop' directly." ;; \
+	esac
+
+## Remove everything 'make install-app' installed.
+uninstall-app-linux:
+	@share_dir="$$HOME/.local/share/pi-desktop"; \
+	bin_dir="$$HOME/.local/bin"; \
+	apps_dir="$$HOME/.local/share/applications"; \
+	rm -f "$$bin_dir/pi-desktop"; \
+	rm -rf "$$share_dir"; \
+	rm -f "$$apps_dir/dev.pi.desktop.demo.desktop"; \
+	echo "Removed pi-desktop command, launcher entry, and $$share_dir."
 
 ## --- Versioning & release -------------------------------------------------
 ##
