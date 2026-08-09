@@ -23,3 +23,14 @@ jobs:
           name: mutation-report
           path: reports/mutation
           retention-days: 30
+      - name: File/update mutation gap issues
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create mutation-gap \
+            --description "Weak or regressed Stryker mutation coverage for a file" \
+            --color c2e0c6 || true
+          node scripts/mutation-issue-sync.mjs --report reports/mutation/mutation.json
