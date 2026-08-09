@@ -1,11 +1,13 @@
 import { ChevronDown } from "lucide-react";
 import { useChatStore } from "../state/chat-store";
+import { CREDENTIAL_GATED_HINT, missingCredentialGatedProviders } from "../lib/credential-gated-providers";
 
 export function ModelPicker() {
   const models = useChatStore((state) => state.models);
   const selectedModel = useChatStore((state) => state.selectedModel);
   const selectModel = useChatStore((state) => state.selectModel);
   const hasModels = models.length > 0;
+  const gatedProviderIds = missingCredentialGatedProviders(models.map((model) => model.id));
 
   return (
     <div className="relative opacity-50 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100">
@@ -24,6 +26,15 @@ export function ModelPicker() {
         ) : (
           <option value="">No models available</option>
         )}
+        {gatedProviderIds.length > 0 ? (
+          <optgroup label="Not configured">
+            {gatedProviderIds.map((providerId) => (
+              <option key={providerId} value="" disabled>
+                {`${providerId} (${CREDENTIAL_GATED_HINT})`}
+              </option>
+            ))}
+          </optgroup>
+        ) : null}
       </select>
       <ChevronDown
         size={13}
