@@ -22,7 +22,7 @@ export default {
     "!src/main/windows.ts",
   ],
   coverageAnalysis: "perTest",
-  reporters: ["clear-text", "progress", "html"],
+  reporters: ["clear-text", "progress", "html", "json"],
   thresholds: {
     high: 80,
     low: 60,

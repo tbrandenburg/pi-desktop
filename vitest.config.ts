@@ -19,7 +19,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "scripts/**/*.test.mjs"],
     // Component tests under src/renderer/components need a real DOM.
     // Vitest 4 removed `environmentMatchGlobs`; per-file DOM environment is
     // now selected via a `// @vitest-environment jsdom` pragma comment at
