@@ -216,12 +216,36 @@ interface ProviderSource {
  * treated as "this source contributes nothing", same as every other
  * source here silently contributing nothing when its own optional config
  * is absent/invalid.
+ *
+ * Some extensions (e.g. `pi-free`'s dynamic-fetch providers like `kilo`,
+ * `zenmux`, `crofai`) register synchronously with an EMPTY model list by
+ * design, expecting a later `ModelRuntime.refresh({ allowNetwork: true })`
+ * call (via each provider's own `refreshModels` callback) to populate them
+ * -- mirroring `pi-coding-agent`'s own `pi update --models` CLI flow. Since
+ * `ModelRuntime.create()` above is deliberately created with
+ * `allowModelNetwork: false` (this source must never make a network call
+ * before the caller opts in), those providers stayed empty forever without
+ * an explicit follow-up refresh (issue #165). Do this refresh with a short
+ * (~4s) bounded timeout since it runs on every model-list request, not a
+ * one-off user command -- a provider whose refresh doesn't finish in time
+ * simply keeps 0 models that round (no worse than before this fix); a
+ * timeout must never throw/reject and must never discard providers that
+ * already resolved.
  */
 const extensionProviderSource: ProviderSource = {
   async load(ctx) {
     try {
       const { createAgentSession, ModelRuntime, SessionManager } = await loadCodingAgent(ctx.codingAgentLoaders);
-      const extensionRuntime = await ModelRuntime.create({ allowModelNetwork: false });
+      const extensionRuntime = await ModelRuntime.create({
+        allowModelNetwork: false,
+        // Mirror the `agentDir: ctx.globalDir` pin on the `createAgentSession`
+        // call below (see its comment) onto this `ModelRuntime.create()` call
+        // too -- otherwise this runtime's own auth/models file resolution
+        // falls back to `getAgentDir()`'s implicit default instead of the
+        // `homeDir` `buildModelsRegistry` was actually given (issue #165).
+        authPath: path.join(ctx.globalDir, "auth.json"),
+        modelsPath: path.join(ctx.globalDir, "models.json"),
+      });
       await createAgentSession({
         cwd: ctx.cwd,
         // Explicitly pin the global agent dir to the same `globalDir` every
@@ -240,6 +264,23 @@ const extensionProviderSource: ProviderSource = {
         noTools: "all",
         resourceLoader: ctx.extensionResourceLoader,
       });
+
+      const abortController = new AbortController();
+      const timeout = setTimeout(() => abortController.abort(), 4_000);
+      try {
+        await extensionRuntime.refresh({
+          allowNetwork: true,
+          force: true,
+          signal: abortController.signal,
+        });
+      } catch {
+        // A slow/failing dynamic-fetch provider must not prevent already-
+        // registered providers (including ones whose refresh already
+        // succeeded) from being returned below.
+      } finally {
+        clearTimeout(timeout);
+      }
+
       return extensionRuntime
         .getRegisteredProviderIds()
         .map((providerId) => extensionRuntime.getProvider(providerId))

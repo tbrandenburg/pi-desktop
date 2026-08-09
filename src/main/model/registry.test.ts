@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildModelsRegistry,
@@ -485,5 +487,71 @@ describe("buildModelsRegistry with extension-registered providers (issue #147)",
     const provider = registry.models.getProvider("pi-free-ondisk-provider");
     expect(provider).toBeDefined();
     expect(provider!.getModels().some((m) => m.id === "ondisk-model")).toBe(true);
+  });
+
+  it("populates a provider's dynamic-fetch model list via refreshModels(...) -- regression test for issue #165 (pi-free's kilo/zenmux/crofai-style providers registering with 0 models)", async () => {
+    // Deliberately NOT another eager/synchronous `registerProvider({ models:
+    // [...] })` fixture (see `buildProviderTestResourceLoader`'s fixture) --
+    // that pattern was exactly the gap that let #165 ship undetected: it
+    // never exercises `ModelRuntime.refresh({ allowNetwork: true })`, which
+    // is the real mechanism `pi-free`'s dynamic-fetch providers rely on.
+    // This fixture registers synchronously with an EMPTY model list, then
+    // only returns real models from its `refreshModels` callback -- proving
+    // `extensionProviderSource` must call `.refresh(...)` itself to surface
+    // them.
+    let refreshCallCount = 0;
+    const dynamicFetchExtension = (pi: ExtensionAPI): void => {
+      pi.registerProvider("pi-free-dynamic-fixture", {
+        baseUrl: "https://dynamic-fixture.example/v1",
+        api: "openai-completions",
+        // A static placeholder key -- real free-tier pi-free providers (e.g.
+        // kilo/zenmux) similarly configure a resolvable API key even for a
+        // "free" endpoint, since `pi-ai`'s `Models.refresh(...)` only calls a
+        // provider's `refreshModels` once a credential actually resolves
+        // (`resolveRefreshCredential` in `@earendil-works/pi-ai`'s
+        // `models.js`); a provider with no resolvable auth is silently
+        // skipped by `refresh(...)` entirely, regardless of network access.
+        apiKey: "fixture-static-key",
+        models: [],
+        async refreshModels() {
+          refreshCallCount += 1;
+          return [
+            {
+              id: "dynamic-model",
+              name: "Dynamic Model",
+              reasoning: false,
+              input: ["text"],
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 32_000,
+              maxTokens: 4_096,
+            },
+          ];
+        },
+      });
+    };
+    const extensionResourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir: cwd,
+      settingsManager: SettingsManager.inMemory(),
+      extensionFactories: [dynamicFetchExtension],
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await extensionResourceLoader.reload();
+
+    const registry = await buildModelsRegistry(home, cwd, undefined, {
+      ...realModelsLoaders,
+      codingAgentLoaders: realCodingAgentLoaders,
+      extensionResourceLoader,
+    });
+
+    // Before the fix, `refreshModels` is never invoked and the provider
+    // keeps its synchronously-registered empty model list.
+    expect(refreshCallCount).toBeGreaterThan(0);
+    const provider = registry.models.getProvider("pi-free-dynamic-fixture");
+    expect(provider).toBeDefined();
+    expect(provider!.getModels().some((m) => m.id === "dynamic-model")).toBe(true);
   });
 });
