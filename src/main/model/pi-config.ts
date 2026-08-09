@@ -19,15 +19,30 @@ import type { MutableModels } from "@earendil-works/pi-ai";
  * `cache` -- there can be 1000+ models across only ~37 providers, so
  * `models.getAuth()` must be called at most once per provider, never once
  * per model.
+ *
+ * `models.getAuth()` can *reject* (not just resolve to `undefined`) for a
+ * provider whose stored credential is present but no longer usable -- e.g.
+ * an OAuth token whose refresh call itself fails (a real production case:
+ * a suspended GitHub account returns `403` from GitHub's own token-refresh
+ * endpoint, which `pi-ai` surfaces as a rejected `ModelsError`). Since this
+ * function is called once per distinct provider inside `Promise.all` in
+ * `toModelInfos`, an uncaught rejection here would fail the *entire* model
+ * list -- including every other, unrelated, perfectly healthy provider
+ * (verified against a real `github-copilot` suspension in production). A
+ * broken credential is exactly Tier 1's "not usable" case, so any
+ * rejection here is treated the same as "no credential": `configured: false`.
  */
-async function isProviderConfigured(
+export async function isProviderConfigured(
   models: MutableModels,
   providerId: string,
   cache: Map<string, Promise<boolean>>,
 ): Promise<boolean> {
   let pending = cache.get(providerId);
   if (!pending) {
-    pending = models.getAuth(providerId).then((auth) => Boolean(auth?.auth.apiKey));
+    pending = models
+      .getAuth(providerId)
+      .then((auth) => Boolean(auth?.auth.apiKey))
+      .catch(() => false);
     cache.set(providerId, pending);
   }
   return pending;
