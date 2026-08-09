@@ -5,7 +5,7 @@ import type { CommandInfo, ExtensionUIResponse, ModelInfo, PackageInfo, Workspac
 import { ChatService } from "./chat/service";
 import { listConfiguredModels, resolvePiDefault } from "./model/pi-config";
 import { getCachedModels, invalidateModelsCache, setCachedModels } from "./model/registry-cache";
-import { applyStatus } from "./model/model-status";
+import { applyStatus, onStatusChange } from "./model/model-status";
 import { SettingsStore } from "./settings/store";
 import { SessionService } from "./session/service";
 import { AgentRuntime } from "./agent/runtime";
@@ -40,6 +40,21 @@ export function registerIpcHandlers(
   });
 
   const sessionService = new SessionService(getWorkspaceDir, deps.agentCoreLoaders, deps.codingAgentLoaders);
+
+  // Issue #179 part C: last-known-full `model:list` result (post-`applyStatus`
+  // reordering/defaulting, pre-this-module's-own-`applyStatus` re-apply),
+  // keyed by `id`. `onStatusChange` below only tells us a bare
+  // `{ providerId? , modelId? }` changed, not a full `ModelInfo` -- this map
+  // is what turns that into a valid, complete `model:list-updated` payload
+  // for the renderer's existing `mergeModelsById` merge logic (see
+  // `model-status.ts`'s `onStatusChange` doc comment, and `chat-store.ts`).
+  let lastFullModels: ModelInfo[] = [];
+  onStatusChange(() => {
+    if (lastFullModels.length === 0) return;
+    const win = getWindow();
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send("model:list-updated", applyStatus(lastFullModels));
+  });
 
   // Shared across chat's extension `ctx.ui.*` dialogs (#91) AND the
   // package-install consent prompt (#109) -- one real modal mechanism,
@@ -123,24 +138,28 @@ export function registerIpcHandlers(
     // entries use the fully-qualified id (`piDefault.label`), so match on
     // that instead.
     //
-    // NOTE for issue #175 Tier 2/Tier 3 follow-up work: this is the natural
-    // place to also subscribe to `model-status.ts`'s `onStatusChange` and
-    // push incremental `model:list-updated` deltas whenever a background
-    // reachability probe or a real chat use changes a model's status --
-    // that push pipeline needs its own last-known-full-`ModelInfo` index
-    // (keyed by id) to turn a bare `{ providerId? , modelId? }` change into
-    // a valid partial payload; not built here (see `onStatusChange`'s own
-    // doc comment). For now, `applyStatus` below only bakes in whatever
-    // status is already known at the moment of *this* `model:list` call.
+    // Issue #179 part C: `lastFullModels` is updated below so the
+    // `onStatusChange` subscription (registered once, above) can push a
+    // live `model:list-updated` delta the moment a background reachability
+    // probe or a real chat use changes a model's status, instead of
+    // requiring the next `model:list` call (e.g. app restart) to reflect it.
     if (piDefault && piDefault.model === settings.model) {
       const providerId = piDefault.label.slice(0, piDefault.label.indexOf("/"));
       const defaultEntry =
         models.find((m) => m.id === piDefault.label) ??
-        ({ id: piDefault.label, label: piDefault.label, providerId, configured: true } satisfies ModelInfo);
-      return applyStatus([defaultEntry, ...models.filter((m) => m.id !== piDefault.label)]);
+        ({
+          id: piDefault.label,
+          label: piDefault.label,
+          providerId,
+          configured: true,
+          credentialState: "configured",
+        } satisfies ModelInfo);
+      lastFullModels = [defaultEntry, ...models.filter((m) => m.id !== piDefault.label)];
+      return applyStatus(lastFullModels);
     }
 
-    return applyStatus(models);
+    lastFullModels = models;
+    return applyStatus(lastFullModels);
   });
 
   ipcMain.handle("chat:start", async (_event, rawRequest: unknown) => {

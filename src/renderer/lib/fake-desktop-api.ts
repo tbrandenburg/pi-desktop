@@ -34,24 +34,35 @@ export function createFakeDesktopApi(): DesktopAgentApi {
   return {
     async listModels() {
       if (fakeModelsOverride() === "empty") return [];
-      // Exercises every three-tier status state (issue #175) in the
-      // browser dev harness: verified-ok/error take precedence over Tier 2
-      // reachability, which takes precedence over Tier 1 configured/
-      // unconfigured, which takes precedence over "not yet checked".
+      // Exercises every three-tier status state (issue #175), plus every
+      // Tier 1 credential-state variant (issue #179), in the browser dev
+      // harness: verified-ok/error take precedence over Tier 2
+      // reachability, which takes precedence over Tier 1 credential state,
+      // which takes precedence over "not yet checked".
       return [
-        { id: "fake-mini", label: "Fake Mini (browser test)", providerId: "fake", configured: true },
+        {
+          id: "fake-mini",
+          label: "Fake Mini (browser test)",
+          providerId: "fake",
+          configured: true,
+          credentialState: "configured",
+          contextWindow: 128000,
+        },
         {
           id: "fake-pro",
           label: "Fake Pro (browser test)",
           providerId: "fake",
           configured: true,
+          credentialState: "configured",
           verified: { lastVerifiedAt: Date.now(), lastResult: "ok" },
+          contextWindow: 1000000,
         },
         {
           id: "fake-flaky",
           label: "Fake Flaky (verified error)",
           providerId: "fake-flaky",
           configured: true,
+          credentialState: "configured",
           reachability: "reachable",
           verified: { lastVerifiedAt: Date.now(), lastResult: "error" },
         },
@@ -60,6 +71,7 @@ export function createFakeDesktopApi(): DesktopAgentApi {
           label: "Fake Reachable (browser test)",
           providerId: "fake-reachable",
           configured: true,
+          credentialState: "configured",
           reachability: "reachable",
         },
         {
@@ -67,6 +79,7 @@ export function createFakeDesktopApi(): DesktopAgentApi {
           label: "Fake Needs Re-auth (browser test)",
           providerId: "fake-auth-failed",
           configured: true,
+          credentialState: "configured",
           reachability: "auth-failed",
         },
         {
@@ -74,6 +87,7 @@ export function createFakeDesktopApi(): DesktopAgentApi {
           label: "Fake Unreachable (browser test)",
           providerId: "fake-unreachable",
           configured: true,
+          credentialState: "configured",
           reachability: "unreachable",
         },
         {
@@ -81,6 +95,28 @@ export function createFakeDesktopApi(): DesktopAgentApi {
           label: "Fake Unconfigured (browser test)",
           providerId: "fake-unconfigured",
           configured: false,
+          credentialState: "missing",
+        },
+        {
+          id: "fake-free",
+          label: "Fake Free (no key required)",
+          providerId: "fake-free",
+          configured: true,
+          credentialState: "free",
+        },
+        {
+          id: "fake-oauth",
+          label: "Fake OAuth (browser test)",
+          providerId: "fake-oauth",
+          configured: true,
+          credentialState: "oauth",
+        },
+        {
+          id: "fake-auth-error",
+          label: "Fake Auth Error (browser test)",
+          providerId: "fake-auth-error",
+          configured: false,
+          credentialState: "auth-error",
         },
       ];
     },
@@ -95,7 +131,9 @@ export function createFakeDesktopApi(): DesktopAgentApi {
       modelListListener = callback;
       if (fakeModelsOverride() !== "empty") {
         setTimeout(() => {
-          modelListListener?.([{ id: "fake-mini", label: "Fake Mini (browser test)", providerId: "fake", configured: true }]);
+          modelListListener?.([
+            { id: "fake-mini", label: "Fake Mini (browser test)", providerId: "fake", configured: true, credentialState: "configured" },
+          ]);
         }, 5);
       }
       return () => {

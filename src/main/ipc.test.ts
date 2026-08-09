@@ -236,6 +236,45 @@ describe("IPC settings round-trip integration", () => {
     vi.mocked(listConfiguredModels).mockResolvedValue([]);
   });
 
+  it("pushes a live model:list-updated delta the moment a background reachability probe completes (issue #179 part C)", async () => {
+    const { listConfiguredModels } = await import("./model/pi-config");
+    const { setProviderReachability } = await import("./model/model-status");
+    vi.mocked(listConfiguredModels).mockResolvedValue([
+      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7", providerId: "llm7", configured: true },
+    ]);
+
+    const sent: unknown[] = [];
+    const fakeWindow = {
+      isDestroyed: () => false,
+      webContents: { send: (_channel: string, payload: unknown) => sent.push(payload) },
+    } as unknown as BrowserWindow;
+    registerIpcHandlers(() => fakeWindow, {
+      agentCoreLoaders: realAgentCoreLoaders,
+      codingAgentLoaders: realCodingAgentLoaders,
+    });
+
+    // Populate this second registration's own `lastFullModels` cache by
+    // calling model:list once, exactly like the renderer does on load --
+    // a probe completion before any model:list call has nothing to push.
+    await invoke("model:list");
+    expect(sent).toHaveLength(0);
+
+    setProviderReachability("llm7", "reachable");
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual([
+      {
+        id: "llm7/minimax-m2.7",
+        label: "llm7/minimax-m2.7",
+        providerId: "llm7",
+        configured: true,
+        reachability: "reachable",
+      },
+    ]);
+
+    vi.mocked(listConfiguredModels).mockResolvedValue([]);
+  });
+
   it("lists, gets, and deletes real cwd-scoped sessions through the IPC boundary", async () => {
     // Ensure currentWorkspaceDir resolved before writing directly via JsonlSessionRepo.
     expect(await invoke("workspace:get")).toEqual({ dir: workspaceDir });
