@@ -34,9 +34,54 @@ export function createFakeDesktopApi(): DesktopAgentApi {
   return {
     async listModels() {
       if (fakeModelsOverride() === "empty") return [];
+      // Exercises every three-tier status state (issue #175) in the
+      // browser dev harness: verified-ok/error take precedence over Tier 2
+      // reachability, which takes precedence over Tier 1 configured/
+      // unconfigured, which takes precedence over "not yet checked".
       return [
         { id: "fake-mini", label: "Fake Mini (browser test)", providerId: "fake", configured: true },
-        { id: "fake-pro", label: "Fake Pro (browser test)", providerId: "fake", configured: true },
+        {
+          id: "fake-pro",
+          label: "Fake Pro (browser test)",
+          providerId: "fake",
+          configured: true,
+          verified: { lastVerifiedAt: Date.now(), lastResult: "ok" },
+        },
+        {
+          id: "fake-flaky",
+          label: "Fake Flaky (verified error)",
+          providerId: "fake-flaky",
+          configured: true,
+          reachability: "reachable",
+          verified: { lastVerifiedAt: Date.now(), lastResult: "error" },
+        },
+        {
+          id: "fake-reachable",
+          label: "Fake Reachable (browser test)",
+          providerId: "fake-reachable",
+          configured: true,
+          reachability: "reachable",
+        },
+        {
+          id: "fake-auth-failed",
+          label: "Fake Needs Re-auth (browser test)",
+          providerId: "fake-auth-failed",
+          configured: true,
+          reachability: "auth-failed",
+        },
+        {
+          id: "fake-unreachable",
+          label: "Fake Unreachable (browser test)",
+          providerId: "fake-unreachable",
+          configured: true,
+          reachability: "unreachable",
+        },
+        {
+          id: "fake-unconfigured",
+          label: "Fake Unconfigured (browser test)",
+          providerId: "fake-unconfigured",
+          configured: false,
+        },
       ];
     },
 
