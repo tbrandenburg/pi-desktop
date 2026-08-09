@@ -39,6 +39,25 @@ function modelStatus(model: ModelInfo): { symbol: string; title: string } {
   return { symbol: "", title: "Not yet checked" };
 }
 
+/**
+ * Formats a model's context window size for compact inline display in a
+ * native `<option>` label (issue #178) -- e.g. `128000` -> `"128K"`,
+ * `1000000` -> `"1M"`. Native `<option>`s can't render rich markup, so this
+ * stays plain text, following the same inline-text precedent as the status
+ * symbol above.
+ */
+export function formatContextWindow(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    const millions = tokens / 1_000_000;
+    return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
+  }
+  if (tokens >= 1_000) {
+    const thousands = tokens / 1_000;
+    return `${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}K`;
+  }
+  return `${tokens}`;
+}
+
 export function ModelPicker() {
   const models = useChatStore((state) => state.models);
   const selectedModel = useChatStore((state) => state.selectedModel);
@@ -57,9 +76,12 @@ export function ModelPicker() {
         {hasModels ? (
           models.map((model) => {
             const status = modelStatus(model);
+            const contextSuffix =
+              model.contextWindow !== undefined ? ` \u2014 ${formatContextWindow(model.contextWindow)} ctx` : "";
+            const label = `${model.label}${contextSuffix}`;
             return (
               <option key={model.id} value={model.id} title={status.title}>
-                {status.symbol ? `${status.symbol} ${model.label}` : model.label}
+                {status.symbol ? `${status.symbol} ${label}` : label}
               </option>
             );
           })

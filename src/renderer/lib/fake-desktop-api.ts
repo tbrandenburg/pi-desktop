@@ -39,13 +39,20 @@ export function createFakeDesktopApi(): DesktopAgentApi {
       // reachability, which takes precedence over Tier 1 configured/
       // unconfigured, which takes precedence over "not yet checked".
       return [
-        { id: "fake-mini", label: "Fake Mini (browser test)", providerId: "fake", configured: true },
+        {
+          id: "fake-mini",
+          label: "Fake Mini (browser test)",
+          providerId: "fake",
+          configured: true,
+          contextWindow: 128000,
+        },
         {
           id: "fake-pro",
           label: "Fake Pro (browser test)",
           providerId: "fake",
           configured: true,
           verified: { lastVerifiedAt: Date.now(), lastResult: "ok" },
+          contextWindow: 1000000,
         },
         {
           id: "fake-flaky",

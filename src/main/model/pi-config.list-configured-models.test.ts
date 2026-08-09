@@ -39,6 +39,8 @@ describe("listConfiguredModels", () => {
         label: "app-settings/gpt-4o-mini",
         providerId: "app-settings",
         configured: true,
+        contextWindow: 128000,
+        maxOutputTokens: 16384,
       },
     ]);
   });
@@ -70,13 +72,29 @@ describe("listConfiguredModels", () => {
 
     expect(models).toEqual(
       expect.arrayContaining([
-        { id: "llm7/gpt-oss-20b", label: "llm7/gpt-oss-20b", providerId: "llm7", configured: true },
-        { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7", providerId: "llm7", configured: true },
+        {
+          id: "llm7/gpt-oss-20b",
+          label: "llm7/gpt-oss-20b",
+          providerId: "llm7",
+          configured: true,
+          contextWindow: 128000,
+          maxOutputTokens: 16384,
+        },
+        {
+          id: "llm7/minimax-m2.7",
+          label: "llm7/minimax-m2.7",
+          providerId: "llm7",
+          configured: true,
+          contextWindow: 128000,
+          maxOutputTokens: 16384,
+        },
         {
           id: "anthropic-custom/claude-opus",
           label: "anthropic-custom/claude-opus",
           providerId: "anthropic-custom",
           configured: true,
+          contextWindow: 128000,
+          maxOutputTokens: 16384,
         },
       ]),
     );

@@ -24,6 +24,10 @@ export interface ModelInfo {
   reachability?: ProviderReachability;
   /** Tier 3: outcome of the most recent real use of this exact model, `undefined` = never used. */
   verified?: ModelVerification;
+  /** Model's context window size in tokens, `undefined` = unknown (issue #178). */
+  contextWindow?: number;
+  /** Model's maximum output tokens, `undefined` = unknown (issue #178). */
+  maxOutputTokens?: number;
 }
 
 export interface StartChatRequest {

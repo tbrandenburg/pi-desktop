@@ -65,6 +65,8 @@ async function toModelInfos(
       label: `${model.provider}/${model.id}`,
       providerId: model.provider,
       configured: await isProviderConfigured(models, model.provider, configuredCache),
+      contextWindow: model.contextWindow,
+      maxOutputTokens: model.maxTokens,
     })),
   );
 }
