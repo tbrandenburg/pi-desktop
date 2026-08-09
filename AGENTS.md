@@ -1135,3 +1135,17 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   changes — use `git diff <other-branch> --stat`/`git diff <other-branch> --
   <path>` (read-only) instead; `checkout -- .` always mutates the working
   tree for every path that differs, with no confirmation prompt.
+- 2026-08-09: Passing a `gh issue comment --body "..."` string containing
+  literal backtick-quoted package names (e.g. `` `pi-free` ``) through the
+  bash tool inside double quotes triggered real command substitution — bash
+  tried to execute `pi-free` as a command (`pi-free: command not found`),
+  silently dropping that token from the posted comment body. Caught only by
+  re-fetching the actual posted comment via `gh issue view --comments --json
+  comments` and diffing against the intended text, not by the command's own
+  exit output. Fixed via `gh api .../issues/comments/<id> -X PATCH` (not
+  `gh issue comment` again, which would have posted a duplicate) using
+  single-quoted body segments with `'"'"'` escaping instead of double quotes.
+  Rule: any body text passed to `gh issue comment`/`gh pr comment` that
+  contains backticks must be single-quoted (or written to a temp file and
+  passed via `--body-file`), never double-quoted — and always re-fetch the
+  posted comment to confirm it matches what was intended before moving on.
