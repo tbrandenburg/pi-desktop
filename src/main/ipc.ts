@@ -1,8 +1,10 @@
+import os from "node:os";
 import { app, type BrowserWindow, dialog, ipcMain } from "electron";
 import { startChatRequestSchema, providerSettingsSchema, workspaceDirSchema } from "../shared/schemas";
 import type { CommandInfo, ExtensionUIResponse, ModelInfo, PackageInfo, WorkspaceInfo } from "../shared/events";
 import { ChatService } from "./chat/service";
 import { listConfiguredModels, resolvePiDefault } from "./model/pi-config";
+import { getCachedModels, invalidateModelsCache, setCachedModels } from "./model/registry-cache";
 import { SettingsStore } from "./settings/store";
 import { SessionService } from "./session/service";
 import { AgentRuntime } from "./agent/runtime";
@@ -14,6 +16,15 @@ import type { CodingAgentLoaders } from "./agent/coding-agent-loaders";
 export interface RegisterIpcHandlersDeps {
   agentCoreLoaders?: AgentCoreLoaders;
   codingAgentLoaders?: CodingAgentLoaders;
+  /**
+   * Workspace directory resolved from a CLI launch argument (e.g.
+   * `pi-desktop .`, see #164), already persisted via
+   * `settingsStore.setWorkspaceDir()` by the caller. Seeds
+   * `currentWorkspaceDir` synchronously so the renderer's initial
+   * `workspace:get` call reflects it immediately, without waiting on the
+   * async `settingsStore.getWorkspaceDir()` load below.
+   */
+  initialWorkspaceDir?: string;
 }
 
 export function registerIpcHandlers(
@@ -21,7 +32,7 @@ export function registerIpcHandlers(
   deps: RegisterIpcHandlersDeps = {},
 ): void {
   const settingsStore = new SettingsStore();
-  let currentWorkspaceDir = "";
+  let currentWorkspaceDir = deps.initialWorkspaceDir ?? "";
   const getWorkspaceDir = () => currentWorkspaceDir;
   void settingsStore.getWorkspaceDir().then((dir) => {
     currentWorkspaceDir = dir;
@@ -78,11 +89,18 @@ export function registerIpcHandlers(
     // and registering that as a separate "app-settings" provider would just
     // duplicate the underlying .pi/agent provider under a misleading label.
     const hasSavedApiKey = await settingsStore.hasSavedApiKey();
-    const models = await listConfiguredModels(
-      undefined,
-      undefined,
-      hasSavedApiKey ? settings : undefined,
-    );
+    const appSettingsInput = hasSavedApiKey ? settings : undefined;
+    const homeDir = os.homedir();
+    const cwd = process.cwd();
+    // Issue #166 part A: `listConfiguredModels` rebuilds the whole registry
+    // (including the ~2.3-2.6s extension-activation pass) on every call --
+    // cache it, keyed by the inputs that actually affect the result, and
+    // only rebuild when nothing cached matches (see registry-cache.ts).
+    let models = getCachedModels(homeDir, cwd, appSettingsInput);
+    if (!models) {
+      models = await listConfiguredModels(homeDir, cwd, appSettingsInput);
+      setCachedModels(homeDir, cwd, appSettingsInput, models);
+    }
     const piDefault = await resolvePiDefault();
 
     // `piDefault.model` and `settings.model` are both *bare* model ids (see
@@ -123,6 +141,7 @@ export function registerIpcHandlers(
   ipcMain.handle("settings:save", async (_event, rawSettings: unknown) => {
     const settings = providerSettingsSchema.parse(rawSettings);
     await settingsStore.save(settings);
+    invalidateModelsCache();
   });
 
   ipcMain.handle("settings:get", async () => {
@@ -165,15 +184,19 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle("packages:install", async (_event, source: string): Promise<PackageInfo> => {
-    return packageService.install(source);
+    const result = await packageService.install(source);
+    invalidateModelsCache();
+    return result;
   });
 
   ipcMain.handle("packages:remove", async (_event, source: string): Promise<void> => {
     await packageService.remove(source);
+    invalidateModelsCache();
   });
 
   ipcMain.handle("packages:update", async (_event, source: string): Promise<void> => {
     await packageService.update(source);
+    invalidateModelsCache();
   });
 
   ipcMain.handle("extension-ui:get-tools-expanded", (): boolean => {

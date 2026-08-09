@@ -1096,5 +1096,42 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   feature branch from the worktree branch *before* any merge/validation
   step — never run `git checkout main` immediately after a subagent
   finishes, regardless of how small or single-threaded the change was;
-  the muscle-memory risk of merging onto `main` locally is exactly the same
-  whether the graph had 1 package or 5.
+   the muscle-memory risk of merging onto `main` locally is exactly the same
+   whether the graph had 1 package or 5.
+- 2026-08-09: For #164/#165/#166 (2 independent issues in parallel + 1
+  sequential, phased by real file overlap in `registry.ts`), adding a new
+  module-level cache (#166's `registry-cache.ts`) to an IPC handler
+  immediately exposed a real, pre-existing test-isolation bug in
+  `ipc.test.ts`: an earlier test's mocked `listConfiguredModels()` result for
+  the same `(homeDir, cwd, appSettings)` fingerprint silently leaked into a
+  later test via a cache hit, since the cache is a module-level singleton
+  with no per-test reset. Fixed with one `invalidateModelsCache()` call in
+  `beforeEach`, mirroring the existing `memoryStore.clear()` pattern already
+  in that file. Rule: whenever a fix introduces a new module-level
+  singleton/cache anywhere in `src/main`, always add its explicit reset call
+  to every test file's `beforeEach` that exercises the code path touching
+  it — a green test suite immediately after adding the cache is not
+  sufficient proof of test isolation; specifically re-run the affected test
+  file's full suite (not just the new/changed test) to catch cross-test
+  leakage the same session the cache is introduced, not later. Separately,
+  real packaged-AppImage CDP validation (not just unit tests) was essential
+  here: it caught that only 2 of 14 pi-free dynamic-fetch providers actually
+  populate after #165's bounded-refresh fix in a real network environment
+  (`fastrouter`, `cline`) even though the unit test (a synthetic
+  deferred-population fixture) passed cleanly — filed as a separate,
+  explicit follow-up (#168) rather than either overclaiming full coverage or
+  blocking the PR on root-causing all 12 remaining providers.
+- 2026-08-09: Mid-task, a stray `git checkout main -- .` (intended to check
+  what changed relative to `main` while already on the feature branch) instead
+  silently staged+applied `main`'s versions of every changed file over the
+  feature branch's working tree — nearly reverting #164/#165/#166's actual
+  code changes right before the final doc-only commit. Caught immediately by
+  `git status --short` showing unexpected `M` modifications matching exactly
+  the feature files, undone with a targeted `git restore --staged --worktree
+  <files>` (not a blind `git checkout HEAD -- .`, which would have also wiped
+  the in-progress uncommitted AGENTS.md edit). Rule: never use `git checkout
+  <other-branch> -- .` (bare, repo-wide pathspec) to "diff against" or
+  "compare with" another branch while on a feature branch with uncommitted
+  changes — use `git diff <other-branch> --stat`/`git diff <other-branch> --
+  <path>` (read-only) instead; `checkout -- .` always mutates the working
+  tree for every path that differs, with no confirmation prompt.

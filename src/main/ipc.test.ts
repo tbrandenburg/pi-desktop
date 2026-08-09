@@ -6,6 +6,7 @@ import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { realAgentCoreLoaders } from "./agent/test-support/real-agent-core-loaders";
 import { realCodingAgentLoaders } from "./agent/test-support/real-coding-agent-loaders";
+import { invalidateModelsCache } from "./model/registry-cache";
 
 // This suite must be hermetic regardless of the machine's real ~/.pi/agent
 // config, so .pi resolution is mocked here (tested separately in pi-config.test.ts).
@@ -81,6 +82,12 @@ describe("IPC settings round-trip integration", () => {
 
   beforeEach(() => {
     memoryStore.clear();
+    // Issue #166's `model:list` cache is a module-level singleton, so it
+    // must be cleared between tests in this file the same way `memoryStore`
+    // is -- otherwise an earlier test's `listConfiguredModels` mock result
+    // for the same (homeDir, cwd, appSettings) fingerprint leaks into a
+    // later test.
+    invalidateModelsCache();
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ipc-workspace-"));
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ipc-agent-"));
     // Isolates SessionService's `getAgentDir()`-based sessions directory
