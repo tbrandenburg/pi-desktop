@@ -8,6 +8,20 @@ import {
   type ModelsLoaders,
   type ModelsRegistry,
 } from "./registry";
+import type { MutableModels } from "@earendil-works/pi-ai";
+
+/**
+ * Maps a provider's `getAvailable()` result to the renderer-facing
+ * `ModelInfo[]` shape. Extracted so both `listConfiguredModels`'s final
+ * result and its optional progressive partial callback (issue #167 part C)
+ * share exactly one mapping implementation -- never duplicated.
+ */
+function toModelInfos(available: Awaited<ReturnType<MutableModels["getAvailable"]>>): ModelInfo[] {
+  return available.map((model) => ({
+    id: qualifyModelId(model.provider, asBareModelId(model.id)),
+    label: `${model.provider}/${model.id}`,
+  }));
+}
 
 export interface ResolvedPiDefault {
   apiKey: string;
@@ -94,12 +108,29 @@ export async function listConfiguredModels(
   cwd: string = process.cwd(),
   appSettings?: AppSettingsProviderInput,
   loaders?: ModelsLoaders,
+  /**
+   * Optional progressive callback (issue #167 part C): invoked with an
+   * early, partial `ModelInfo[]` snapshot every time one more provider
+   * source resolves, ahead of this function's own final, authoritative
+   * return value -- lets a caller (`ipc.ts`'s `model:list` handler) push
+   * incremental updates to the renderer during a slow, cold (uncached)
+   * call instead of blocking on the single slowest source. Never changes
+   * this function's final return value in any way.
+   */
+  onPartialModels?: (models: ModelInfo[]) => void,
 ): Promise<ModelInfo[]> {
-  const registry = await buildModelsRegistry(homeDir, cwd, appSettings, loaders);
+  const registry = await buildModelsRegistry(
+    homeDir,
+    cwd,
+    appSettings,
+    loaders,
+    onPartialModels
+      ? (models) => {
+          void models.getAvailable().then((available) => onPartialModels(toModelInfos(available)));
+        }
+      : undefined,
+  );
   const available = await registry.models.getAvailable();
 
-  return available.map((model) => ({
-    id: qualifyModelId(model.provider, asBareModelId(model.id)),
-    label: `${model.provider}/${model.id}`,
-  }));
+  return toModelInfos(available);
 }

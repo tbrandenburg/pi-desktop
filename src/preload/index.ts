@@ -22,6 +22,12 @@ const api: DesktopAgentApi = {
     return ipcRenderer.invoke("model:list");
   },
 
+  onModelListUpdated(listener: (models: ModelInfo[]) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, models: ModelInfo[]) => listener(models);
+    ipcRenderer.on("model:list-updated", handler);
+    return () => ipcRenderer.removeListener("model:list-updated", handler);
+  },
+
   startChat(request: StartChatRequest): Promise<{ requestId: string }> {
     return ipcRenderer.invoke("chat:start", request);
   },

@@ -168,6 +168,17 @@ export type ChatEvent =
 
 export interface DesktopAgentApi {
   listModels(): Promise<ModelInfo[]>;
+  /**
+   * Subscribes to progressive, partial model-list snapshots pushed from
+   * main during a slow, cold (uncached) `listModels()` call (issue #167
+   * part C) -- as each provider source resolves, main pushes an
+   * accumulated-so-far `ModelInfo[]` here, ahead of `listModels()`'s own
+   * final resolution, so the picker can populate incrementally instead of
+   * blocking on the single slowest source. `listModels()`'s own resolved
+   * value remains the final, authoritative source of truth; this is purely
+   * an additional, earlier preview.
+   */
+  onModelListUpdated(listener: (models: ModelInfo[]) => void): () => void;
   startChat(request: StartChatRequest): Promise<{ requestId: string }>;
   cancelChat(requestId: string): Promise<void>;
   saveProviderSettings(settings: ProviderSettings): Promise<void>;

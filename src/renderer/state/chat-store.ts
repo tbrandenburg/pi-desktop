@@ -183,6 +183,26 @@ interface ChatState {
 
 let unsubscribe: (() => void) | null = null;
 
+// Issue #167 part C: subscription to progressive, partial model-list
+// snapshots pushed from main during a slow, cold `listModels()` call.
+// Module-level (mirrors `unsubscribe` above) so re-calling `loadModels()`
+// (e.g. a remount) doesn't leak a duplicate listener.
+let modelListUnsubscribe: (() => void) | null = null;
+
+/**
+ * Merges an incoming (possibly partial) model snapshot into the existing
+ * `models` array, deduping by `id` -- last write for a given id wins.
+ * `incoming` is itself already the full accumulated snapshot as of when it
+ * was pushed (see `buildModelsRegistry`'s `onPartialResult`), so this is
+ * mostly a safety net against out-of-order delivery rather than a delta
+ * merge.
+ */
+function mergeModelsById(existing: ModelInfo[], incoming: ModelInfo[]): ModelInfo[] {
+  const byId = new Map(existing.map((model) => [model.id, model] as const));
+  for (const model of incoming) byId.set(model.id, model);
+  return [...byId.values()];
+}
+
 // Safety net for #119: if an assistant message never receives any event at
 // all (text-delta/completed/error) — e.g. a dead IPC channel or a main
 // process crash before responding — flip it to an error state after this
@@ -208,6 +228,16 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
   },
 
   loadModels: async () => {
+    // Issue #167 part C: subscribe to progressive partial updates before
+    // kicking off the (possibly slow, cold) `listModels()` call, so any
+    // partial pushes that arrive while it's in flight populate the picker
+    // early. `listModels()`'s own resolution below remains the final,
+    // authoritative write (last write wins), same as before this change.
+    modelListUnsubscribe?.();
+    modelListUnsubscribe = desktopApi().onModelListUpdated((partial) => {
+      const merged = mergeModelsById(get().models, partial);
+      set({ models: merged, selectedModel: get().selectedModel || merged[0]?.id || "" });
+    });
     const models = await desktopApi().listModels();
     set({ models, selectedModel: get().selectedModel || models[0]?.id || "" });
   },

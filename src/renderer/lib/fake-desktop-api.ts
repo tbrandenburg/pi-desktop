@@ -22,6 +22,7 @@ function fakeModelsOverride(): "empty" | null {
 export function createFakeDesktopApi(): DesktopAgentApi {
   const sessions = new Map<string, SessionRecord>();
   let listener: ((event: import("../../shared/events").ChatEvent) => void) | null = null;
+  let modelListListener: ((models: import("../../shared/events").ModelInfo[]) => void) | null = null;
   let workspaceDir = "/home/fake-user";
   // Small in-memory package list -- no real install logic here, just
   // enough shape (source) to keep the Settings UI's package list
@@ -37,6 +38,24 @@ export function createFakeDesktopApi(): DesktopAgentApi {
         { id: "fake-mini", label: "Fake Mini (browser test)" },
         { id: "fake-pro", label: "Fake Pro (browser test)" },
       ];
+    },
+
+    onModelListUpdated(callback) {
+      // The real bridge only pushes partial results while a real, slow
+      // extension-activation pass is in flight (issue #167 part C). This
+      // harness has no such slow path -- deliver a short-delayed partial
+      // (a subset) before `listModels()` above resolves, purely so the
+      // progressive-merge code path in `chat-store.ts` is exercised by the
+      // browser dev harness too, then never fire again.
+      modelListListener = callback;
+      if (fakeModelsOverride() !== "empty") {
+        setTimeout(() => {
+          modelListListener?.([{ id: "fake-mini", label: "Fake Mini (browser test)" }]);
+        }, 5);
+      }
+      return () => {
+        modelListListener = null;
+      };
     },
 
     async startChat(request) {

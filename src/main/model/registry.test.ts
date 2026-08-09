@@ -555,3 +555,65 @@ describe("buildModelsRegistry with extension-registered providers (issue #147)",
     expect(provider!.getModels().some((m) => m.id === "dynamic-model")).toBe(true);
   });
 });
+
+describe("buildModelsRegistry onPartialResult callback (issue #167 part C)", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-models-partial-home-"));
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-models-partial-cwd-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("invokes onPartialResult at least once per source, with the app-settings model visible on the shared registry by the last call", async () => {
+    const calls: string[][] = [];
+
+    const registry = await buildModelsRegistry(
+      home,
+      cwd,
+      { apiKey: "sk-partial-test", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+      realModelsLoaders,
+      (models) => {
+        calls.push(models.getProviders().map((p) => p.id));
+      },
+    );
+
+    // One call per source in `SOURCES` (5 sources) -- each of the 5
+    // `ProviderSource.load()` promises resolves exactly once.
+    expect(calls.length).toBe(5);
+    // By the final call, the app-settings provider (from `appSettingsSource`)
+    // must already be visible on the shared `models` object passed to the
+    // callback -- proving entries are applied progressively, not only after
+    // every source has settled.
+    expect(calls[calls.length - 1]).toContain(APP_SETTINGS_PROVIDER_ID);
+
+    // The callback must never change buildModelsRegistry's own final,
+    // authoritative result: the app-settings model must still be resolvable
+    // exactly as it would be with no callback passed at all.
+    const available = await registry.models.getAvailable();
+    expect(available).toEqual([
+      expect.objectContaining({ id: "gpt-4o-mini", provider: APP_SETTINGS_PROVIDER_ID }),
+    ]);
+  });
+
+  it("never invokes onPartialResult when omitted, and produces the identical final result either way", async () => {
+    const appSettings = { apiKey: "sk-partial-omit", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" };
+
+    const withoutCallback = await buildModelsRegistry(home, cwd, appSettings, realModelsLoaders);
+    const availableWithout = await withoutCallback.models.getAvailable();
+
+    let callCount = 0;
+    const withCallback = await buildModelsRegistry(home, cwd, appSettings, realModelsLoaders, () => {
+      callCount += 1;
+    });
+    const availableWith = await withCallback.models.getAvailable();
+
+    expect(callCount).toBeGreaterThan(0);
+    expect(availableWith).toEqual(availableWithout);
+  });
+});
