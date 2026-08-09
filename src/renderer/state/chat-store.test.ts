@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { ChatEvent } from "../../shared/events";
+import type { ChatEvent, ModelInfo } from "../../shared/events";
 
 const startChat = vi.fn();
 const onChatEvent = vi.fn((_handler: (event: ChatEvent) => void) => () => {});
 const listModels = vi.fn();
+const onModelListUpdated = vi.fn((_handler: (models: ModelInfo[]) => void) => () => {});
 const listSessions = vi.fn();
 const getSession = vi.fn();
 const deleteSession = vi.fn();
@@ -17,6 +18,7 @@ vi.mock("../lib/desktop-api", () => ({
     startChat,
     onChatEvent,
     listModels,
+    onModelListUpdated,
     listSessions,
     getSession,
     deleteSession,
@@ -36,6 +38,7 @@ describe("chat-store sendMessage guard (issue #3)", () => {
     startChat.mockReset();
     onChatEvent.mockReset().mockReturnValue(() => {});
     listModels.mockReset();
+    onModelListUpdated.mockReset().mockReturnValue(() => {});
     listSessions.mockReset();
     getSession.mockReset();
     deleteSession.mockReset();
@@ -43,6 +46,7 @@ describe("chat-store sendMessage guard (issue #3)", () => {
     getWorkspace.mockReset().mockResolvedValue({ dir: "/home/test" });
     chooseWorkspace.mockReset();
   });
+
 
   it("never enters the thinking state and reports a visible error when no model is selected", async () => {
     const { useChatStore } = await import("./chat-store");
@@ -92,6 +96,7 @@ describe("chat-store.loadModels", () => {
   beforeEach(() => {
     vi.resetModules();
     listModels.mockReset();
+    onModelListUpdated.mockReset().mockReturnValue(() => {});
   });
 
   it("selects the first returned model when no model was previously selected", async () => {
@@ -134,6 +139,66 @@ describe("chat-store.loadModels", () => {
     const state = useChatStore.getState();
     expect(state.models).toEqual([]);
     expect(state.selectedModel).toBe("");
+  });
+});
+
+describe("chat-store.loadModels progressive partial updates (issue #167 part C)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    listModels.mockReset();
+    onModelListUpdated.mockReset().mockReturnValue(() => {});
+  });
+
+  it("populates models from a partial push before listModels() resolves, and selects its first entry", async () => {
+    const { useChatStore } = await import("./chat-store");
+    useChatStore.setState({ selectedModel: "", models: [] });
+
+    let pushPartial: ((models: { id: string; label: string }[]) => void) | undefined;
+    onModelListUpdated.mockImplementation((handler: (models: { id: string; label: string }[]) => void) => {
+      pushPartial = handler;
+      return () => {};
+    });
+    // listModels() itself never resolves during this assertion window --
+    // proves the partial push alone (not the final listModels() result)
+    // populated `models`/`selectedModel`.
+    listModels.mockReturnValue(new Promise(() => {}));
+
+    void useChatStore.getState().loadModels();
+    pushPartial?.([{ id: "partial-a", label: "Partial A" }]);
+
+    const state = useChatStore.getState();
+    expect(state.models).toEqual([{ id: "partial-a", label: "Partial A" }]);
+    expect(state.selectedModel).toBe("partial-a");
+  });
+
+  it("dedupes a partial push against an already-populated model by id, and the final listModels() result overwrites the partial preview", async () => {
+    const { useChatStore } = await import("./chat-store");
+    useChatStore.setState({ selectedModel: "", models: [] });
+
+    let pushPartial: ((models: { id: string; label: string }[]) => void) | undefined;
+    onModelListUpdated.mockImplementation((handler: (models: { id: string; label: string }[]) => void) => {
+      pushPartial = handler;
+      return () => {};
+    });
+    listModels.mockResolvedValue([
+      { id: "partial-a", label: "Partial A (final)" },
+      { id: "final-b", label: "Final B" },
+    ]);
+
+    const done = useChatStore.getState().loadModels();
+    pushPartial?.([{ id: "partial-a", label: "Partial A (preview)" }]);
+    // Same id pushed twice must not produce a duplicate entry.
+    pushPartial?.([{ id: "partial-a", label: "Partial A (preview)" }]);
+    await done;
+
+    const state = useChatStore.getState();
+    // The final listModels() resolution is the last write and must win,
+    // both replacing the preview label and adding the newly-resolved model.
+    expect(state.models).toEqual([
+      { id: "partial-a", label: "Partial A (final)" },
+      { id: "final-b", label: "Final B" },
+    ]);
+    expect(state.selectedModel).toBe("partial-a");
   });
 });
 

@@ -349,6 +349,25 @@ export async function buildModelsRegistry(
   cwd: string = process.cwd(),
   appSettings?: AppSettingsProviderInput,
   loaders: ModelsLoaders = {},
+  /**
+   * Optional progressive side-channel (issue #167 part C): invoked with the
+   * shared `MutableModels` instance every time a single `ProviderSource`'s
+   * `.load(ctx)` promise resolves, *before* every source has settled --
+   * letting a caller (e.g. `listConfiguredModels`) push an early, partial
+   * model list to the renderer instead of waiting on the single slowest
+   * source (`extensionProviderSource`, ~2.3-6.9s). Purely additive: omitting
+   * this callback (every existing caller) leaves behavior byte-for-byte
+   * identical to before this parameter existed. The entries a source
+   * contributes are applied onto `models` as soon as that source resolves
+   * (regardless of resolution order), then the existing fixed-precedence
+   * loop below re-applies every source's entries again, in the same
+   * `SOURCES` array order as always -- `models.setProvider` upserts are
+   * idempotent, so this re-application is a no-op for already-applied
+   * entries and produces the exact same final, authoritative result as
+   * before this change; only the *timing* of when entries first become
+   * visible on `models` is new.
+   */
+  onPartialResult?: (models: MutableModels) => void,
 ): Promise<ModelsRegistry> {
   const loadPiAi = loaders.loadPiAi ?? defaultLoadPiAi;
   const loadApiModule = loaders.loadApiModule ?? defaultLoadApiModule;
@@ -381,7 +400,20 @@ export async function buildModelsRegistry(
   // preserve the exact last-one-wins precedence semantics documented above
   // -- only the `.load(ctx)` fetching itself is concurrent, never the
   // `setProvider` application.
-  const results = await Promise.all(SOURCES.map((source) => source.load(ctx)));
+  const results = await Promise.all(
+    SOURCES.map((source) =>
+      source.load(ctx).then((entries) => {
+        // Progressive side-channel (issue #167 part C) -- see
+        // `onPartialResult`'s doc comment above for why applying entries
+        // here, ahead of the fixed-order loop below, is safe.
+        for (const entry of entries) {
+          models.setProvider(entry.kind === "provider" ? entry.provider : createProvider(entry.options));
+        }
+        onPartialResult?.(models);
+        return entries;
+      }),
+    ),
+  );
   for (const entries of results) {
     for (const entry of entries) {
       models.setProvider(entry.kind === "provider" ? entry.provider : createProvider(entry.options));

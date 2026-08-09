@@ -98,7 +98,17 @@ export function registerIpcHandlers(
     // only rebuild when nothing cached matches (see registry-cache.ts).
     let models = getCachedModels(homeDir, cwd, appSettingsInput);
     if (!models) {
-      models = await listConfiguredModels(homeDir, cwd, appSettingsInput);
+      // Issue #167 part C: on a cold (uncached) call, push progressive,
+      // partial results to the renderer as each provider source resolves,
+      // instead of leaving it blocked until the whole registry (including
+      // the slow extensionProviderSource pass) finishes. Purely an
+      // additional side-channel -- the final `models` value returned below
+      // is unaffected.
+      models = await listConfiguredModels(homeDir, cwd, appSettingsInput, undefined, (partial) => {
+        const win = getWindow();
+        if (!win || win.isDestroyed()) return;
+        win.webContents.send("model:list-updated", partial);
+      });
       setCachedModels(homeDir, cwd, appSettingsInput, models);
     }
     const piDefault = await resolvePiDefault();
