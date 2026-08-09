@@ -117,6 +117,46 @@ export async function buildFakeFailingModelRuntime(agentDir: string, errorMessag
 }
 
 /**
+ * Registers a `streamSimple` override that synchronously throws instead of
+ * resolving/rejecting a stream -- mirrors a real OAuth/credential
+ * resolution failure thrown before any request is even attempted (the
+ * `catch` branch in `runtime.ts`'s `run()`, distinct from
+ * `buildFakeFailingModelRuntime`'s non-throwing `stopReason: "error"`
+ * case). Used to prove Tier 3 (issue #175) records `"error"` for this
+ * thrown-exception path too.
+ */
+export async function buildFakeThrowingModelRuntime(agentDir: string, errorMessage: string) {
+  const { ModelRuntime } = await realCodingAgentLoaders.loadCodingAgent!();
+  const modelRuntime = await ModelRuntime.create({
+    authPath: path.join(agentDir, "auth.json"),
+    modelsPath: null,
+    allowModelNetwork: false,
+  });
+  modelRuntime.registerProvider(FAKE_PROVIDER_ID, {
+    baseUrl: "https://fake.local",
+    api: "openai-completions",
+    apiKey: "fake-key",
+    streamSimple: () => {
+      throw new Error(errorMessage);
+    },
+    models: [
+      {
+        id: FAKE_MODEL_ID,
+        name: FAKE_MODEL_ID,
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128_000,
+        maxTokens: 4096,
+      },
+    ],
+  });
+  const model = modelRuntime.getModel(FAKE_PROVIDER_ID, FAKE_MODEL_ID);
+  if (!model) throw new Error("fake model failed to register");
+  return { modelRuntime, model: model as unknown as Model<Api> };
+}
+
+/**
  * Builds a real `ModelRuntime` (isolated to `agentDir` via an explicit
  * `authPath`, no network refresh) with a single fake, network-free
  * provider/model registered on it. Tests inject this `modelRuntime`

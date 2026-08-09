@@ -5,9 +5,16 @@ import path from "node:path";
 import { AgentRuntime } from "./runtime";
 import { IpcUIContextBridge } from "./ui-context";
 import { realCodingAgentLoaders } from "./test-support/real-coding-agent-loaders";
-import { buildFakeModelRuntime, buildFakeFailingModelRuntime, FAKE_PROVIDER_ID } from "./test-support/fake-model-runtime";
+import {
+  buildFakeModelRuntime,
+  buildFakeFailingModelRuntime,
+  buildFakeThrowingModelRuntime,
+  FAKE_PROVIDER_ID,
+} from "./test-support/fake-model-runtime";
 import { buildTestResourceLoader, type TestExtensionLog } from "./test-support/inline-test-extension";
 import { PackageService } from "../packages/service";
+import { clearAllStatus, getModelVerification } from "../model/model-status";
+import { qualifyModelId, asBareModelId } from "../model/registry";
 import type { ChatEvent, ExtensionUIRequest, StartChatRequest } from "../../shared/events";
 
 /**
@@ -50,6 +57,10 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
     // (it never passes an explicit `agentDir`/`sessionDir` override).
     originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = agentDir;
+    // Tier 3 (issue #175): the model-status store is a module-level
+    // singleton shared across the whole process -- reset it every test to
+    // avoid cross-test leakage of a prior test's recorded verification.
+    clearAllStatus();
   });
 
   afterEach(() => {
@@ -156,6 +167,94 @@ describe("AgentRuntime (real AgentSession + real SessionManager, fake network)",
       requestId: "req-provider-error",
       message: providerErrorMessage,
     });
+  });
+
+  it("issue #175 Tier 3: records a real successful turn as 'ok' verification, keyed by the fully-qualified model id", async () => {
+    const request: StartChatRequest = {
+      conversationId: "conv-tier3-ok",
+      model: "fake/fake-model",
+      messages: [{ role: "user", content: "hello there" }],
+    };
+
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    const { modelRuntime, model } = await buildFakeModelRuntime(agentDir);
+    const qualifiedModelId = qualifyModelId(FAKE_PROVIDER_ID, asBareModelId(model.id));
+    const before = Date.now();
+
+    await runtime.run({
+      requestId: "req-tier3-ok",
+      request,
+      cwd,
+      providerId: FAKE_PROVIDER_ID,
+      model,
+      modelRuntime,
+      signal: new AbortController().signal,
+      emit: () => {},
+    });
+
+    const verification = getModelVerification(qualifiedModelId);
+    expect(verification?.lastResult).toBe("ok");
+    expect(verification?.lastVerifiedAt).toBeGreaterThanOrEqual(before);
+    expect(verification?.lastVerifiedAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("issue #175 Tier 3: records a non-throwing stopReason:'error' turn as 'error' verification -- the exact case that must not be skipped (see AGENTS.md 2026-08-08)", async () => {
+    const request: StartChatRequest = {
+      conversationId: "conv-tier3-stop-error",
+      model: "fake/fake-model",
+      messages: [{ role: "user", content: "Hello, ping" }],
+    };
+
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    const providerErrorMessage = "OAuth refresh failed for github-copilot: 403 Forbidden";
+    const { modelRuntime, model } = await buildFakeFailingModelRuntime(agentDir, providerErrorMessage);
+    const qualifiedModelId = qualifyModelId(FAKE_PROVIDER_ID, asBareModelId(model.id));
+    const before = Date.now();
+
+    await runtime.run({
+      requestId: "req-tier3-stop-error",
+      request,
+      cwd,
+      providerId: FAKE_PROVIDER_ID,
+      model,
+      modelRuntime,
+      signal: new AbortController().signal,
+      emit: () => {},
+    });
+
+    const verification = getModelVerification(qualifiedModelId);
+    expect(verification?.lastResult).toBe("error");
+    expect(verification?.lastVerifiedAt).toBeGreaterThanOrEqual(before);
+    expect(verification?.lastVerifiedAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("issue #175 Tier 3: records a thrown session.prompt() exception as 'error' verification", async () => {
+    const request: StartChatRequest = {
+      conversationId: "conv-tier3-thrown",
+      model: "fake/fake-model",
+      messages: [{ role: "user", content: "Hello, ping" }],
+    };
+
+    const runtime = new AgentRuntime(realCodingAgentLoaders);
+    const { modelRuntime, model } = await buildFakeThrowingModelRuntime(agentDir, "network unreachable");
+    const qualifiedModelId = qualifyModelId(FAKE_PROVIDER_ID, asBareModelId(model.id));
+    const before = Date.now();
+
+    await runtime.run({
+      requestId: "req-tier3-thrown",
+      request,
+      cwd,
+      providerId: FAKE_PROVIDER_ID,
+      model,
+      modelRuntime,
+      signal: new AbortController().signal,
+      emit: () => {},
+    });
+
+    const verification = getModelVerification(qualifiedModelId);
+    expect(verification?.lastResult).toBe("error");
+    expect(verification?.lastVerifiedAt).toBeGreaterThanOrEqual(before);
+    expect(verification?.lastVerifiedAt).toBeLessThanOrEqual(Date.now());
   });
 
   it("finds the last user message when the request has multiple, using the most recent one", async () => {
