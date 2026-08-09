@@ -1,7 +1,7 @@
 {
   "name": "pi-desktop",
   "private": true,
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "Pi Desktop Demo - Electron + React chat app powered by pi-ai",
   "author": "tbrandenburg",
   "desktopName": "dev.pi.desktop.demo",
