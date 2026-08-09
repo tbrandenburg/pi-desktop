@@ -6,11 +6,16 @@ import type { ModelInfo } from "../../shared/events";
 /**
  * Resolves a model's single most-informative status glyph + tooltip for the
  * three-tier model availability signal (issue #175), per the precedence
- * "verified (tier 3)" > "reachability (tier 2)" > "configured (tier 1)" >
- * unknown. Native `<option>` elements can't render rich icons/markup, so
- * this returns a plain-text prefix symbol plus an accessible `title`.
+ * "verified (tier 3)" > "reachability (tier 2)" > "credentialState (tier 1)"
+ * > unknown. Tier 1 distinguishes free/oauth/missing/auth-error credential
+ * states (issue #179) instead of a single "configured" boolean; the final
+ * `!model.configured` fallback below only fires for a `ModelInfo` with no
+ * `credentialState` at all (e.g. an older cached/partial payload), and is
+ * kept purely for backward compatibility. Native `<option>` elements can't
+ * render rich icons/markup, so this returns a plain-text prefix symbol plus
+ * an accessible `title`.
  */
-function modelStatus(model: ModelInfo): { symbol: string; title: string } {
+export function modelStatus(model: ModelInfo): { symbol: string; title: string } {
   if (model.verified?.lastResult === "ok") {
     return { symbol: "\u2713", title: "Last used successfully" };
   }
@@ -30,6 +35,20 @@ function modelStatus(model: ModelInfo): { symbol: string; title: string } {
       return { symbol: "\u2715", title: "Provider unreachable" };
     case "checking":
       return { symbol: "\u2026", title: "Checking provider availability\u2026" };
+    default:
+      break;
+  }
+  switch (model.credentialState) {
+    case "free":
+      return { symbol: "\u25cc", title: "No credentials required \u2014 ready to use" };
+    case "oauth":
+      return { symbol: "\u25d0", title: "Authenticated via OAuth" };
+    case "auth-error":
+      return { symbol: "\u26bf", title: "OAuth session expired \u2014 re-authenticate" };
+    case "missing":
+      return { symbol: "\u25cb", title: "Provider not configured \u2014 add credentials in Settings" };
+    case "configured":
+      return { symbol: "", title: "Not yet checked" };
     default:
       break;
   }

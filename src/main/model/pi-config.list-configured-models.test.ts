@@ -14,7 +14,9 @@ describe("listConfiguredModels", () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-home-list-"));
     agentDir = path.join(home, ".pi", "agent");
     fs.mkdirSync(agentDir, { recursive: true });
-    emptyCwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-empty-cwd-list-"));
+    emptyCwd = fs.mkdtempSync(
+      path.join(os.tmpdir(), "pi-desktop-empty-cwd-list-"),
+    );
   });
 
   afterEach(() => {
@@ -23,14 +25,20 @@ describe("listConfiguredModels", () => {
   });
 
   it("returns an empty list when nothing is configured", async () => {
-    await expect(listConfiguredModels(home, emptyCwd, undefined, realModelsLoaders)).resolves.toEqual([]);
+    await expect(
+      listConfiguredModels(home, emptyCwd, undefined, realModelsLoaders),
+    ).resolves.toEqual([]);
   });
 
   it("includes a model configured only via the app's own settings, with zero .pi files present", async () => {
     const models = await listConfiguredModels(
       home,
       emptyCwd,
-      { apiKey: "sk-app-only", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+      {
+        apiKey: "sk-app-only",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      },
       realModelsLoaders,
     );
     expect(models).toEqual([
@@ -39,6 +47,7 @@ describe("listConfiguredModels", () => {
         label: "app-settings/gpt-4o-mini",
         providerId: "app-settings",
         configured: true,
+        credentialState: "configured",
         contextWindow: 128000,
         maxOutputTokens: 16384,
       },
@@ -68,7 +77,12 @@ describe("listConfiguredModels", () => {
     process.env.LLM7_TOKEN_LIST_TEST = "llm7-list-token";
     process.env.ANTHROPIC_TOKEN_LIST_TEST = "anthropic-list-token";
 
-    const models = await listConfiguredModels(home, emptyCwd, undefined, realModelsLoaders);
+    const models = await listConfiguredModels(
+      home,
+      emptyCwd,
+      undefined,
+      realModelsLoaders,
+    );
 
     expect(models).toEqual(
       expect.arrayContaining([
@@ -77,6 +91,7 @@ describe("listConfiguredModels", () => {
           label: "llm7/gpt-oss-20b",
           providerId: "llm7",
           configured: true,
+          credentialState: "configured",
           contextWindow: 128000,
           maxOutputTokens: 16384,
         },
@@ -85,6 +100,7 @@ describe("listConfiguredModels", () => {
           label: "llm7/minimax-m2.7",
           providerId: "llm7",
           configured: true,
+          credentialState: "configured",
           contextWindow: 128000,
           maxOutputTokens: 16384,
         },
@@ -93,6 +109,7 @@ describe("listConfiguredModels", () => {
           label: "anthropic-custom/claude-opus",
           providerId: "anthropic-custom",
           configured: true,
+          credentialState: "configured",
           contextWindow: 128000,
           maxOutputTokens: 16384,
         },
@@ -119,6 +136,8 @@ describe("listConfiguredModels", () => {
       }),
     );
 
-    await expect(listConfiguredModels(home, emptyCwd, undefined, realModelsLoaders)).resolves.toEqual([]);
+    await expect(
+      listConfiguredModels(home, emptyCwd, undefined, realModelsLoaders),
+    ).resolves.toEqual([]);
   });
 });

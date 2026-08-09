@@ -12,14 +12,32 @@ export interface ModelVerification {
   lastResult: "ok" | "error";
 }
 
+/**
+ * Tier 1's richer credential classification (issue #179), replacing a
+ * single boolean that collapsed genuinely different states into one
+ * "not configured" glyph: `"free"` (no key required), `"configured"`
+ * (real API key resolved), `"oauth"` (OAuth session resolved), `"missing"`
+ * (no credential at all), `"auth-error"` (a stored credential exists but
+ * is currently unusable, e.g. a failing OAuth refresh).
+ */
+export type CredentialState = "free" | "configured" | "oauth" | "missing" | "auth-error";
+
 export interface ModelInfo {
   /** Fully-qualified `provider/modelId` (see `registry.ts`'s `qualifyModelId`). */
   id: string;
   label: string;
   /** The provider id this model belongs to -- the prefix of the qualified `id`. */
   providerId: string;
-  /** Tier 1: whether this provider currently has a usable credential (computed at registry-build time). */
+  /**
+   * Tier 1 (derived): whether this provider currently has a usable
+   * credential right now, i.e. `credentialState` is anything other than
+   * `"missing"`/`"auth-error"`. Kept for any caller that only needs the
+   * coarse yes/no signal -- `credentialState` is the source of truth for
+   * the picker's richer glyphs (issue #179).
+   */
   configured: boolean;
+  /** Tier 1: full credential classification computed at registry-build time (issue #179). */
+  credentialState?: CredentialState;
   /** Tier 2: background provider-reachability probe result, `undefined` = not yet probed. */
   reachability?: ProviderReachability;
   /** Tier 3: outcome of the most recent real use of this exact model, `undefined` = never used. */
