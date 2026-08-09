@@ -373,8 +373,17 @@ export async function buildModelsRegistry(
     extensionResourceLoader: loaders.extensionResourceLoader,
   };
 
-  for (const source of SOURCES) {
-    for (const entry of await source.load(ctx)) {
+  // Fetch every source concurrently (issue #166 part B) -- none of these
+  // sources reads another's output, so there's no reason to idle behind
+  // `extensionProviderSource` (the dominant ~2.3-2.6s cost) sequentially.
+  // Applying the results must still walk `SOURCES` in its original array
+  // order (fully applying `results[0]` before `results[1]`, etc.) to
+  // preserve the exact last-one-wins precedence semantics documented above
+  // -- only the `.load(ctx)` fetching itself is concurrent, never the
+  // `setProvider` application.
+  const results = await Promise.all(SOURCES.map((source) => source.load(ctx)));
+  for (const entries of results) {
+    for (const entry of entries) {
       models.setProvider(entry.kind === "provider" ? entry.provider : createProvider(entry.options));
     }
   }
