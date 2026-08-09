@@ -1,6 +1,43 @@
 import { ChevronDown } from "lucide-react";
 import { useChatStore } from "../state/chat-store";
 import { CREDENTIAL_GATED_HINT, missingCredentialGatedProviders } from "../lib/credential-gated-providers";
+import type { ModelInfo } from "../../shared/events";
+
+/**
+ * Resolves a model's single most-informative status glyph + tooltip for the
+ * three-tier model availability signal (issue #175), per the precedence
+ * "verified (tier 3)" > "reachability (tier 2)" > "configured (tier 1)" >
+ * unknown. Native `<option>` elements can't render rich icons/markup, so
+ * this returns a plain-text prefix symbol plus an accessible `title`.
+ */
+function modelStatus(model: ModelInfo): { symbol: string; title: string } {
+  if (model.verified?.lastResult === "ok") {
+    return { symbol: "\u2713", title: "Last used successfully" };
+  }
+  if (model.verified?.lastResult === "error") {
+    // Tier 3 real-use evidence about THIS check must stay visible even if
+    // Tier 2 currently reports the provider reachable -- a transient probe
+    // success does not erase a recorded real failure.
+    const reachableNote = model.reachability === "reachable" ? " (provider currently reachable)" : "";
+    return { symbol: "\u26a0", title: `Last use failed${reachableNote}` };
+  }
+  switch (model.reachability) {
+    case "reachable":
+      return { symbol: "\u25cf", title: "Provider reachable" };
+    case "auth-failed":
+      return { symbol: "\u26bf", title: "Provider needs re-authentication" };
+    case "unreachable":
+      return { symbol: "\u2715", title: "Provider unreachable" };
+    case "checking":
+      return { symbol: "\u2026", title: "Checking provider availability\u2026" };
+    default:
+      break;
+  }
+  if (!model.configured) {
+    return { symbol: "\u25cb", title: "Provider not configured \u2014 add credentials in Settings" };
+  }
+  return { symbol: "", title: "Not yet checked" };
+}
 
 export function ModelPicker() {
   const models = useChatStore((state) => state.models);
@@ -18,11 +55,14 @@ export function ModelPicker() {
         className="appearance-none rounded-lg border border-surface-border bg-surface-panel py-1.5 pl-3 pr-8 text-xs text-white/80 outline-none disabled:cursor-not-allowed disabled:text-white/40"
       >
         {hasModels ? (
-          models.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.label}
-            </option>
-          ))
+          models.map((model) => {
+            const status = modelStatus(model);
+            return (
+              <option key={model.id} value={model.id} title={status.title}>
+                {status.symbol ? `${status.symbol} ${model.label}` : model.label}
+              </option>
+            );
+          })
         ) : (
           <option value="">No models available</option>
         )}

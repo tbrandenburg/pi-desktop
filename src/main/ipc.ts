@@ -5,6 +5,7 @@ import type { CommandInfo, ExtensionUIResponse, ModelInfo, PackageInfo, Workspac
 import { ChatService } from "./chat/service";
 import { listConfiguredModels, resolvePiDefault } from "./model/pi-config";
 import { getCachedModels, invalidateModelsCache, setCachedModels } from "./model/registry-cache";
+import { applyStatus } from "./model/model-status";
 import { SettingsStore } from "./settings/store";
 import { SessionService } from "./session/service";
 import { AgentRuntime } from "./agent/runtime";
@@ -121,13 +122,25 @@ export function registerIpcHandlers(
     // SettingsStore.get() itself returned the fallback value. `models`
     // entries use the fully-qualified id (`piDefault.label`), so match on
     // that instead.
+    //
+    // NOTE for issue #175 Tier 2/Tier 3 follow-up work: this is the natural
+    // place to also subscribe to `model-status.ts`'s `onStatusChange` and
+    // push incremental `model:list-updated` deltas whenever a background
+    // reachability probe or a real chat use changes a model's status --
+    // that push pipeline needs its own last-known-full-`ModelInfo` index
+    // (keyed by id) to turn a bare `{ providerId? , modelId? }` change into
+    // a valid partial payload; not built here (see `onStatusChange`'s own
+    // doc comment). For now, `applyStatus` below only bakes in whatever
+    // status is already known at the moment of *this* `model:list` call.
     if (piDefault && piDefault.model === settings.model) {
+      const providerId = piDefault.label.slice(0, piDefault.label.indexOf("/"));
       const defaultEntry =
-        models.find((m) => m.id === piDefault.label) ?? { id: piDefault.label, label: piDefault.label };
-      return [defaultEntry, ...models.filter((m) => m.id !== piDefault.label)];
+        models.find((m) => m.id === piDefault.label) ??
+        ({ id: piDefault.label, label: piDefault.label, providerId, configured: true } satisfies ModelInfo);
+      return applyStatus([defaultEntry, ...models.filter((m) => m.id !== piDefault.label)]);
     }
 
-    return models;
+    return applyStatus(models);
   });
 
   ipcMain.handle("chat:start", async (_event, rawRequest: unknown) => {

@@ -2,6 +2,8 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionUIContext, ModelRuntime, ResourceLoader, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ChatEvent, CommandInfo, StartChatRequest } from "../../shared/events";
 import { loadCodingAgent, type CodingAgentLoaders, type AgentSessionEvent } from "./coding-agent-loaders";
+import { setModelVerification } from "../model/model-status";
+import { qualifyModelId, asBareModelId } from "../model/registry";
 
 export interface AgentRuntimeRunArgs {
   requestId: string;
@@ -181,6 +183,11 @@ export class AgentRuntime {
 
     emit({ type: "started", requestId });
 
+    // Tier 3 (issue #175): computed once, up front, so both the try-block's
+    // success/stopReason-error branches AND the catch-block's thrown-error
+    // branch below can record the same fully-qualified model id.
+    const qualifiedModelId = qualifyModelId(providerId, asBareModelId(model.id));
+
     try {
       await session.prompt(lastUserMessage.content);
 
@@ -198,11 +205,24 @@ export class AgentRuntime {
       // reproduced with a real suspended github-copilot account).
       const last = session.messages.at(-1);
       if (last?.role === "assistant" && last.stopReason === "error" && last.errorMessage) {
+        // Tier 3 (issue #175): a real turn that resolved without throwing
+        // but whose final assistant message reports a provider-side
+        // failure is still a real, fully-attempted, FAILED use of this
+        // model -- must be recorded as "error", not skipped just because
+        // no exception was thrown (see this file's own doc comment above
+        // on why `session.prompt()` never throws for this case).
+        setModelVerification(qualifiedModelId, "error");
         emit({ type: "error", requestId, message: last.errorMessage });
       } else {
+        // Tier 3: a real turn that completed cleanly is a real, successful use.
+        setModelVerification(qualifiedModelId, "ok");
         emit({ type: "completed", requestId });
       }
     } catch (error) {
+      // Tier 3: a real turn that threw (e.g. an OAuth/credential resolution
+      // failure before any request was attempted) is still a real,
+      // fully-attempted, FAILED use of this model.
+      setModelVerification(qualifiedModelId, "error");
       emit({
         type: "error",
         requestId,

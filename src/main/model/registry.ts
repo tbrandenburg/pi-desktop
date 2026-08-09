@@ -22,6 +22,7 @@ import {
   readProvidersFromAgentDir,
   type AgentSettingsFile,
 } from "./pi-agent-dir";
+import { scheduleProviderAvailabilitySweep } from "./provider-prober";
 
 export interface PiAiModule {
   createModels: (...args: Parameters<typeof import("@earendil-works/pi-ai").createModels>) => MutableModels;
@@ -414,11 +415,21 @@ export async function buildModelsRegistry(
       }),
     ),
   );
+  const registeredProviderIds = new Set<string>();
   for (const entries of results) {
     for (const entry of entries) {
-      models.setProvider(entry.kind === "provider" ? entry.provider : createProvider(entry.options));
+      const provider = entry.kind === "provider" ? entry.provider : createProvider(entry.options);
+      models.setProvider(provider);
+      registeredProviderIds.add(provider.id);
     }
   }
+
+  // Tier 2 of the three-tier model availability signal (issue #175): kick
+  // off a background reachability sweep for every provider this registry
+  // build just registered. Currently a no-op stub (see `provider-prober.ts`)
+  // -- this call site exists now so the real prober work package never
+  // needs to touch this function again.
+  scheduleProviderAvailabilitySweep(Array.from(registeredProviderIds));
 
   const globalSettings = readJson<AgentSettingsFile>(path.join(globalDir, "settings.json"));
   const projectSettings = readJson<AgentSettingsFile>(path.join(projectDir, "settings.json"));

@@ -153,8 +153,8 @@ describe("chat-store.loadModels progressive partial updates (issue #167 part C)"
     const { useChatStore } = await import("./chat-store");
     useChatStore.setState({ selectedModel: "", models: [] });
 
-    let pushPartial: ((models: { id: string; label: string }[]) => void) | undefined;
-    onModelListUpdated.mockImplementation((handler: (models: { id: string; label: string }[]) => void) => {
+    let pushPartial: ((models: ModelInfo[]) => void) | undefined;
+    onModelListUpdated.mockImplementation((handler: (models: ModelInfo[]) => void) => {
       pushPartial = handler;
       return () => {};
     });
@@ -164,10 +164,10 @@ describe("chat-store.loadModels progressive partial updates (issue #167 part C)"
     listModels.mockReturnValue(new Promise(() => {}));
 
     void useChatStore.getState().loadModels();
-    pushPartial?.([{ id: "partial-a", label: "Partial A" }]);
+    pushPartial?.([{ id: "partial-a", label: "Partial A", providerId: "partial", configured: true }]);
 
     const state = useChatStore.getState();
-    expect(state.models).toEqual([{ id: "partial-a", label: "Partial A" }]);
+    expect(state.models).toEqual([{ id: "partial-a", label: "Partial A", providerId: "partial", configured: true }]);
     expect(state.selectedModel).toBe("partial-a");
   });
 
@@ -175,28 +175,28 @@ describe("chat-store.loadModels progressive partial updates (issue #167 part C)"
     const { useChatStore } = await import("./chat-store");
     useChatStore.setState({ selectedModel: "", models: [] });
 
-    let pushPartial: ((models: { id: string; label: string }[]) => void) | undefined;
-    onModelListUpdated.mockImplementation((handler: (models: { id: string; label: string }[]) => void) => {
+    let pushPartial: ((models: ModelInfo[]) => void) | undefined;
+    onModelListUpdated.mockImplementation((handler: (models: ModelInfo[]) => void) => {
       pushPartial = handler;
       return () => {};
     });
     listModels.mockResolvedValue([
-      { id: "partial-a", label: "Partial A (final)" },
-      { id: "final-b", label: "Final B" },
+      { id: "partial-a", label: "Partial A (final)", providerId: "partial", configured: true },
+      { id: "final-b", label: "Final B", providerId: "final", configured: true },
     ]);
 
     const done = useChatStore.getState().loadModels();
-    pushPartial?.([{ id: "partial-a", label: "Partial A (preview)" }]);
+    pushPartial?.([{ id: "partial-a", label: "Partial A (preview)", providerId: "partial", configured: true }]);
     // Same id pushed twice must not produce a duplicate entry.
-    pushPartial?.([{ id: "partial-a", label: "Partial A (preview)" }]);
+    pushPartial?.([{ id: "partial-a", label: "Partial A (preview)", providerId: "partial", configured: true }]);
     await done;
 
     const state = useChatStore.getState();
     // The final listModels() resolution is the last write and must win,
     // both replacing the preview label and adding the newly-resolved model.
     expect(state.models).toEqual([
-      { id: "partial-a", label: "Partial A (final)" },
-      { id: "final-b", label: "Final B" },
+      { id: "partial-a", label: "Partial A (final)", providerId: "partial", configured: true },
+      { id: "final-b", label: "Final B", providerId: "final", configured: true },
     ]);
     expect(state.selectedModel).toBe("partial-a");
   });

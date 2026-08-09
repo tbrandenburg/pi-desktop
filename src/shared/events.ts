@@ -1,6 +1,29 @@
+/**
+ * Tier 2 of the three-tier model availability signal (issue #175): a
+ * background reachability probe result for a provider. `undefined` on
+ * `ModelInfo.reachability` means "not yet probed", distinct from any of
+ * these four known states.
+ */
+export type ProviderReachability = "checking" | "reachable" | "auth-failed" | "unreachable";
+
+/** Tier 3 of the three-tier model availability signal (issue #175): the outcome of the most recent real use of a specific model. */
+export interface ModelVerification {
+  lastVerifiedAt: number; // epoch ms
+  lastResult: "ok" | "error";
+}
+
 export interface ModelInfo {
+  /** Fully-qualified `provider/modelId` (see `registry.ts`'s `qualifyModelId`). */
   id: string;
   label: string;
+  /** The provider id this model belongs to -- the prefix of the qualified `id`. */
+  providerId: string;
+  /** Tier 1: whether this provider currently has a usable credential (computed at registry-build time). */
+  configured: boolean;
+  /** Tier 2: background provider-reachability probe result, `undefined` = not yet probed. */
+  reachability?: ProviderReachability;
+  /** Tier 3: outcome of the most recent real use of this exact model, `undefined` = never used. */
+  verified?: ModelVerification;
 }
 
 export interface StartChatRequest {

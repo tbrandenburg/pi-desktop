@@ -11,16 +11,47 @@ import {
 import type { MutableModels } from "@earendil-works/pi-ai";
 
 /**
+ * Tier 1 of the three-tier model availability signal (issue #175): whether
+ * a provider currently has a usable credential. Mirrors the exact
+ * truthiness check `resolveFromRegistry` below already uses
+ * (`auth?.auth.apiKey`) so "configured" means the same thing everywhere in
+ * this file. Memoized per distinct `providerId` via the caller-supplied
+ * `cache` -- there can be 1000+ models across only ~37 providers, so
+ * `models.getAuth()` must be called at most once per provider, never once
+ * per model.
+ */
+async function isProviderConfigured(
+  models: MutableModels,
+  providerId: string,
+  cache: Map<string, Promise<boolean>>,
+): Promise<boolean> {
+  let pending = cache.get(providerId);
+  if (!pending) {
+    pending = models.getAuth(providerId).then((auth) => Boolean(auth?.auth.apiKey));
+    cache.set(providerId, pending);
+  }
+  return pending;
+}
+
+/**
  * Maps a provider's `getAvailable()` result to the renderer-facing
  * `ModelInfo[]` shape. Extracted so both `listConfiguredModels`'s final
  * result and its optional progressive partial callback (issue #167 part C)
  * share exactly one mapping implementation -- never duplicated.
  */
-function toModelInfos(available: Awaited<ReturnType<MutableModels["getAvailable"]>>): ModelInfo[] {
-  return available.map((model) => ({
-    id: qualifyModelId(model.provider, asBareModelId(model.id)),
-    label: `${model.provider}/${model.id}`,
-  }));
+async function toModelInfos(
+  models: MutableModels,
+  available: Awaited<ReturnType<MutableModels["getAvailable"]>>,
+  configuredCache: Map<string, Promise<boolean>>,
+): Promise<ModelInfo[]> {
+  return Promise.all(
+    available.map(async (model) => ({
+      id: qualifyModelId(model.provider, asBareModelId(model.id)),
+      label: `${model.provider}/${model.id}`,
+      providerId: model.provider,
+      configured: await isProviderConfigured(models, model.provider, configuredCache),
+    })),
+  );
 }
 
 export interface ResolvedPiDefault {
@@ -119,6 +150,11 @@ export async function listConfiguredModels(
    */
   onPartialModels?: (models: ModelInfo[]) => void,
 ): Promise<ModelInfo[]> {
+  // Shared across both the progressive partial callback and the final
+  // result below, so `models.getAuth()` is still called at most once per
+  // distinct provider across this whole `listConfiguredModels` call, not
+  // once per partial snapshot.
+  const configuredCache = new Map<string, Promise<boolean>>();
   const registry = await buildModelsRegistry(
     homeDir,
     cwd,
@@ -126,11 +162,14 @@ export async function listConfiguredModels(
     loaders,
     onPartialModels
       ? (models) => {
-          void models.getAvailable().then((available) => onPartialModels(toModelInfos(available)));
+          void models
+            .getAvailable()
+            .then((available) => toModelInfos(models, available, configuredCache))
+            .then(onPartialModels);
         }
       : undefined,
   );
   const available = await registry.models.getAvailable();
 
-  return toModelInfos(available);
+  return toModelInfos(registry.models, available, configuredCache);
 }

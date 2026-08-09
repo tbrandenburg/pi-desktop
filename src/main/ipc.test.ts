@@ -7,6 +7,7 @@ import { registerIpcHandlers } from "./ipc";
 import { realAgentCoreLoaders } from "./agent/test-support/real-agent-core-loaders";
 import { realCodingAgentLoaders } from "./agent/test-support/real-coding-agent-loaders";
 import { invalidateModelsCache } from "./model/registry-cache";
+import { clearAllStatus } from "./model/model-status";
 
 // This suite must be hermetic regardless of the machine's real ~/.pi/agent
 // config, so .pi resolution is mocked here (tested separately in pi-config.test.ts).
@@ -88,6 +89,10 @@ describe("IPC settings round-trip integration", () => {
     // for the same (homeDir, cwd, appSettings) fingerprint leaks into a
     // later test.
     invalidateModelsCache();
+    // Issue #175's `model:list` handler bakes in known Tier 2/Tier 3 status
+    // via `applyStatus` -- `model-status.ts` is a module-level singleton
+    // too, so it needs the same per-test reset.
+    clearAllStatus();
     workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ipc-workspace-"));
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ipc-agent-"));
     // Isolates SessionService's `getAgentDir()`-based sessions directory
@@ -173,14 +178,14 @@ describe("IPC settings round-trip integration", () => {
   it("lists configured models, and reorders the resolved .pi/agent default to the front using its fully-qualified id", async () => {
     const { listConfiguredModels, resolvePiDefault } = await import("./model/pi-config");
     vi.mocked(listConfiguredModels).mockResolvedValue([
-      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
-      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
+      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7", providerId: "llm7", configured: true },
+      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b", providerId: "llm7", configured: true },
     ]);
 
     const plain = await invoke("model:list");
     expect(plain).toEqual([
-      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
-      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
+      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7", providerId: "llm7", configured: true },
+      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b", providerId: "llm7", configured: true },
     ]);
 
     // Regression: ResolvedPiDefault.model is a *bare* id, matched against
@@ -188,8 +193,8 @@ describe("IPC settings round-trip integration", () => {
     // fully-qualified ("provider/modelId"). Reordering must match against
     // `piDefault.label` (qualified), not `piDefault.model` (bare).
     vi.mocked(listConfiguredModels).mockResolvedValue([
-      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
-      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
+      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b", providerId: "llm7", configured: true },
+      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7", providerId: "llm7", configured: true },
     ]);
     vi.mocked(resolvePiDefault).mockResolvedValue({
       apiKey: "sk-test",
@@ -200,12 +205,35 @@ describe("IPC settings round-trip integration", () => {
 
     const reordered = await invoke("model:list");
     expect(reordered).toEqual([
-      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7" },
-      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b" },
+      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7", providerId: "llm7", configured: true },
+      { id: "llm7/gpt-oss:20b", label: "llm7/gpt-oss:20b", providerId: "llm7", configured: true },
     ]);
 
     vi.mocked(listConfiguredModels).mockResolvedValue([]);
     vi.mocked(resolvePiDefault).mockResolvedValue(null);
+  });
+
+  it("bakes in a known Tier 2 reachability status onto the model:list result (issue #175)", async () => {
+    const { listConfiguredModels } = await import("./model/pi-config");
+    const { setProviderReachability } = await import("./model/model-status");
+    vi.mocked(listConfiguredModels).mockResolvedValue([
+      { id: "llm7/minimax-m2.7", label: "llm7/minimax-m2.7", providerId: "llm7", configured: true },
+    ]);
+
+    setProviderReachability("llm7", "reachable");
+
+    const models = await invoke("model:list");
+    expect(models).toEqual([
+      {
+        id: "llm7/minimax-m2.7",
+        label: "llm7/minimax-m2.7",
+        providerId: "llm7",
+        configured: true,
+        reachability: "reachable",
+      },
+    ]);
+
+    vi.mocked(listConfiguredModels).mockResolvedValue([]);
   });
 
   it("lists, gets, and deletes real cwd-scoped sessions through the IPC boundary", async () => {
