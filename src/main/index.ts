@@ -5,6 +5,8 @@
 import { BrowserWindow, app } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { createMainWindow } from "./windows";
+import { resolveLaunchDirectoryArg } from "./cli-args";
+import { SettingsStore } from "./settings/store";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -12,8 +14,19 @@ function getWindow(): BrowserWindow | null {
   return mainWindow;
 }
 
-app.whenReady().then(() => {
-  registerIpcHandlers(getWindow);
+app.whenReady().then(async () => {
+  // Issue #164: `pi-desktop <dir>` (e.g. `pi-desktop .`) seeds the workspace
+  // dir from the launch cwd -- unlike the persisted-settings default, the
+  // launch cwd of an explicit CLI invocation IS meaningful (see cli-args.ts).
+  const launchDir = resolveLaunchDirectoryArg(process.argv, app.isPackaged, process.cwd());
+  let initialWorkspaceDir: string | undefined;
+  if (launchDir) {
+    const settingsStore = new SettingsStore();
+    await settingsStore.setWorkspaceDir(launchDir);
+    initialWorkspaceDir = launchDir;
+  }
+
+  registerIpcHandlers(getWindow, { initialWorkspaceDir });
   mainWindow = createMainWindow();
 
   app.on("activate", () => {

@@ -14,6 +14,15 @@ import type { CodingAgentLoaders } from "./agent/coding-agent-loaders";
 export interface RegisterIpcHandlersDeps {
   agentCoreLoaders?: AgentCoreLoaders;
   codingAgentLoaders?: CodingAgentLoaders;
+  /**
+   * Workspace directory resolved from a CLI launch argument (e.g.
+   * `pi-desktop .`, see #164), already persisted via
+   * `settingsStore.setWorkspaceDir()` by the caller. Seeds
+   * `currentWorkspaceDir` synchronously so the renderer's initial
+   * `workspace:get` call reflects it immediately, without waiting on the
+   * async `settingsStore.getWorkspaceDir()` load below.
+   */
+  initialWorkspaceDir?: string;
 }
 
 export function registerIpcHandlers(
@@ -21,7 +30,7 @@ export function registerIpcHandlers(
   deps: RegisterIpcHandlersDeps = {},
 ): void {
   const settingsStore = new SettingsStore();
-  let currentWorkspaceDir = "";
+  let currentWorkspaceDir = deps.initialWorkspaceDir ?? "";
   const getWorkspaceDir = () => currentWorkspaceDir;
   void settingsStore.getWorkspaceDir().then((dir) => {
     currentWorkspaceDir = dir;
