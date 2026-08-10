@@ -1282,3 +1282,8 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   read what the gate actually printed (the measured number, not just its
   exit code), and treat any `Unknown`/`0/0`/empty measurement as a failing
   gate rather than a passing one.
+- 2026-08-10: A detached packaged-app launch can leave the app running even
+  when the shell tool reports a timeout. Before retrying, inspect the intended
+  debug port and verify the owning PID's cwd and command line; otherwise a
+  second launch can collide with the first instance and make CDP target the
+  wrong process.
