@@ -28,7 +28,7 @@ describe("LLM7_MODELS", () => {
     expect(LLM7_MODELS.map((m) => m.name)).toEqual(["LLM7 Default", "LLM7 Fast"]);
   });
 
-  it("marks both selectors as free with a 32K context window", () => {
+  it("marks both selectors as free with a 128K context window", () => {
     for (const model of LLM7_MODELS) {
       expect(model.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
       expect(model.contextWindow).toBe(128000);
