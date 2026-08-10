@@ -169,4 +169,54 @@ describe("syncIssues", () => {
     expect(result.created).toEqual([{ file: "src/dry.ts", url: "(dry-run)" }]);
     expect(run).toHaveBeenCalledTimes(1); // only the list lookup, no create
   });
+
+  it("still creates the issue (without the label) when 'gh issue create --label ...' fails, then best-effort attaches the label", () => {
+    const run = vi
+      .fn()
+      // findExistingIssue: no match
+      .mockReturnValueOnce("[]")
+      // first create attempt (with --label) fails, e.g. label doesn't exist
+      .mockImplementationOnce(() => {
+        throw new Error("HTTP 422: 'mutation-gap' not found");
+      })
+      // retry without --label succeeds
+      .mockReturnValueOnce("https://github.com/o/r/issues/55\n")
+      // best-effort gh issue edit --add-label succeeds
+      .mockReturnValueOnce("");
+
+    const gaps = [
+      { file: "src/nolabel.ts", score: 3, reason: "below mutation score floor", killed: 0, survived: 9, noCoverage: 1 },
+    ];
+    const result = syncIssues(gaps, { run, maxNew: 5 });
+
+    expect(result.created).toEqual([{ file: "src/nolabel.ts", url: "https://github.com/o/r/issues/55" }]);
+    // Called 4 times: list, failed create, retried create, label attach.
+    expect(run).toHaveBeenCalledTimes(4);
+    const createCallArgs = run.mock.calls[1][1];
+    expect(createCallArgs).toEqual(expect.arrayContaining(["--label", LABEL]));
+    const retryCallArgs = run.mock.calls[2][1];
+    expect(retryCallArgs).not.toEqual(expect.arrayContaining(["--label"]));
+    const editCallArgs = run.mock.calls[3][1];
+    expect(editCallArgs).toEqual(expect.arrayContaining(["issue", "edit", "55", "--add-label", LABEL]));
+  });
+
+  it("still reports the issue as created even if the best-effort label attach also fails", () => {
+    const run = vi
+      .fn()
+      .mockReturnValueOnce("[]")
+      .mockImplementationOnce(() => {
+        throw new Error("label create failed");
+      })
+      .mockReturnValueOnce("https://github.com/o/r/issues/56\n")
+      .mockImplementationOnce(() => {
+        throw new Error("still no label");
+      });
+
+    const gaps = [
+      { file: "src/nolabelever.ts", score: 2, reason: "below mutation score floor", killed: 0, survived: 9, noCoverage: 1 },
+    ];
+    const result = syncIssues(gaps, { run, maxNew: 5 });
+
+    expect(result.created).toEqual([{ file: "src/nolabelever.ts", url: "https://github.com/o/r/issues/56" }]);
+  });
 });
