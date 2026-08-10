@@ -19,7 +19,9 @@ help:
 	@echo "  make install     Install all dependencies"
 	@echo "  make run         Start app in dev mode (renderer + main + electron)"
 	@echo "  make stop        Kill any running dev/electron processes"
-	@echo "  make test        Run unit tests (vitest); warns if suite takes >60s"
+	@echo "  make test        Run unit tests (vitest); warns on duration budget"
+	@echo "                   overruns (90s local / 150s CI total, 1s node-env"
+	@echo "                   file / 5s jsdom file), never fails on slowness alone"
 	@echo "  make lint        Type-check renderer + main; runs oxlint; warns on files >500 LOC and test:source LOC ratio >2:1; fails on coverage regression below .coverage-baseline"
 	@echo "  make audit       Audit dependencies for known vulnerabilities"
 	@echo "  make build       Build renderer + main for production"
@@ -71,17 +73,10 @@ stop:
 	-pkill -f "scripts/run-electron-dev.ts" 2>/dev/null || true
 	-pkill -f "electron \." 2>/dev/null || true
 
-## Run all tests (warns if suite exceeds 60s, but never fails on slowness alone)
+## Run all tests (warns on duration budget overruns via scripts/check-test-duration.sh,
+## but never fails on slowness alone; see issue #185)
 test:
-	@start=$$(date +%s); \
-	npm run test; \
-	status=$$?; \
-	end=$$(date +%s); \
-	elapsed=$$((end - start)); \
-	if [ $$elapsed -gt 60 ]; then \
-		echo "WARNING: test suite took $${elapsed}s (threshold: 60s)"; \
-	fi; \
-	exit $$status
+	@bash scripts/check-test-duration.sh
 
 ## Type-check code (renderer + main); runs oxlint; also warns on source files
 ## over 500 LOC and on test files that exceed 500 LOC or a 2:1 test:source LOC ratio
