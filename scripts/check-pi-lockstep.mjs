@@ -63,6 +63,49 @@ function main() {
   }
 
   console.log(`check-pi-lockstep: OK (${[...distinctLines][0]}.x across all three packages)`);
+
+  checkExtensionPeerDependency(rootDir, lines);
+}
+
+// Validates that extensions/pi-llm7's peerDependencies["@earendil-works/pi-ai"]
+// range is compatible with the root's pinned version. A "*" range is trivially
+// fine (no drift possible); a concrete range must share the root's major.minor.
+function checkExtensionPeerDependency(rootDir, rootLines) {
+  const pkgPath = path.join(rootDir, "extensions", "pi-llm7", "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  const range = pkg.peerDependencies?.["@earendil-works/pi-ai"];
+
+  if (!range) {
+    console.error(
+      "check-pi-lockstep: extensions/pi-llm7/package.json is missing peerDependencies[\"@earendil-works/pi-ai\"]",
+    );
+    process.exit(1);
+  }
+
+  if (range === "*") {
+    console.log("check-pi-lockstep: OK (extensions/pi-llm7 peer range \"*\" is always compatible)");
+    return;
+  }
+
+  const rootLine = rootLines.find((entry) => entry.name === "@earendil-works/pi-ai").line;
+  const extensionLine = majorMinor(range);
+  if (!extensionLine) {
+    console.error(
+      `check-pi-lockstep: could not parse a major.minor version from extensions/pi-llm7 peer range: ${range}`,
+    );
+    process.exit(1);
+  }
+
+  if (extensionLine !== rootLine) {
+    console.error(
+      `check-pi-lockstep: extensions/pi-llm7's @earendil-works/pi-ai peer range (${range}, ${extensionLine}.x) is out of lockstep with root (${rootLine}.x)`,
+    );
+    process.exit(1);
+  }
+
+  console.log(
+    `check-pi-lockstep: OK (extensions/pi-llm7 peer range ${range} matches root ${rootLine}.x)`,
+  );
 }
 
 main();

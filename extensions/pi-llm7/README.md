@@ -19,6 +19,12 @@ The paid `pro` selector is intentionally not exposed.
 pi install npm:@pi-desktop/pi-llm7
 ```
 
+> **Scope availability note:** `@pi-desktop` was confirmed unclaimed as of
+> 2026-08-10 (`npm view @pi-desktop/pi-llm7` returns 404). Re-check this
+> immediately before the actual publish — if the scope is unusable at publish
+> time (e.g. an org-creation issue or policy problem), the documented fallback
+> package name is `@tbrandenburg/pi-llm7`.
+
 ## Optional key
 
 No configuration is required — llm7.io serves anonymous requests. If you do have
@@ -71,3 +77,22 @@ make -C extensions/pi-llm7 build
 make -C extensions/pi-llm7 test
 make -C extensions/pi-llm7 lint
 ```
+
+## Publishing
+
+Real `npm publish` is not yet performed for this package (npm MFA for the
+`@pi-desktop` org has not been set up). Once resolved:
+
+```bash
+npm login
+npm publish -w extensions/pi-llm7 --access public   # run from repo root
+```
+
+**Version-bump policy:** this package follows its own independent semver,
+tracked only in `extensions/pi-llm7/package.json`. There is no automatic
+CI publish-on-tag in this first iteration — publishing is manual only, and
+is not coupled to the app's own `make release-patch`/`version-*` targets
+(those version and release `pi-desktop` itself, not this extension).
+Revisit automation once there is a second extension to justify the shared
+tooling.
+
