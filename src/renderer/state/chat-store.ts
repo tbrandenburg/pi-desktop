@@ -238,8 +238,13 @@ export const useChatStore = create<ChatState>()(immer((set, get) => ({
       const merged = mergeModelsById(get().models, partial);
       set({ models: merged, selectedModel: get().selectedModel || merged[0]?.id || "" });
     });
-    const models = await desktopApi().listModels();
-    set({ models, selectedModel: get().selectedModel || models[0]?.id || "" });
+    try {
+      const models = await desktopApi().listModels();
+      set({ models, selectedModel: get().selectedModel || models[0]?.id || "" });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      set({ errorMessage: `Failed to load models: ${errorMessage}` });
+    }
   },
 
   selectModel: (modelId: string) => set({ selectedModel: modelId }),

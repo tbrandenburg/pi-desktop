@@ -37,27 +37,37 @@ async function defaultLoadPiAi(): Promise<PiAiModule> {
   return piAiModule;
 }
 
-// Every pi-ai API implementation module exports exactly `stream`/`streamSimple`
-// (the `ProviderStreams` shape), keyed here by the `api` string used in
-// models.json / our own settings. Extend this map to support more APIs.
-const API_MODULE_SPECIFIERS: Record<string, string> = {
-  "openai-completions": "@earendil-works/pi-ai/api/openai-completions",
-  "anthropic-messages": "@earendil-works/pi-ai/api/anthropic-messages",
-  "google-generative-ai": "@earendil-works/pi-ai/api/google-generative-ai",
-};
+export interface PiAiCompatModule {
+  registerBuiltInApiProviders: () => void;
+  getApiProvider: (api: string) => ProviderStreams | undefined;
+}
 
-const apiModuleCache = new Map<string, Promise<ProviderStreams>>();
-function defaultLoadApiModule(api: string): Promise<ProviderStreams> {
-  const specifier = API_MODULE_SPECIFIERS[api];
-  if (!specifier) {
+// Issue #183: rather than maintaining our own hardcoded allowlist of the
+// (currently 10) real `api` strings pi-ai ships API implementations for,
+// delegate to pi-ai's own `compat` registry -- it already knows every
+// built-in api id (`openai-responses`, `azure-openai-responses`,
+// `bedrock-converse-stream`, `mistral-conversations`, `google-vertex`,
+// `pi-messages`, etc.), so this app never has to keep its own list in sync
+// with pi-ai's. NOTE: `@earendil-works/pi-ai/compat`'s own doc comment
+// states it is a temporary/transitional entrypoint ("deleted with the
+// coding-agent ModelManager migration") -- re-verify this still works on
+// the next pi-ai major bump.
+let compatModule: Promise<PiAiCompatModule> | null = null;
+function loadCompatModule(): Promise<PiAiCompatModule> {
+  if (!compatModule) {
+    compatModule = nativeDynamicImport("@earendil-works/pi-ai/compat") as Promise<PiAiCompatModule>;
+  }
+  return compatModule;
+}
+
+async function defaultLoadApiModule(api: string): Promise<ProviderStreams> {
+  const { registerBuiltInApiProviders, getApiProvider } = await loadCompatModule();
+  registerBuiltInApiProviders(); // idempotent -- safe to call on every lookup
+  const provider = getApiProvider(api);
+  if (!provider) {
     return Promise.reject(new Error(`Unsupported pi-ai API: "${api}"`));
   }
-  let modulePromise = apiModuleCache.get(api);
-  if (!modulePromise) {
-    modulePromise = nativeDynamicImport(specifier) as Promise<ProviderStreams>;
-    apiModuleCache.set(api, modulePromise);
-  }
-  return modulePromise;
+  return provider;
 }
 
 export interface BuiltinProvidersModule {

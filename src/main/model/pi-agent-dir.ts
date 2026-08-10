@@ -250,7 +250,18 @@ export async function readProvidersFromAgentDir(
   const config = readJson<AgentModelsFile>(path.join(dir, "models.json"));
   const entries = Object.entries(config?.providers ?? {});
   const options = await Promise.all(
-    entries.map(([id, cfg]) => toProviderOptions(id, cfg, loadApiModule)),
+    entries.map(async ([id, cfg]) => {
+      // Issue #183: one bad/unsupported provider entry (e.g. an `api` value
+      // this app/pi-ai doesn't recognize) must not abort the whole
+      // `Promise.all` and take down every other, correctly-configured
+      // provider along with it.
+      try {
+        return await toProviderOptions(id, cfg, loadApiModule);
+      } catch (error) {
+        console.error(`Skipping models.json provider "${id}" (api: ${cfg.api ?? "unknown"}):`, error);
+        return null;
+      }
+    }),
   );
   return options.filter((opts): opts is CreateProviderOptions => opts !== null);
 }

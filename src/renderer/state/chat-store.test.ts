@@ -140,6 +140,18 @@ describe("chat-store.loadModels", () => {
     expect(state.models).toEqual([]);
     expect(state.selectedModel).toBe("");
   });
+
+  it("sets errorMessage and leaves models empty (does not throw) when listModels() rejects (issue #183)", async () => {
+    const { useChatStore } = await import("./chat-store");
+    useChatStore.setState({ selectedModel: "", models: [], errorMessage: null });
+    listModels.mockRejectedValue(new Error("registry build failed"));
+
+    await expect(useChatStore.getState().loadModels()).resolves.toBeUndefined();
+
+    const state = useChatStore.getState();
+    expect(state.models).toEqual([]);
+    expect(state.errorMessage).toMatch(/registry build failed/i);
+  });
 });
 
 describe("chat-store.loadModels progressive partial updates (issue #167 part C)", () => {
