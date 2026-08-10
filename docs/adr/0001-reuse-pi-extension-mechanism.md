@@ -6,8 +6,8 @@
 - **Supersedes:** — (this replaces an earlier draft of ADR 0001 that proposed a
   tool-only, pi-agent-core-native mechanism; that approach is recorded and
   rejected in §5, Alternative 1.)
-- **Related:** `AGENTS.md` "Architecture rules", STATUS.md Milestones 4/6, issue
-  #41 (agent-harness integration).
+- **Related:** `AGENTS.md` "Architecture rules", issue #41 (agent-harness
+  integration).
 
 ---
 
@@ -657,4 +657,3 @@ support" and "adopt pi extensions" are two distinct, non-overlapping levers.
   `electron-builder.yml`, `scripts/cdp-drive.ts`.
 - `AGENTS.md` — "Architecture rules", "How to add X (Adding an IPC channel)",
   "Diagnosing bugs that only reproduce in the packaged app", lessons #1–#14.
-- STATUS.md — Milestones 4 (streaming chat) and 6 (sessions).

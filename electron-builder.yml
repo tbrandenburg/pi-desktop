@@ -1,5 +1,5 @@
-appId: dev.pi.desktop.demo
-productName: Pi Desktop Demo
+appId: dev.pi.desktop
+productName: Pi Desktop
 
 directories:
   output: release
