@@ -18,6 +18,13 @@ on:
 jobs:
   check-and-test:
     runs-on: ubuntu-latest
+    # `pull-requests: write` lets scripts/check-test-duration.sh (#197) post/
+    # update a loud PR comment on a hard/soft duration-budget breach via the
+    # gh CLI; `contents: read` is the standard minimal read needed for
+    # actions/checkout. No other permissions are used by this job.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -34,9 +41,14 @@ jobs:
       - run: npm ci
       - run: make audit
       - run: npm run check
-      # `make test` wraps `npm test` with a warn-only duration-budget check
-      # (scripts/check-test-duration.sh, see issue #185) so slow-suite
-      # regressions surface as loud `::warning::` annotations on every PR
-      # instead of only being visible when a human happens to run
-      # `make test` locally. Never fails the build purely for slowness.
+      # `make test` wraps `npm test` with a duration-budget check
+      # (scripts/check-test-duration.sh, see issues #185/#197): soft
+      # breaches surface as loud `::warning::` annotations (and, on a real
+      # PR, an @-mention comment) but never fail the build; a HARD breach
+      # (~3x the soft per-file threshold, 2x the total-suite one) does fail
+      # the build, since that indicates a genuine regression rather than
+      # tolerable drift. GH_TOKEN is required for the PR-comment step only;
+      # it is a no-op locally with no GH_TOKEN/gh present.
       - run: make test
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
