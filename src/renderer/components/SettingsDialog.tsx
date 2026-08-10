@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { PackageInfo } from "../../shared/events";
 import { desktopApi } from "../lib/desktop-api";
+import { RECOMMENDED_PACKAGES } from "../lib/recommended-packages";
 import { useSettingsStore } from "../state/settings-store";
 
 export function SettingsDialog() {
@@ -27,8 +28,8 @@ export function SettingsDialog() {
 
   if (!isOpen) return null;
 
-  const handleInstall = async () => {
-    const trimmed = source.trim();
+  const installSource = async (rawSource: string) => {
+    const trimmed = rawSource.trim();
     if (!trimmed) return;
     setError(null);
     setInstalling(true);
@@ -37,13 +38,17 @@ export function SettingsDialog() {
       // prompt (ADR 0001 §3.7) -- this call only resolves once the user has
       // answered it.
       await desktopApi().installPackage(trimmed);
-      setSource("");
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setInstalling(false);
     }
+  };
+
+  const handleInstall = async () => {
+    await installSource(source);
+    setSource("");
   };
 
   const handleRemove = async (pkgSource: string) => {
@@ -67,6 +72,37 @@ export function SettingsDialog() {
             Install a local-path, git, or npm pi-package. Installed packages run with full
             system access -- remove any you no longer trust.
           </p>
+
+          <div className="mb-4">
+            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/50">
+              Recommended
+            </h4>
+            <ul className="space-y-1">
+              {RECOMMENDED_PACKAGES.map((rec) => {
+                const isInstalled = packages.some((pkg) => pkg.source === rec.source);
+                return (
+                  <li
+                    key={rec.source}
+                    className="flex items-center justify-between rounded-lg bg-black/20 px-2 py-1 text-xs text-white/80"
+                  >
+                    <span className="truncate" title={rec.description}>
+                      <span className="font-medium text-white">{rec.name}</span>
+                      {" -- "}
+                      {rec.description}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => installSource(rec.source)}
+                      disabled={isInstalled || installing}
+                      className="ml-2 shrink-0 rounded-lg bg-accent px-2 py-0.5 text-xs font-medium text-black disabled:opacity-50"
+                    >
+                      {isInstalled ? "Installed" : "Install"}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
 
           <div className="mb-2 flex gap-2">
             <input
