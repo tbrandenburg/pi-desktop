@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AgentRuntime } from "./runtime";
 import { realCodingAgentLoaders } from "./test-support/real-coding-agent-loaders";
 
@@ -24,6 +24,8 @@ let agentDir: string;
 let cwd: string;
 let bundledDir: string;
 let previousAgentDirEnv: string | undefined;
+let withBundled: string[];
+let withoutBundled: string[];
 
 /** Writes a real, loadable pi package whose extension registers one command. */
 function writePackage(parent: string, name: string, commandName: string): string {
@@ -45,7 +47,7 @@ function writePackage(parent: string, name: string, commandName: string): string
   return dir;
 }
 
-beforeEach(() => {
+beforeAll(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "bundled-loader-"));
   agentDir = path.join(root, "agent");
   cwd = path.join(root, "workspace");
@@ -63,9 +65,22 @@ beforeEach(() => {
 
   previousAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = agentDir;
+
+  // Each `listCommands()` call spins up a full, real `AgentSession` against
+  // the real `@earendil-works/pi-coding-agent` build -- by far the most
+  // expensive thing in this file. Both configurations under test are
+  // therefore resolved exactly ONCE here and shared by every assertion
+  // below, instead of one (or two) real sessions per `it()`. That keeps the
+  // suite inside `scripts/check-test-duration.sh`'s budget while testing the
+  // identical production code path (the fixture is immutable and read-only
+  // for all three cases, so sharing it cannot leak state between them).
+  withBundled = (await new AgentRuntime(realCodingAgentLoaders, bundledEntryPaths()).listCommands(cwd)).map(
+    (c) => c.name,
+  );
+  withoutBundled = (await new AgentRuntime(realCodingAgentLoaders, []).listCommands(cwd)).map((c) => c.name);
 });
 
-afterEach(() => {
+afterAll(() => {
   if (previousAgentDirEnv === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = previousAgentDirEnv;
   fs.rmSync(root, { recursive: true, force: true });
@@ -76,41 +91,27 @@ function bundledEntryPaths(): string[] {
 }
 
 describe("bundled extension discovery (real DefaultResourceLoader)", () => {
-  it("activates a bundled extension's commands via additionalExtensionPaths", async () => {
-    const runtime = new AgentRuntime(realCodingAgentLoaders, bundledEntryPaths());
-    const names = (await runtime.listCommands(cwd)).map((c) => c.name);
-
-    expect(names).toContain("llm7-bundled");
+  it("activates a bundled extension's commands via additionalExtensionPaths", () => {
+    expect(withBundled).toContain("llm7-bundled");
     // ...and the user's own third-party package is still loaded alongside it.
-    expect(names).toContain("acme-third-party");
+    expect(withBundled).toContain("acme-third-party");
   });
 
-  it("does NOT activate the bundled extension when no bundled paths are wired", async () => {
-    const runtime = new AgentRuntime(realCodingAgentLoaders, []);
-    const names = (await runtime.listCommands(cwd)).map((c) => c.name);
-
+  it("does NOT activate the bundled extension when no bundled paths are wired", () => {
     // This is the exact assertion that fails if the #192 wiring is reverted.
-    expect(names).not.toContain("llm7-bundled");
+    expect(withoutBundled).not.toContain("llm7-bundled");
     // Baseline: third-party `settings.json` packages loaded before this
     // change and must load identically after it.
-    expect(names).toContain("acme-third-party");
+    expect(withoutBundled).toContain("acme-third-party");
   });
 
-  it("leaves third-party settings.json activation byte-for-byte unchanged", async () => {
-    const withBundled = (await new AgentRuntime(realCodingAgentLoaders, bundledEntryPaths()).listCommands(cwd))
-      .map((c) => c.name)
-      .filter((n) => n !== "llm7-bundled")
-      .sort();
-    const withoutBundled = (await new AgentRuntime(realCodingAgentLoaders, []).listCommands(cwd))
-      .map((c) => c.name)
-      .sort();
-
+  it("leaves third-party settings.json activation byte-for-byte unchanged", () => {
     // The bundled-paths loader is a strict *superset* of the library's own
     // default: it adds first-party extensions and changes nothing else.
     // (`noExtensions: true` would break this -- it would silently disable
     // every user-configured package instead, the exact failure mode
     // AGENTS.md's #104 lesson warns about.)
-    expect(withBundled).toEqual(withoutBundled);
+    expect(withBundled.filter((n) => n !== "llm7-bundled").sort()).toEqual([...withoutBundled].sort());
     expect(withoutBundled).toContain("acme-third-party");
   });
 });

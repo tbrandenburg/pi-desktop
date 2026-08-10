@@ -1213,3 +1213,25 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   against the real library/runtime, then implement the correct behavior and
   state the correction explicitly in the handoff/PR rather than satisfying the
   literal wording.
+- 2026-08-10: Coordinator-side final validation for #192/#199/#200 ran
+  `npm run check`, `npx oxlint`, `npm test` and `make lint` — all green — and
+  still shipped a PR that failed CI, because the CI job runs **`make test`**,
+  which wraps `vitest` in `scripts/check-test-duration.sh`; plain `npm test`
+  bypasses that gate entirely. The breach was real, not flake: three new tests
+  that each spin a full real `@earendil-works/pi-coding-agent` `AgentSession`
+  (4 sessions in one file) pushed total wall-clock from ~64s to ~100s, and the
+  added CPU contention inflated an *untouched* file's measured window
+  (`settings/store.test.ts`, 0.26s → 3.06s on CI) past the HARD ceiling. Two
+  rules: (1) always run the exact command CI runs (`make test`, not `npm
+  test`) as the final gate — check `.github/workflows/ci.yml` for the literal
+  command rather than assuming the npm script is equivalent; (2) when a
+  duration breach names a file you did not touch, do not dismiss it as
+  flake — reproduce `main` in a throwaway worktree first (`main` here had
+  **zero** breaches, proving causation), then fix your own cost. Note that
+  vitest's per-file `endTime - startTime` excludes module import time, so an
+  expensive real-library import shows up as inflated durations on *other*
+  files, never on the file that caused it. The fix was to resolve each
+  expensive real-session configuration exactly once in `beforeAll` and share
+  the immutable result across assertions (4 sessions → 2), which preserved
+  every assertion and the revert-verification while restoring the baseline —
+  never raise the threshold to make your own regression pass.
