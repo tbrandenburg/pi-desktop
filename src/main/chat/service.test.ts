@@ -27,9 +27,14 @@ function makeRegistryLoader() {
     maxTokens: 4096,
   };
   const provider = { id: "app-settings", getModels: () => [model] };
+  // A second, keyless provider (issue #212): stands in for a bundled
+  // extension / pi-free style provider that needs no app-level API key.
+  const keylessModel = { ...model, id: "default", name: "default", provider: "llm7-free" };
+  const keylessProvider = { id: "llm7-free", getModels: () => [keylessModel] };
   const models = {
-    getProvider: (id: string) => (id === "app-settings" ? provider : undefined),
-    getProviders: () => [provider],
+    getProvider: (id: string) =>
+      id === "app-settings" ? provider : id === "llm7-free" ? keylessProvider : undefined,
+    getProviders: () => [provider, keylessProvider],
   } as unknown as MutableModels;
   return async (): Promise<ModelsRegistry> => ({ models });
 }
@@ -97,7 +102,7 @@ describe("ChatService integration", () => {
     expect(runArgs.cwd).toBe("/tmp/pi-desktop-workspace");
   });
 
-  it("emits a single error event and never calls AgentRuntime when no API key is configured", async () => {
+  it("emits a single error event and never calls AgentRuntime when an app-settings model is selected with no API key configured", async () => {
     const run = vi.fn();
 
     const settingsStore = {
@@ -125,6 +130,72 @@ describe("ChatService integration", () => {
         type: "error",
         requestId: expect.any(String),
         message: "No API key configured. Open settings and add a provider API key first.",
+      },
+    ]);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("runs a keyless provider's model with an empty app API key, instead of rejecting the turn (issue #212)", async () => {
+    const run = vi.fn(async ({ requestId, emit }: AgentRuntimeRunArgs) => {
+      emit({ type: "completed", requestId });
+    });
+
+    const settingsStore = {
+      get: vi.fn().mockResolvedValue({
+        apiKey: "",
+        baseUrl: "https://api.openai.com/v1",
+        model: "",
+      }),
+    } as unknown as SettingsStore;
+
+    const sent: ChatEvent[] = [];
+    const service = new ChatService(
+      settingsStore,
+      () => makeFakeWindow(sent),
+      makeRegistryLoader(),
+      () => "/tmp/pi-desktop-workspace",
+      makeFakeRuntime(run),
+    );
+
+    await service.startChat({ ...makeRequest(), model: "llm7-free/default" });
+    await vi.waitFor(() => expect(sent.some((e) => e.type === "completed")).toBe(true));
+
+    expect(sent.map((e) => e.type)).toEqual(["completed"]);
+    expect(run).toHaveBeenCalledTimes(1);
+    const runArgs = run.mock.calls[0][0] as AgentRuntimeRunArgs;
+    expect(runArgs.model.id).toBe("default");
+    expect(runArgs.providerId).toBe("llm7-free");
+  });
+
+  it("still reports an unconfigured keyless model as not configured rather than as a missing API key (issue #212)", async () => {
+    const run = vi.fn();
+
+    const settingsStore = {
+      get: vi.fn().mockResolvedValue({
+        apiKey: "",
+        baseUrl: "https://api.openai.com/v1",
+        model: "",
+      }),
+    } as unknown as SettingsStore;
+
+    const sent: ChatEvent[] = [];
+    const service = new ChatService(
+      settingsStore,
+      () => makeFakeWindow(sent),
+      makeRegistryLoader(),
+      () => "/tmp/pi-desktop-workspace",
+      makeFakeRuntime(run),
+    );
+
+    await service.startChat({ ...makeRequest(), model: "llm7-free/not-a-real-model" });
+    await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+
+    expect(sent).toEqual([
+      {
+        type: "error",
+        requestId: expect.any(String),
+        message:
+          'Model "llm7-free/not-a-real-model" is not configured. Open settings and select a configured model.',
       },
     ]);
     expect(run).not.toHaveBeenCalled();

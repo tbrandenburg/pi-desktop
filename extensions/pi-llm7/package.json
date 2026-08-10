@@ -1,7 +1,7 @@
 {
   "name": "@pi-desktop/pi-llm7",
   "version": "0.1.0",
-  "description": "First-party pi-package for pi-desktop's LLM7 provider integration (placeholder scaffold, see issue #191).",
+  "description": "Optional-key LLM7 provider for pi (provider id llm7-free, free default/fast selectors).",
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -16,7 +16,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
-    "test": "echo \"no tests yet\"",
+    "test": "vitest run",
     "clean": "rm -rf dist"
   }
 }

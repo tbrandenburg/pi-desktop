@@ -1235,3 +1235,50 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   the immutable result across assertions (4 sessions → 2), which preserved
   every assertion and the revert-verification while restoring the baseline —
   never raise the threshold to make your own regression pass.
+- 2026-08-10: The `node_modules` symlink trick for parallel worktrees
+  (2026-08-10 entry above) is safe for `tsc`/`vitest`/`oxlint` but **silently
+  produces a broken package** under `electron-builder`. Packing from a
+  symlinked worktree logged `cannot find path for dependency
+  ["@earendil-works/pi-ai@undefined", ..., "conf@undefined"]` — a *warning*,
+  exit code still 0, artifact still produced — and the resulting app crashed
+  at runtime with `Cannot find module 'conf'` from `electron-store`, because
+  electron-builder cannot walk the dependency tree through the symlink.
+  Re-packing the identical commit from a tree with a real `node_modules`
+  emitted no such warning and produced a working app. Rule: never run
+  `make pack`/`dist*`/`electron-builder` from a worktree whose `node_modules`
+  is a symlink — package from the coordinator tree instead (`git checkout
+  --detach <sha>` on the exact commit is enough, no copying required), and
+  explicitly forbid packaging commands in the prompt of any subagent working
+  in a symlinked worktree. Also treat `cannot find path for dependency ...
+  @undefined` in electron-builder output as a hard failure signal despite the
+  zero exit code.
+- 2026-08-10: A model being listed in pi-desktop's picker proves nothing about
+  whether it can actually serve a turn — the app builds its model registry
+  **twice, from different inputs**: `ipc.ts`'s `model:list` passes
+  `bundledExtensionPaths`/`homeDir`/`cwd`, while `ChatService`'s default
+  `loadModelsRegistryForChat` called `buildModelsRegistry(undefined, undefined,
+  settings)`. So #192's bundled extension provider appeared in the picker and
+  was rejected on send with `Model "llm7-free/default" is not configured`
+  (#211) — with a second, independent blocker (`!settings.apiKey` firing for a
+  keyless provider, #212) stacked in front of it, so fixing either one alone
+  still left the feature broken. Neither was reachable from unit tests: every
+  existing test injects the `loadModelsRegistry` override, which is exactly the
+  #147 blind spot repeating. Rules: (1) whenever a registry/config is built at
+  more than one call site, treat symmetry of their inputs as a thing to assert,
+  not assume — grep for every `buildModelsRegistry(`-style call and diff the
+  arguments; (2) "appears in the UI" is never acceptance evidence for a
+  feature whose point is *using* the thing — always drive one real end-to-end
+  turn; (3) when an E2E failure is fixed, re-run immediately rather than
+  declaring victory, since blockers of this class stack and the second one is
+  only revealed once the first is cleared.
+- 2026-08-10: `make lint`'s coverage ratchet has been silently vacuous —
+  `vitest run --coverage` reports `All files | 0 | 0 | 0 | 0` /
+  `Statements : Unknown% ( 0/0 )` on a clean `origin/main`, and
+  `check-coverage-ratchet.sh` reads that `"Unknown"` and prints `coverage
+  improved (46.06% -> Unknown%)` while exiting 0, so it can never fail
+  (filed as #210). Found only because a full `make lint` was run during
+  coordinator validation and the *wording* of a passing gate looked wrong.
+  Rule: a green quality gate is not evidence the gate works — periodically
+  read what the gate actually printed (the measured number, not just its
+  exit code), and treat any `Unknown`/`0/0`/empty measurement as a failing
+  gate rather than a passing one.
