@@ -1,14 +1,16 @@
 {
   "name": "pi-desktop",
   "private": true,
-  "version": "0.9.2",
+  "version": "0.10.0",
   "description": "Pi Desktop - Electron + React chat app powered by pi-ai",
   "author": "tbrandenburg",
   "desktopName": "dev.pi.desktop",
   "license": "MIT",
   "main": "dist-main/main/index.js",
   "type": "commonjs",
-  "workspaces": ["extensions/*"],
+  "workspaces": [
+    "extensions/*"
+  ],
   "engines": {
     "node": ">=22.19.0"
   },
