@@ -283,15 +283,15 @@ install-app-linux:
 	printf '%s\n' \
 		"[Desktop Entry]" \
 		"Type=Application" \
-		"Name=Pi Desktop Demo" \
+		"Name=Pi Desktop" \
 		"Comment=Electron + React chat app powered by pi-ai" \
 		"Exec=$$share_dir/pi-desktop.AppImage --no-sandbox %U" \
 		"Icon=$$share_dir/icon.png" \
 		"Categories=Development;" \
 		"Terminal=false" \
-		> "$$apps_dir/dev.pi.desktop.demo.desktop"; \
+		> "$$apps_dir/dev.pi.desktop.desktop"; \
 	echo "Installed: $$bin_dir/pi-desktop -> $$share_dir/pi-desktop.AppImage"; \
-	echo "Installed launcher entry: $$apps_dir/dev.pi.desktop.demo.desktop"; \
+	echo "Installed launcher entry: $$apps_dir/dev.pi.desktop.desktop"; \
 	case ":$$PATH:" in \
 		*":$$bin_dir:"*) ;; \
 		*) echo "warning: $$bin_dir is not on your PATH -- add e.g. 'export PATH=\"$$bin_dir:\$$PATH\"' to your shell rc file to run 'pi-desktop' directly." ;; \
@@ -304,7 +304,7 @@ uninstall-app-linux:
 	apps_dir="$$HOME/.local/share/applications"; \
 	rm -f "$$bin_dir/pi-desktop"; \
 	rm -rf "$$share_dir"; \
-	rm -f "$$apps_dir/dev.pi.desktop.demo.desktop"; \
+	rm -f "$$apps_dir/dev.pi.desktop.desktop"; \
 	echo "Removed pi-desktop command, launcher entry, and $$share_dir."
 
 ## --- Versioning & release -------------------------------------------------
