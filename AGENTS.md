@@ -1149,3 +1149,24 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   contains backticks must be single-quoted (or written to a temp file and
   passed via `--body-file`), never double-quoted — and always re-fetch the
   posted comment to confirm it matches what was intended before moving on.
+- 2026-08-10: Adding `npm run build --workspaces --if-present`/`npm test
+  --workspaces --if-present` as a *trailing* command in a chained npm script
+  (`"test": "vitest run && npm test --workspaces --if-present"`, from #191's
+  extensions-workspace scaffold) silently broke CI: npm appends any extra
+  CLI args passed via `npm test -- <args>` to the very end of the whole
+  resolved script string, not to whichever subcommand logically "should"
+  receive them. `scripts/check-test-duration.sh` and `make lint`'s coverage
+  step both rely on `npm test -- --reporter=json --outputFile=...` /
+  `npm test -- --coverage` reaching `vitest run` specifically — with
+  `--workspaces --if-present` as the trailing command, those flags landed on
+  it instead, so vitest silently produced no JSON report and CI failed with
+  `check-test-duration: ERROR: vitest produced no JSON report`. All local
+  validation in the originating subagent's worktree passed because it only
+  ran `npm test` with no extra args. Fixed by reordering so the command that
+  needs to receive forwarded CLI flags (`vitest run`) is always last in the
+  chain. Rule: whenever a chained npm script (`cmd1 && cmd2`) is changed and
+  any tooling elsewhere invokes that script with `-- <extra args>`, always
+  verify locally which subcommand actually receives the forwarded args
+  (`npm run <script> -- --some-flag`, then check the printed resolved command
+  line) — do not assume args attach to the "intended" subcommand just
+  because it's semantically the right one.
