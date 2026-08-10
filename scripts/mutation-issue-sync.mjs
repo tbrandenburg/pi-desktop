@@ -137,6 +137,41 @@ function defaultRun(cmd, args) {
 }
 
 /**
+ * Creates a GitHub issue for a mutation gap, tolerating a missing/unusable
+ * `mutation-gap` label. If `gh issue create --label ...` fails (e.g. because
+ * the label doesn't exist and the workflow token couldn't create it), the
+ * issue is still created without the label, and a best-effort attempt is
+ * made to attach the label afterwards via `gh issue edit`. Label problems
+ * must never prevent the underlying issue from being filed.
+ * @param {typeof execFileSync} run
+ * @param {{file: string, score: number, reason: string, killed: number, survived: number, noCoverage: number}} entry
+ * @param {{repo?: string, runUrl?: string}} opts
+ * @returns {string} the `gh issue create` output (issue URL)
+ */
+function createIssue(run, entry, opts) {
+  const baseArgs = ["issue", "create", "--title", issueTitle(entry.file), "--body", issueBody(entry, opts.runUrl)];
+  try {
+    return run("gh", ghArgs([...baseArgs, "--label", LABEL], opts.repo));
+  } catch (err) {
+    console.error(
+      `Warning: failed to create issue for ${entry.file} with label "${LABEL}" ` +
+        `(${err.message}); retrying without a label.`,
+    );
+    const out = run("gh", ghArgs(baseArgs, opts.repo));
+    try {
+      const issueUrl = out.trim();
+      const issueNumber = issueUrl.split("/").pop();
+      if (issueNumber) {
+        run("gh", ghArgs(["issue", "edit", issueNumber, "--add-label", LABEL], opts.repo));
+      }
+    } catch (labelErr) {
+      console.error(`Warning: could not attach label "${LABEL}" to issue for ${entry.file}: ${labelErr.message}`);
+    }
+    return out;
+  }
+}
+
+/**
  * Syncs gaps to GitHub issues: creates a new issue per gap with no existing
  * open match (capped at maxNew), and comments on existing matches instead of
  * duplicating.
@@ -168,22 +203,7 @@ export function syncIssues(gaps, opts = {}) {
     }
 
     if (!dryRun) {
-      const out = run(
-        "gh",
-        ghArgs(
-          [
-            "issue",
-            "create",
-            "--title",
-            issueTitle(entry.file),
-            "--body",
-            issueBody(entry, opts.runUrl),
-            "--label",
-            LABEL,
-          ],
-          opts.repo,
-        ),
-      );
+      const out = createIssue(run, entry, opts);
       result.created.push({ file: entry.file, url: out.trim() });
     } else {
       result.created.push({ file: entry.file, url: "(dry-run)" });
