@@ -5,6 +5,7 @@ node_modules/
 dist-main/
 dist-renderer/
 release/
+extensions/*/dist/
 
 # Electron-builder
 electron-builder-effective-config.yaml

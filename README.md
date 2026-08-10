@@ -166,9 +166,7 @@ The renderer speaks only to `window.desktopApi`
 (`src/preload/api-types.ts`) — there is no path from the UI to Node, the
 filesystem, or provider credentials.
 
-See [`docs/INITIAL.md`](docs/INITIAL.md) for the original design brief and
-[`STATUS.md`](STATUS.md) for a running log of milestones, bugs found and
-fixed, and verification evidence.
+See [`docs/INITIAL.md`](docs/INITIAL.md) for the original design brief.
 
 ## Philosophy
 

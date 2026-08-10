@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -19,14 +27,28 @@ vi.mock("electron-store", async () => {
 });
 
 describe("SettingsStore persistence (real electron-store)", () => {
+  // A single real on-disk root is created once for the whole file (instead
+  // of a fresh mkdtempSync/rmSync pair per test case) and each test gets its
+  // own uniquely-named subdirectory under it. This keeps every test's
+  // electron-store writes genuinely isolated on real disk (no shared state
+  // between test cases) while cutting the redundant mkdtemp/rm syscalls from
+  // 9 pairs down to 1, which was the dominant cost behind this file's
+  // outlier duration (see issue #189).
+  let root: string;
   let cwd: string;
+  let testIndex = 0;
 
-  beforeEach(() => {
-    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-settings-"));
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-settings-"));
   });
 
-  afterEach(() => {
-    fs.rmSync(cwd, { recursive: true, force: true });
+  afterAll(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    cwd = path.join(root, `case-${testIndex++}`);
+    fs.mkdirSync(cwd, { recursive: true });
   });
 
   function newStoreAt(dir: string): SettingsStore {
