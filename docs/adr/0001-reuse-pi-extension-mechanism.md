@@ -337,11 +337,12 @@ build time (so no runtime jiti/npm needed for bundled ones):
 ```yaml
 # electron-builder.yml
 extraResources:
-  - from: resources/pi-packages
-    to: pi-packages
+  - from: extensions
+    to: pi-extensions
+    filter: ["*/package.json", "*/dist/**", "*/README.md", ...]
 ```
 
-At startup, `process.resourcesPath/pi-packages/*` feed the extension discovery
+At startup, `process.resourcesPath/pi-extensions/*` feed the extension discovery
 path. No network, no toolchain — satisfies the portable-exe constraint. Peer
 deps (`pi-ai`, `pi-agent-core`, `pi-coding-agent`, `typebox`) are provided by the
 host, not bundled per-package (the ecosystem's `peerDependencies: "*"`
@@ -371,6 +372,23 @@ so we do not ship it and reject/skip TUI-only extensions.
 > package" milestone until either (a) the ecosystem produces a genuinely
 > strict tool-only package, or (b) Phase 2's UI bridge lands and a
 > hook/command-using package becomes viable to bundle with a proper review.
+
+> **Update (issue #192, epic #190):** the `read-only-tools` package and its
+> `resources/pi-packages` `extraResources` block were removed by issue #132
+> along with the read-only tool scope. The bundling/discovery mechanism
+> itself is now **reinstated and generalized**: `extensions/*` is a real npm
+> workspace of first-party, independently publishable pi packages, bundled
+> as `resources/pi-extensions/*` and discovered at runtime by
+> `src/main/agent/bundled-extensions.ts` (`resolveBundledExtensionsDir` +
+> `listBundledExtensionPaths`), whose result is injected — from `ipc.ts`,
+> the only place allowed to touch `app.isPackaged`/`process.resourcesPath` —
+> into both `AgentRuntime` (chat sessions, `listCommands`) and
+> `registry.ts`'s `extensionProviderSource` (model picker) as
+> `DefaultResourceLoader`'s `additionalExtensionPaths`. That loader is a
+> strict *superset* of the library's own default (`noExtensions` is
+> deliberately never set), so every user-configured `settings.json` package
+> keeps loading exactly as it did before — pinned by
+> `src/main/agent/bundled-extensions.loader.test.ts`.
 
 ### 3.6 Runtime extension (user installs later)
 

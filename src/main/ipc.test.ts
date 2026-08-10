@@ -43,6 +43,7 @@ vi.mock("electron", () => {
   >();
   return {
     app: {
+      isPackaged: false,
       getVersion: () => "9.9.9-test",
       getPath: () => "/tmp/pi-desktop-test-userdata",
     },
