@@ -34,4 +34,9 @@ jobs:
       - run: npm ci
       - run: make audit
       - run: npm run check
-      - run: npm test
+      # `make test` wraps `npm test` with a warn-only duration-budget check
+      # (scripts/check-test-duration.sh, see issue #185) so slow-suite
+      # regressions surface as loud `::warning::` annotations on every PR
+      # instead of only being visible when a human happens to run
+      # `make test` locally. Never fails the build purely for slowness.
+      - run: make test
