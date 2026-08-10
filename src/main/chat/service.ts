@@ -112,15 +112,6 @@ export class ChatService {
   ): Promise<void> {
     try {
       const settings = await this.settingsStore.get();
-      if (!settings.apiKey) {
-        this.emit({
-          type: "error",
-          requestId,
-          message:
-            "No API key configured. Open settings and add a provider API key first.",
-        });
-        return;
-      }
 
       // `request.model` (from the renderer's selected model) is always
       // already fully-qualified (`provider/modelId`, see `qualifyModelId`).
@@ -138,6 +129,32 @@ export class ChatService {
           type: "error",
           requestId,
           message: "No model selected. Choose a model before sending a message.",
+        });
+        return;
+      }
+
+      // Issue #212: the app's own single-slot API key is a credential for
+      // exactly one provider (`APP_SETTINGS_PROVIDER_ID`), so it may only
+      // gate models served by *that* provider. Keyless providers (a bundled
+      // extension's `llm7-free`, pi-free's free models, ...) must be able to
+      // send with an empty settings slot, and any genuine credential problem
+      // then surfaces as the real provider error instead of this generic one.
+      //
+      // Check order is deliberate: (1) no model selected -- nothing can be
+      // said about credentials before we know which provider is meant;
+      // (2) this app-key check, keyed off the qualified id's provider
+      // segment; (3) registry resolution. (2) must precede (3) because
+      // `appSettingsProviderOptions` registers no provider at all when the
+      // key is empty, so resolving first would report the misleading
+      // "Model ... is not configured" for what is really a missing key.
+      const providerSeparator = modelId.indexOf("/");
+      const requestedProviderId = providerSeparator === -1 ? "" : modelId.slice(0, providerSeparator);
+      if (requestedProviderId === APP_SETTINGS_PROVIDER_ID && !settings.apiKey) {
+        this.emit({
+          type: "error",
+          requestId,
+          message:
+            "No API key configured. Open settings and add a provider API key first.",
         });
         return;
       }

@@ -3,6 +3,7 @@ import { app, type BrowserWindow, dialog, ipcMain } from "electron";
 import { startChatRequestSchema, providerSettingsSchema, workspaceDirSchema } from "../shared/schemas";
 import type { CommandInfo, ExtensionUIResponse, ModelInfo, PackageInfo, WorkspaceInfo } from "../shared/events";
 import { ChatService } from "./chat/service";
+import { buildModelsRegistry, type AppSettingsProviderInput, type ModelsLoaders } from "./model/registry";
 import { listConfiguredModels, resolvePiDefault } from "./model/pi-config";
 import { getCachedModels, invalidateModelsCache, setCachedModels } from "./model/registry-cache";
 import { applyStatus, onStatusChange } from "./model/model-status";
@@ -27,6 +28,30 @@ export interface RegisterIpcHandlersDeps {
    * async `settingsStore.getWorkspaceDir()` load below.
    */
   initialWorkspaceDir?: string;
+  /**
+   * Test-only override for the bundled first-party extension entry files
+   * normally resolved from `app.isPackaged`/`process.resourcesPath` below.
+   * Lets a test point the *real* (unstubbed) registry build at an inline
+   * fixture extension instead of the repo's own `extensions/` directory.
+   */
+  bundledExtensionPaths?: string[];
+  /**
+   * Test-only override for the `AgentRuntime` handed to `ChatService`,
+   * mirroring the injection seam `ChatService` already exposes (see
+   * `chat/service.test.ts`). Lets a test exercise the real model-resolution
+   * path of a chat turn without spinning a real `AgentSession`.
+   */
+  agentRuntime?: AgentRuntime;
+  /**
+   * Injectable pi-ai module loaders for the chat path's registry build.
+   * Production omits this (the real `nativeDynamicImport`-hidden defaults
+   * apply); tests must inject `realModelsLoaders`, because the hidden
+   * dynamic-import trick cannot run under Vitest's vm pool at all (see
+   * AGENTS.md, "Diagnosing bugs that only reproduce in the packaged app"
+   * #4). Injecting the *module loaders* is not the same as stubbing the
+   * registry build itself -- the real `buildModelsRegistry` still runs.
+   */
+  modelsLoaders?: ModelsLoaders;
 }
 
 export function registerIpcHandlers(
@@ -88,17 +113,30 @@ export function registerIpcHandlers(
   // the pattern the removed `resolvePiPackagesReadOnlyToolsDir` used
   // (issue #97), generalized from one hardcoded package to a directory of
   // many.
-  const bundledExtensionPaths = resolveBundledExtensionPaths({
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    repoRoot: process.cwd(),
-  });
+  const bundledExtensionPaths =
+    deps.bundledExtensionPaths ??
+    resolveBundledExtensionPaths({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      repoRoot: process.cwd(),
+    });
 
-  const agentRuntime = new AgentRuntime(deps.codingAgentLoaders, bundledExtensionPaths);
+  const agentRuntime = deps.agentRuntime ?? new AgentRuntime(deps.codingAgentLoaders, bundledExtensionPaths);
   const chatService = new ChatService(
     settingsStore,
     getWindow,
-    undefined,
+    // Issue #211: the chat path must build its registry from the exact same
+    // inputs the picker does (`model:list` below) -- otherwise a model the
+    // picker lists (e.g. a bundled extension's provider) is rejected on send
+    // with "is not configured". Passing `undefined` here previously fell
+    // back to `ChatService`'s own no-argument default, which sees neither
+    // the bundled extension paths nor this process's homeDir/cwd.
+    (settings: AppSettingsProviderInput) =>
+      buildModelsRegistry(os.homedir(), process.cwd(), settings, {
+        ...deps.modelsLoaders,
+        codingAgentLoaders: deps.codingAgentLoaders,
+        bundledExtensionPaths,
+      }),
     getWorkspaceDir,
     agentRuntime,
     uiContextBridge,

@@ -4,8 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import { registerIpcHandlers } from "./ipc";
+import type { AgentRuntime, AgentRuntimeRunArgs } from "./agent/runtime";
+import type { ChatEvent } from "../shared/events";
 import { realAgentCoreLoaders } from "./agent/test-support/real-agent-core-loaders";
 import { realCodingAgentLoaders } from "./agent/test-support/real-coding-agent-loaders";
+import { realModelsLoaders } from "./model/test-support/real-models-loaders";
 import { invalidateModelsCache } from "./model/registry-cache";
 import { clearAllStatus } from "./model/model-status";
 
@@ -350,5 +353,83 @@ describe("IPC settings round-trip integration", () => {
   it("returns an empty shortcut list and a no-op trigger, honestly reflecting no supported discovery API (issue #142)", async () => {
     expect(await invoke("shortcuts:list")).toEqual([]);
     await expect(invoke("shortcuts:trigger", "any-id")).resolves.toBeUndefined();
+  });
+
+  // Issue #211: deliberately does NOT stub `ChatService`'s
+  // `loadModelsRegistry` -- the real production wiring built here in
+  // `ipc.ts` is exactly what was broken (it passed `undefined`, so the chat
+  // path silently used a registry built with no bundled extension paths and
+  // rejected every extension-registered model). Per the #147 lesson, a test
+  // that injects that override cannot catch this class of bug. Only the
+  // `AgentRuntime` is faked, reusing the seam `chat/service.test.ts`
+  // already relies on, so no real `AgentSession` is spun up.
+  it("resolves a bundled extension's provider on the chat path, with no API key configured (issues #211, #212)", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ipc-chat-home-"));
+    const originalHome = process.env.HOME;
+    const bundledDir = path.join(home, "pi-extensions", "pi-bundled-chat-fixture");
+    fs.mkdirSync(path.join(bundledDir, "dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(bundledDir, "package.json"),
+      JSON.stringify({
+        name: "pi-bundled-chat-fixture",
+        version: "1.0.0",
+        pi: { extensions: ["dist/index.js"] },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(bundledDir, "dist", "index.js"),
+      `module.exports = function (pi) {
+        pi.registerProvider("bundled-chat-provider", {
+          baseUrl: "https://bundled-chat-fixture.example/v1",
+          api: "openai-completions",
+          models: [{ id: "bundled-chat-model", name: "Bundled Chat Model" }],
+        });
+      };`,
+    );
+
+    const runArgs: AgentRuntimeRunArgs[] = [];
+    const fakeRuntime = {
+      run: async (args: AgentRuntimeRunArgs) => {
+        runArgs.push(args);
+        args.emit({ type: "completed", requestId: args.requestId });
+      },
+    } as unknown as AgentRuntime;
+
+    const sent: ChatEvent[] = [];
+    const fakeWindow = {
+      isDestroyed: () => false,
+      webContents: { send: (_channel: string, payload: ChatEvent) => sent.push(payload) },
+    } as unknown as BrowserWindow;
+
+    try {
+      // `buildModelsRegistry`'s globalDir comes from `os.homedir()`, which
+      // reads $HOME on POSIX -- keeps this hermetic against the developer's
+      // own ~/.pi/agent instead of needing yet another injection seam.
+      process.env.HOME = home;
+      registerIpcHandlers(() => fakeWindow, {
+        agentCoreLoaders: realAgentCoreLoaders,
+        codingAgentLoaders: realCodingAgentLoaders,
+        bundledExtensionPaths: [path.join(bundledDir, "dist", "index.js")],
+        modelsLoaders: realModelsLoaders,
+        agentRuntime: fakeRuntime,
+      });
+
+      await invoke("chat:start", {
+        conversationId: "conv-bundled",
+        model: "bundled-chat-provider/bundled-chat-model",
+        messages: [{ role: "user", content: "hello" }],
+      });
+
+      await vi.waitFor(() => expect(sent.some((e) => e.type === "completed")).toBe(true));
+
+      expect(sent.filter((e) => e.type === "error")).toEqual([]);
+      expect(runArgs).toHaveLength(1);
+      expect(runArgs[0].providerId).toBe("bundled-chat-provider");
+      expect(runArgs[0].model.id).toBe("bundled-chat-model");
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
