@@ -1,0 +1,46 @@
+version: 2
+
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    # Batch bumps into few PRs to keep review noise bounded.
+    groups:
+      npm-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+      npm-major:
+        applies-to: version-updates
+        update-types:
+          - "major"
+    ignore:
+      # @earendil-works/pi-ai, pi-agent-core and pi-coding-agent are released
+      # in lockstep upstream (pi-coding-agent@X.Y.Z depends on pi-ai@^X.Y.Z and
+      # pi-agent-core@^X.Y.Z). Dependabot has no notion of that constraint, so a
+      # naive PR bumping just one of them would produce a cross-version
+      # combination upstream never tests -- exactly what
+      # `scripts/check-pi-lockstep.mjs` exists to reject. These bumps also need
+      # real packaged-app verification, so they are handled deliberately by the
+      # weekly drift check (`.github/workflows/pi-lockstep-weekly.yml` ->
+      # `scripts/pi-version-drift.mjs`), which files an informational issue
+      # instead of an auto-merged PR.
+      - dependency-name: "@earendil-works/pi-ai"
+      - dependency-name: "@earendil-works/pi-agent-core"
+      - dependency-name: "@earendil-works/pi-coding-agent"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
