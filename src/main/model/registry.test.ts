@@ -439,6 +439,92 @@ describe("buildModelsRegistry with extension-registered providers (issue #147)",
     expect(registry.models.getProvider("pi-free-fixture")).toBeUndefined();
   });
 
+  it("registers a bundled first-party extension's provider via `bundledExtensionPaths` (issue #192), without disabling settings.json packages", async () => {
+    // Deliberately no `extensionResourceLoader` override: that would
+    // short-circuit `extensionProviderSource`'s own DefaultResourceLoader
+    // construction, which is the exact production branch #192 adds.
+    const bundledDir = path.join(home, "pi-extensions", "pi-bundled-fixture");
+    fs.mkdirSync(path.join(bundledDir, "dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(bundledDir, "package.json"),
+      JSON.stringify({ name: "pi-bundled-fixture", version: "1.0.0", pi: { extensions: ["dist/index.js"] } }),
+    );
+    fs.writeFileSync(
+      path.join(bundledDir, "dist", "index.js"),
+      `module.exports = function (pi) {
+        pi.registerProvider("pi-bundled-provider", {
+          baseUrl: "https://bundled-fixture.example/v1",
+          api: "openai-completions",
+          models: [{ id: "bundled-model", name: "Bundled Model" }],
+        });
+      };`,
+    );
+
+    // A user-configured third-party package must keep loading exactly as
+    // before -- the bundled-paths loader is a strict superset, never a
+    // replacement (see AGENTS.md's #104 trust-gating lesson).
+    const thirdPartyDir = path.join(home, ".pi", "agent", "npm", "node_modules", "third-party-fixture");
+    fs.mkdirSync(thirdPartyDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(thirdPartyDir, "package.json"),
+      JSON.stringify({ name: "third-party-fixture", version: "1.0.0", pi: { extensions: ["./index.js"] } }),
+    );
+    fs.writeFileSync(
+      path.join(thirdPartyDir, "index.js"),
+      `module.exports = function (pi) {
+        pi.registerProvider("third-party-provider", {
+          baseUrl: "https://third-party-fixture.example/v1",
+          api: "openai-completions",
+          models: [{ id: "third-party-model", name: "Third Party Model" }],
+        });
+      };`,
+    );
+    fs.mkdirSync(path.join(home, ".pi", "agent"), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, ".pi", "agent", "settings.json"),
+      JSON.stringify({ packages: ["npm:third-party-fixture"] }),
+    );
+
+    const registry = await buildModelsRegistry(home, cwd, undefined, {
+      ...realModelsLoaders,
+      codingAgentLoaders: realCodingAgentLoaders,
+      bundledExtensionPaths: [path.join(bundledDir, "dist", "index.js")],
+    });
+
+    const bundled = registry.models.getProvider("pi-bundled-provider");
+    expect(bundled).toBeDefined();
+    expect(bundled!.getModels().some((m) => m.id === "bundled-model")).toBe(true);
+    // Unchanged behavior for the user's own settings.json package.
+    expect(registry.models.getProvider("third-party-provider")).toBeDefined();
+  });
+
+  it("does not register the bundled provider when no `bundledExtensionPaths` are wired", async () => {
+    const bundledDir = path.join(home, "pi-extensions", "pi-bundled-fixture");
+    fs.mkdirSync(path.join(bundledDir, "dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(bundledDir, "package.json"),
+      JSON.stringify({ name: "pi-bundled-fixture", version: "1.0.0", pi: { extensions: ["dist/index.js"] } }),
+    );
+    fs.writeFileSync(
+      path.join(bundledDir, "dist", "index.js"),
+      `module.exports = function (pi) {
+        pi.registerProvider("pi-bundled-provider", {
+          baseUrl: "https://bundled-fixture.example/v1",
+          api: "openai-completions",
+          models: [{ id: "bundled-model", name: "Bundled Model" }],
+        });
+      };`,
+    );
+
+    const registry = await buildModelsRegistry(home, cwd, undefined, {
+      ...realModelsLoaders,
+      codingAgentLoaders: realCodingAgentLoaders,
+    });
+
+    expect(registry.models.getProvider("pi-bundled-provider")).toBeUndefined();
+    await expect(registry.models.getAvailable()).resolves.toEqual([]);
+  });
+
   it("discovers a real on-disk npm-style package (e.g. pi-free) via the given homeDir's own .pi/agent/settings.json -- no extensionResourceLoader override, no PI_CODING_AGENT_DIR env var", async () => {
     // Regression test for a real bug caught by a manual end-to-end repro
     // (not by any of the tests above, since they all inject

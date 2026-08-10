@@ -13,6 +13,27 @@ files:
   - "!dist-main/**/test-support/**"
   - package.json
 
+# pi-desktop's own first-party pi extensions (issue #192, epic #190):
+# every `extensions/*` workspace package's *built* output is shipped as a
+# plain (non-asar) resource directory, discovered at runtime via
+# `process.resourcesPath/pi-extensions/*` (see
+# `src/main/agent/bundled-extensions.ts`). Reinstates and generalizes the
+# `resources/pi-packages` mechanism ADR 0001 §3.5 proved and issue #132
+# removed -- a directory of many packages instead of one hardcoded path.
+#
+# The filter is required: without it, `.ts` sources and `*.test.js` would
+# ship inside the signed binary -- the same leak class the
+# `!dist-main/**/*.test.js` negations above already guard against.
+extraResources:
+  - from: extensions
+    to: pi-extensions
+    filter:
+      - "*/package.json"
+      - "*/dist/**"
+      - "*/README.md"
+      - "!*/dist/**/*.ts"
+      - "!*/dist/**/*.test.js"
+
 asar: true
 # @earendil-works/pi-ai is ESM-only and loaded via a genuine dynamic
 # import() (see the `nativeDynamicImport` comment in chat-service.ts for why

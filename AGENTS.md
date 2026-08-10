@@ -1170,3 +1170,68 @@ fully invisible to `npm test`, `npm run check`, and even `npm run dev`:
   (`npm run <script> -- --some-flag`, then check the printed resolved command
   line) — do not assume args attach to the "intended" subcommand just
   because it's semantically the right one.
+- 2026-08-10: For #192/#199/#200 (2 parallel worktree packages), symlinking
+  the root `node_modules` into each `.worktrees/*` checkout
+  (`ln -s ../../node_modules .worktrees/<name>/node_modules`) replaced the
+  usual per-worktree `npm install` entirely: `tsc`, `vitest`, `oxlint` and
+  `electron-builder` all resolved correctly through it, subagents finished
+  faster, and — most importantly — it made the `@emnapi/*` lockfile-drift
+  class (2026-07-25/07-26/08-05 lessons) structurally impossible, because no
+  subagent ever ran an install at all. Use this whenever parallel packages
+  need no dependency changes, and explicitly forbid `npm install`/`npm ci` in
+  those subagents' prompts. Two caveats: (1) `.gitignore`'s `node_modules/`
+  (trailing slash) does NOT match the *symlink*, so `git add -A` inside a
+  worktree will happily stage it — filed as #206; check `git ls-files | grep
+  node_modules` before merging any worktree branch. (2) Delete the symlink
+  before `git worktree remove --force`, and remove the worktrees *before*
+  running combined coverage, per the 2026-07-25 contamination lesson.
+- 2026-08-10: The decisive proof that a packaged app resolves a bundled
+  resource from `process.resourcesPath` rather than the dev-mode path is a
+  **negative control**, not a positive observation: `llm7-status` appearing in
+  the packaged app's command list is equally consistent with it having been
+  read from `<repo>/extensions` (the packaged binary was launched with the
+  repo as cwd, so both candidate paths existed simultaneously). Only moving
+  `release/linux-unpacked/resources/pi-extensions` aside, relaunching, and
+  confirming the command *disappeared* while the repo's own built
+  `extensions/` was still present proved which branch actually ran. Rule: when
+  verifying packaged-vs-dev path resolution, always make the two candidate
+  paths distinguishable by removing one and re-observing — a feature simply
+  "working in the packaged app" never proves which path supplied it.
+- 2026-08-10: A subagent correctly REFUSED part of issue #192's own written
+  acceptance criteria ("verify a user-`settings.json`-configured third-party
+  package is NOT activated by this loader construction") after checking it
+  against the real library: issue #109 had already removed the persistent
+  per-package trust gate, so implementing that literal wording (via
+  `noExtensions: true`) would have silently disabled every user-installed
+  package — precisely the #104 failure mode the same issue's checklist was
+  trying to guard against. The correct semantics was "our loader is a strict
+  superset of the library default", pinned by a test asserting
+  `withBundled minus <bundled> === withoutBundled`, and confirmed live in the
+  packaged app (all 33 real `pi-free` commands still loaded alongside the new
+  bundled one). Rule: issue acceptance criteria are a hypothesis, not a spec —
+  when a criterion contradicts the current code's real semantics, verify
+  against the real library/runtime, then implement the correct behavior and
+  state the correction explicitly in the handoff/PR rather than satisfying the
+  literal wording.
+- 2026-08-10: Coordinator-side final validation for #192/#199/#200 ran
+  `npm run check`, `npx oxlint`, `npm test` and `make lint` — all green — and
+  still shipped a PR that failed CI, because the CI job runs **`make test`**,
+  which wraps `vitest` in `scripts/check-test-duration.sh`; plain `npm test`
+  bypasses that gate entirely. The breach was real, not flake: three new tests
+  that each spin a full real `@earendil-works/pi-coding-agent` `AgentSession`
+  (4 sessions in one file) pushed total wall-clock from ~64s to ~100s, and the
+  added CPU contention inflated an *untouched* file's measured window
+  (`settings/store.test.ts`, 0.26s → 3.06s on CI) past the HARD ceiling. Two
+  rules: (1) always run the exact command CI runs (`make test`, not `npm
+  test`) as the final gate — check `.github/workflows/ci.yml` for the literal
+  command rather than assuming the npm script is equivalent; (2) when a
+  duration breach names a file you did not touch, do not dismiss it as
+  flake — reproduce `main` in a throwaway worktree first (`main` here had
+  **zero** breaches, proving causation), then fix your own cost. Note that
+  vitest's per-file `endTime - startTime` excludes module import time, so an
+  expensive real-library import shows up as inflated durations on *other*
+  files, never on the file that caused it. The fix was to resolve each
+  expensive real-session configuration exactly once in `beforeAll` and share
+  the immutable result across assertions (4 sessions → 2), which preserved
+  every assertion and the revert-verification while restoring the baseline —
+  never raise the threshold to make your own regression pass.

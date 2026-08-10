@@ -120,6 +120,15 @@ export interface ModelsLoaders {
    * listCommands()` already relies on for the identical discovery pattern.
    */
   extensionResourceLoader?: ResourceLoader;
+  /**
+   * Absolute entry-file paths of pi-desktop's own bundled first-party
+   * extension packages (issue #192), resolved by the real Electron entry
+   * point (`ipc.ts`, via `agent/bundled-extensions.ts`). Fed into
+   * `extensionProviderSource`'s `DefaultResourceLoader` construction so a
+   * bundled extension's `pi.registerProvider` calls reach the model picker.
+   * Ignored when `extensionResourceLoader` is injected (tests).
+   */
+  bundledExtensionPaths?: string[];
 }
 
 /** The app's own single-slot `settings.json` config (via SettingsStore). */
@@ -171,6 +180,7 @@ interface ProviderSourceContext {
   loadBuiltinProviders: () => Promise<BuiltinProvidersModule>;
   codingAgentLoaders: CodingAgentLoaders;
   extensionResourceLoader?: ResourceLoader;
+  bundledExtensionPaths: string[];
 }
 
 /**
@@ -246,7 +256,8 @@ interface ProviderSource {
 const extensionProviderSource: ProviderSource = {
   async load(ctx) {
     try {
-      const { createAgentSession, ModelRuntime, SessionManager } = await loadCodingAgent(ctx.codingAgentLoaders);
+      const { createAgentSession, ModelRuntime, SessionManager, DefaultResourceLoader, SettingsManager } =
+        await loadCodingAgent(ctx.codingAgentLoaders);
       const extensionRuntime = await ModelRuntime.create({
         allowModelNetwork: false,
         // Mirror the `agentDir: ctx.globalDir` pin on the `createAgentSession`
@@ -257,6 +268,25 @@ const extensionProviderSource: ProviderSource = {
         authPath: path.join(ctx.globalDir, "auth.json"),
         modelsPath: path.join(ctx.globalDir, "models.json"),
       });
+      // pi-desktop's own bundled first-party extension packages (issue
+      // #192) reach this discovery session the same way `AgentRuntime`
+      // feeds them into a chat session: via a `DefaultResourceLoader`
+      // built exactly like the one `createAgentSession` would construct
+      // internally, plus `additionalExtensionPaths`. `noExtensions` is
+      // deliberately NOT set, so every `settings.json`-configured
+      // third-party package still loads exactly as before (see
+      // `AgentRuntime.buildBundledExtensionsResourceLoader`'s doc comment).
+      let resourceLoader = ctx.extensionResourceLoader;
+      if (!resourceLoader && ctx.bundledExtensionPaths.length > 0) {
+        const loader = new DefaultResourceLoader({
+          cwd: ctx.cwd,
+          agentDir: ctx.globalDir,
+          settingsManager: SettingsManager.create(ctx.cwd, ctx.globalDir),
+          additionalExtensionPaths: ctx.bundledExtensionPaths,
+        });
+        await loader.reload();
+        resourceLoader = loader;
+      }
       await createAgentSession({
         cwd: ctx.cwd,
         // Explicitly pin the global agent dir to the same `globalDir` every
@@ -273,7 +303,7 @@ const extensionProviderSource: ProviderSource = {
         modelRuntime: extensionRuntime,
         sessionManager: SessionManager.inMemory(ctx.cwd),
         noTools: "all",
-        resourceLoader: ctx.extensionResourceLoader,
+        resourceLoader,
       });
 
       const abortController = new AbortController();
@@ -401,6 +431,7 @@ export async function buildModelsRegistry(
     loadBuiltinProviders,
     codingAgentLoaders: loaders.codingAgentLoaders ?? {},
     extensionResourceLoader: loaders.extensionResourceLoader,
+    bundledExtensionPaths: loaders.bundledExtensionPaths ?? [],
   };
 
   // Fetch every source concurrently (issue #166 part B) -- none of these
