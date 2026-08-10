@@ -9,6 +9,7 @@ import { applyStatus, onStatusChange } from "./model/model-status";
 import { SettingsStore } from "./settings/store";
 import { SessionService } from "./session/service";
 import { AgentRuntime } from "./agent/runtime";
+import { resolveBundledExtensionPaths } from "./agent/bundled-extensions";
 import { IpcUIContextBridge } from "./agent/ui-context";
 import { PackageService } from "./packages/service";
 import type { AgentCoreLoaders } from "./agent/core";
@@ -78,7 +79,22 @@ export function registerIpcHandlers(
     deps.codingAgentLoaders,
   );
 
-  const agentRuntime = new AgentRuntime(deps.codingAgentLoaders);
+  // pi-desktop's own first-party extension packages (issue #192):
+  // `<repo>/extensions/*` in dev, `<process.resourcesPath>/pi-extensions/*`
+  // once packaged (see `electron-builder.yml`'s `extraResources`).
+  // `app.isPackaged`/`process.resourcesPath` are Electron-runtime-only, so
+  // the resolution happens here (the real Electron entry point) and the
+  // resulting absolute paths are injected into the two consumers -- exactly
+  // the pattern the removed `resolvePiPackagesReadOnlyToolsDir` used
+  // (issue #97), generalized from one hardcoded package to a directory of
+  // many.
+  const bundledExtensionPaths = resolveBundledExtensionPaths({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    repoRoot: process.cwd(),
+  });
+
+  const agentRuntime = new AgentRuntime(deps.codingAgentLoaders, bundledExtensionPaths);
   const chatService = new ChatService(
     settingsStore,
     getWindow,
@@ -120,7 +136,7 @@ export function registerIpcHandlers(
       // the slow extensionProviderSource pass) finishes. Purely an
       // additional side-channel -- the final `models` value returned below
       // is unaffected.
-      models = await listConfiguredModels(homeDir, cwd, appSettingsInput, undefined, (partial) => {
+      models = await listConfiguredModels(homeDir, cwd, appSettingsInput, { bundledExtensionPaths }, (partial) => {
         const win = getWindow();
         if (!win || win.isDestroyed()) return;
         win.webContents.send("model:list-updated", partial);

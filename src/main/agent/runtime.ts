@@ -1,7 +1,12 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionUIContext, ModelRuntime, ResourceLoader, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ChatEvent, CommandInfo, StartChatRequest } from "../../shared/events";
-import { loadCodingAgent, type CodingAgentLoaders, type AgentSessionEvent } from "./coding-agent-loaders";
+import {
+  loadCodingAgent,
+  type CodingAgentLoaders,
+  type CodingAgentModule,
+  type AgentSessionEvent,
+} from "./coding-agent-loaders";
 import { setModelVerification } from "../model/model-status";
 import { qualifyModelId, asBareModelId } from "../model/registry";
 
@@ -80,7 +85,22 @@ export class AgentRuntime {
    */
   private readonly toolCallStartedAt = new Map<string, number>();
 
-  constructor(private readonly loaders: CodingAgentLoaders = {}) {}
+  /**
+   * @param bundledExtensionPaths Absolute entry-file paths of pi-desktop's
+   *   own first-party bundled extension packages (`extensions/*` in dev,
+   *   `<resourcesPath>/pi-extensions/*` once packaged — issue #192),
+   *   resolved by the real Electron entry point (`ipc.ts`) via
+   *   `bundled-extensions.ts` because `app.isPackaged`/
+   *   `process.resourcesPath` are Electron-runtime-only APIs that must not
+   *   be imported into this unit-tested module. Always optional: an empty
+   *   list leaves `createAgentSession`'s own default `ResourceLoader`
+   *   construction completely untouched, exactly as before this parameter
+   *   existed.
+   */
+  constructor(
+    private readonly loaders: CodingAgentLoaders = {},
+    private readonly bundledExtensionPaths: string[] = [],
+  ) {}
 
   async run({
     requestId,
@@ -95,7 +115,8 @@ export class AgentRuntime {
     uiContext,
     resourceLoader,
   }: AgentRuntimeRunArgs): Promise<void> {
-    const { createAgentSession, ModelRuntime, SessionManager } = await loadCodingAgent(this.loaders);
+    const { createAgentSession, ModelRuntime, SessionManager, DefaultResourceLoader, SettingsManager, getAgentDir } =
+      await loadCodingAgent(this.loaders);
 
     const lastUserMessage = [...request.messages].reverse().find((m) => m.role === "user");
     if (!lastUserMessage) {
@@ -150,12 +171,24 @@ export class AgentRuntime {
 
     const sessionManager = await openOrCreateSessionManager(SessionManager, cwd, request.conversationId);
 
+    // Feed pi-desktop's own bundled first-party extension packages
+    // (`extensions/*`, issue #192) into the *real* extension discovery
+    // pipeline via `additionalExtensionPaths` -- `createAgentSession`'s own
+    // options have no such field, so this builds the exact same
+    // `DefaultResourceLoader` it would otherwise construct internally (see
+    // pi-coding-agent's `sdk.js`), just with that one extra option set.
+    // Only built when the caller didn't already inject a `resourceLoader`
+    // (tests inject their own, e.g. `buildTestResourceLoader`).
+    const effectiveResourceLoader =
+      resourceLoader ??
+      (await this.buildBundledExtensionsResourceLoader(DefaultResourceLoader, SettingsManager, getAgentDir, cwd));
+
     const { session } = await createAgentSession({
       cwd,
       modelRuntime,
       model: resolvedModel,
       sessionManager,
-      resourceLoader,
+      resourceLoader: effectiveResourceLoader,
     });
 
     // Phase 2 (ADR 0001 §3.4, issue #91): wire the real IPC-backed
@@ -250,14 +283,18 @@ export class AgentRuntime {
    * with `run()`'s session, which is real and persisted).
    */
   async listCommands(cwd: string, resourceLoader?: ResourceLoader): Promise<CommandInfo[]> {
-    const { createAgentSession, ModelRuntime, SessionManager } = await loadCodingAgent(this.loaders);
+    const { createAgentSession, ModelRuntime, SessionManager, DefaultResourceLoader, SettingsManager, getAgentDir } =
+      await loadCodingAgent(this.loaders);
     const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
+    const effectiveResourceLoader =
+      resourceLoader ??
+      (await this.buildBundledExtensionsResourceLoader(DefaultResourceLoader, SettingsManager, getAgentDir, cwd));
     const { extensionsResult } = await createAgentSession({
       cwd,
       modelRuntime,
       sessionManager: SessionManager.inMemory(cwd),
       noTools: "all",
-      resourceLoader,
+      resourceLoader: effectiveResourceLoader,
     });
     const commands: CommandInfo[] = [];
     for (const extension of extensionsResult.extensions) {
@@ -266,6 +303,42 @@ export class AgentRuntime {
       }
     }
     return commands;
+  }
+
+  /**
+   * Builds a real `DefaultResourceLoader` identical to the one
+   * `createAgentSession` constructs internally when no `resourceLoader` is
+   * passed, except with `additionalExtensionPaths` set to pi-desktop's own
+   * bundled first-party extension entry files (issue #192). Returns
+   * `undefined` (falling back to `createAgentSession`'s own internal
+   * default) when there is nothing to add.
+   *
+   * Deliberately does NOT set `noExtensions: true`: this loader is a strict
+   * *superset* of the library's own default. Every `settings.json`-
+   * configured package still loads exactly the way it would for the real
+   * `pi` CLI (there is no persistent per-package trust gate anymore --
+   * issue #109 removed it in favour of a pre-install consent prompt in
+   * `PackageService`), so this construction changes nothing at all for
+   * third-party packages. Verified empirically against the real
+   * `@earendil-works/pi-coding-agent` build, and pinned by
+   * `bundled-extensions.loader.test.ts`.
+   */
+  private async buildBundledExtensionsResourceLoader(
+    DefaultResourceLoaderClass: CodingAgentModule["DefaultResourceLoader"],
+    SettingsManagerClass: CodingAgentModule["SettingsManager"],
+    getAgentDirFn: CodingAgentModule["getAgentDir"],
+    cwd: string,
+  ): Promise<ResourceLoader | undefined> {
+    if (this.bundledExtensionPaths.length === 0) return undefined;
+    const agentDir = getAgentDirFn();
+    const loader = new DefaultResourceLoaderClass({
+      cwd,
+      agentDir,
+      settingsManager: SettingsManagerClass.create(cwd, agentDir),
+      additionalExtensionPaths: this.bundledExtensionPaths,
+    });
+    await loader.reload();
+    return loader;
   }
 
   /**
