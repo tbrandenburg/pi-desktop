@@ -1,0 +1,29 @@
+name: pi-* Lockstep Version Drift (Weekly)
+
+"on":
+  workflow_dispatch: {}
+  schedule:
+    # Monday 04:00 UTC (an hour after the weekly mutation run)
+    - cron: "0 4 * * 1"
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+      - name: Check pi-* upstream version drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create pi-version-drift \
+            --description "Upstream minor/major release available for the lockstep @earendil-works/pi-* packages" \
+            --color 0366d6 || true
+          node scripts/pi-version-drift.mjs
