@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AuthJsonCredentialStore,
   placeholderModel,
@@ -502,5 +502,43 @@ describe("readProvidersFromAgentDir", () => {
     );
     const options = await readProvidersFromAgentDir(dir, loadApiModule);
     expect(options.map((o) => o.id).sort()).toEqual(["valid1", "valid2"]);
+  });
+
+  it("skips a provider entry whose loadApiModule rejects (e.g. unsupported api), without dropping other valid entries (issue #183)", async () => {
+    fs.writeFileSync(
+      path.join(dir, "models.json"),
+      JSON.stringify({
+        providers: {
+          broken: {
+            api: "totally-unsupported-api",
+            baseUrl: "https://broken.example/v1",
+            apiKey: "sk-broken",
+            models: [{ id: "m-broken" }],
+          },
+          working: {
+            api: "openai-completions",
+            baseUrl: "https://working.example/v1",
+            apiKey: "sk-working",
+            models: [{ id: "m-working" }],
+          },
+        },
+      }),
+    );
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const rejectingLoadApiModule = async (api: string) => {
+      if (api === "totally-unsupported-api") {
+        throw new Error(`Unsupported pi-ai API: "${api}"`);
+      }
+      return loadApiModule();
+    };
+
+    const options = await readProvidersFromAgentDir(dir, rejectingLoadApiModule);
+
+    expect(options.map((o) => o.id)).toEqual(["working"]);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("broken"),
+      expect.anything(),
+    );
+    consoleErrorSpy.mockRestore();
   });
 });

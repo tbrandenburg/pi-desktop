@@ -28,3 +28,9 @@ declare module "@earendil-works/pi-ai/providers/all" {
   export function builtinProviders(): Provider[];
 }
 
+declare module "@earendil-works/pi-ai/compat" {
+  import type { Api, ProviderStreams } from "@earendil-works/pi-ai";
+  export function registerBuiltInApiProviders(): void;
+  export function getApiProvider(api: Api): ProviderStreams | undefined;
+}
+

@@ -617,3 +617,73 @@ describe("buildModelsRegistry onPartialResult callback (issue #167 part C)", () 
     expect(availableWith).toEqual(availableWithout);
   });
 });
+
+describe("buildModelsRegistry API support via pi-ai's compat registry (issue #183)", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-models-api-home-"));
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-models-api-cwd-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("registers a custom models.json provider declaring a previously-unsupported api (openai-responses)", async () => {
+    const agentDir = path.join(home, ".pi", "agent");
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(agentDir, "models.json"),
+      JSON.stringify({
+        providers: {
+          myresponses: {
+            api: "openai-responses",
+            baseUrl: "https://x.example/v1",
+            apiKey: "sk-responses",
+            models: [{ id: "model-a" }],
+          },
+        },
+      }),
+    );
+
+    const registry = await buildModelsRegistry(home, cwd, undefined, realModelsLoaders);
+
+    const provider = registry.models.getProvider("myresponses");
+    expect(provider).toBeDefined();
+    expect(provider!.getModels().map((m) => m.id)).toEqual(["model-a"]);
+  });
+
+  it("does not register a models.json provider declaring a genuinely unknown api, but leaves other providers intact", async () => {
+    const agentDir = path.join(home, ".pi", "agent");
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(agentDir, "models.json"),
+      JSON.stringify({
+        providers: {
+          broken: {
+            api: "this-api-does-not-exist",
+            baseUrl: "https://broken.example/v1",
+            apiKey: "sk-broken",
+            models: [{ id: "m-broken" }],
+          },
+          fine: {
+            api: "anthropic-messages",
+            baseUrl: "https://fine.example/v1",
+            apiKey: "sk-fine",
+            models: [{ id: "m-fine" }],
+          },
+        },
+      }),
+    );
+
+    const registry = await buildModelsRegistry(home, cwd, undefined, realModelsLoaders);
+
+    expect(registry.models.getProvider("broken")).toBeUndefined();
+    const fineProvider = registry.models.getProvider("fine");
+    expect(fineProvider).toBeDefined();
+    expect(fineProvider!.getModels().map((m) => m.id)).toEqual(["m-fine"]);
+  });
+});
