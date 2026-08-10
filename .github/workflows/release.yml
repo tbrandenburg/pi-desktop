@@ -53,3 +53,8 @@ jobs:
       - run: ${{ matrix.build-cmd }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Makes electron-builder's bundled appimagetool self-extract
+          # instead of FUSE-mounting -- avoids depending on the runner
+          # image happening to have libfuse2/libfuse2t64 preinstalled.
+          # No-op on non-Linux matrix entries.
+          APPIMAGE_EXTRACT_AND_RUN: '1'

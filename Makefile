@@ -125,8 +125,14 @@ dist: build
 	npx electron-builder
 
 ## Build Linux AppImage
+## APPIMAGE_EXTRACT_AND_RUN=1 makes electron-builder's bundled appimagetool
+## (itself a FUSE-mounted AppImage) self-extract instead of mounting via
+## FUSE — avoids requiring libfuse2/libfuse2t64 to be installed just to
+## *build* the AppImage on a fresh machine. (End users still need FUSE, or
+## --appimage-extract-and-run, to *run* the produced AppImage; that's a
+## separate, unavoidable AppImage runtime requirement, not a build one.)
 dist-linux: build
-	npx electron-builder --linux AppImage
+	APPIMAGE_EXTRACT_AND_RUN=1 npx electron-builder --linux AppImage
 
 ## Build Windows installer (nsis) + portable exe.
 ## Cross-building from Linux requires 'wine' (and 'mono' for some installers):

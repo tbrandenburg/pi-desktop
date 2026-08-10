@@ -102,7 +102,17 @@ npm install
 # Linux — builds an AppImage under release/
 make dist-linux
 make run-linux      # launches it directly (or run the .AppImage yourself)
+```
 
+> **Running** the resulting `.AppImage` on Linux needs FUSE
+> (`libfuse2`/`libfuse2t64`), same as any AppImage — most desktop distros
+> ship it already; if not: `sudo apt-get install libfuse2t64` (Ubuntu
+> 24.04+) or `libfuse2` (older Ubuntu/Debian). No manual FUSE setup is
+> needed to *build* it — `make dist-linux`/`make dist-win` set
+> `APPIMAGE_EXTRACT_AND_RUN=1` so electron-builder's own AppImage-packaged
+> tooling self-extracts instead of requiring FUSE at build time.
+
+```bash
 # Windows — builds an NSIS installer + portable exe under release/
 make dist-win
 make run-win        # launches the built .exe (via wine when cross-building from Linux)
