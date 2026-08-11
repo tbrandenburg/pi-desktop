@@ -6,6 +6,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildModelsRegistry,
+  createModelsRegistryLoader,
   findModelById,
   qualifyModelId,
   asBareModelId,
@@ -116,6 +117,37 @@ describe("buildModelsRegistry", () => {
       realModelsLoaders,
     );
     await expect(registry.models.getAvailable()).resolves.toEqual([]);
+  });
+});
+
+describe("createModelsRegistryLoader", () => {
+  it("uses one typed input set for a real default registry build", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-loader-home-"));
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-loader-cwd-"));
+    try {
+      const loadRegistry = createModelsRegistryLoader({
+        homeDir: home,
+        cwd,
+        bundledExtensionPaths: [],
+        loaders: realModelsLoaders,
+      });
+      const registry = await loadRegistry({
+        apiKey: "sk-loader-test",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4o-mini",
+      });
+
+      const available = await registry.models.getAvailable(APP_SETTINGS_PROVIDER_ID);
+      expect(available).toEqual([
+        expect.objectContaining({ id: "gpt-4o-mini", provider: APP_SETTINGS_PROVIDER_ID }),
+      ]);
+      expect(await registry.models.getAuth(APP_SETTINGS_PROVIDER_ID)).toEqual({
+        auth: { apiKey: "sk-loader-test" },
+      });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });
 

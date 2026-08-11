@@ -131,6 +131,32 @@ export interface ModelsLoaders {
   bundledExtensionPaths?: string[];
 }
 
+/**
+ * Process-level inputs shared by every production registry consumer. Keeping
+ * these together prevents the picker and chat paths from silently selecting
+ * different config directories or bundled extensions.
+ */
+export interface ModelsRegistryInputs {
+  homeDir: string;
+  cwd: string;
+  bundledExtensionPaths: string[];
+  loaders?: ModelsLoaders;
+}
+
+export function modelsLoadersFor(inputs: ModelsRegistryInputs): ModelsLoaders {
+  return {
+    ...inputs.loaders,
+    bundledExtensionPaths: inputs.bundledExtensionPaths,
+  };
+}
+
+export function createModelsRegistryLoader(
+  inputs: ModelsRegistryInputs,
+): (settings: AppSettingsProviderInput) => Promise<ModelsRegistry> {
+  const loaders = modelsLoadersFor(inputs);
+  return (settings) => buildModelsRegistry(inputs.homeDir, inputs.cwd, settings, loaders);
+}
+
 /** The app's own single-slot `settings.json` config (via SettingsStore). */
 export interface AppSettingsProviderInput {
   apiKey: string;
