@@ -4,10 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import { registerIpcHandlers } from "./ipc";
+import { AgentRuntime as RealAgentRuntime } from "./agent/runtime";
 import type { AgentRuntime, AgentRuntimeRunArgs } from "./agent/runtime";
-import type { ChatEvent } from "../shared/events";
+import type { ChatEvent, StartChatRequest } from "../shared/events";
 import { realAgentCoreLoaders } from "./agent/test-support/real-agent-core-loaders";
 import { realCodingAgentLoaders } from "./agent/test-support/real-coding-agent-loaders";
+import { buildFakeModelRuntime, FAKE_PROVIDER_ID } from "./agent/test-support/fake-model-runtime";
 import { realModelsLoaders } from "./model/test-support/real-models-loaders";
 import { invalidateModelsCache } from "./model/registry-cache";
 import { clearAllStatus } from "./model/model-status";
@@ -280,20 +282,35 @@ describe("IPC settings round-trip integration", () => {
   });
 
   it("lists, gets, and deletes real cwd-scoped sessions through the IPC boundary", async () => {
-    // Ensure currentWorkspaceDir resolved before writing directly via JsonlSessionRepo.
+    // Ensure currentWorkspaceDir resolved before writing the fixture session.
     expect(await invoke("workspace:get")).toEqual({ dir: workspaceDir });
 
-    const { JsonlSessionRepo, Session } = await realAgentCoreLoaders.loadAgentCore!();
-    const { NodeExecutionEnv } = await realAgentCoreLoaders.loadAgentCoreNode!();
-    void Session;
-    // Writes to the same `<agentDir>/sessions` root the now-fixed
-    // `SessionService` reads from (issue #90 follow-up) -- previously this
-    // wrote directly under `workspaceDir`, which matched the *old*,
-    // pre-fix `SessionService` behavior.
-    const env = new NodeExecutionEnv({ cwd: workspaceDir });
-    const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: path.join(agentDir, "sessions") });
-    const session = await repo.create({ cwd: workspaceDir, id: "s1" });
-    await session.appendMessage({ role: "user", content: "Hello", timestamp: Date.now() });
+    // Writes the fixture session via a real `AgentRuntime` chat turn (fake,
+    // network-free model, same pattern as `session/service.test.ts` and
+    // `session/directory-alignment.test.ts`) instead of directly via
+    // pi-agent-core's `JsonlSessionRepo` -- `SessionService` now reads
+    // exclusively through pi-coding-agent's `SessionManager`, which only
+    // flushes a session to disk once a real assistant reply has been
+    // recorded (issue #208 follow-up).
+    const { modelRuntime, model } = await buildFakeModelRuntime(agentDir);
+    const runtime = new RealAgentRuntime(realCodingAgentLoaders);
+    const request: StartChatRequest = {
+      conversationId: "s1",
+      model: "fake/fake-model",
+      messages: [{ role: "user", content: "Hello" }],
+    };
+    const events: ChatEvent[] = [];
+    await runtime.run({
+      requestId: "req-1",
+      request,
+      cwd: workspaceDir,
+      providerId: FAKE_PROVIDER_ID,
+      model,
+      modelRuntime,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+    });
+    expect(events.at(-1)).toEqual({ type: "completed", requestId: "req-1" });
 
     const sessions = await invoke("sessions:list");
     expect(sessions).toEqual([
@@ -302,7 +319,10 @@ describe("IPC settings round-trip integration", () => {
 
     const record = (await invoke("sessions:get", "s1")) as { id: string; messages: unknown[] };
     expect(record.id).toBe("s1");
-    expect(record.messages).toEqual([{ role: "user", content: "Hello" }]);
+    expect(record.messages).toEqual([
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi there" },
+    ]);
 
     await invoke("sessions:delete", "s1");
     expect(await invoke("sessions:get", "s1")).toBeNull();
