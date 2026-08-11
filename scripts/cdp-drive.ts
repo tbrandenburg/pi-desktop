@@ -213,7 +213,7 @@ async function main() {
       console.log(`SCREENSHOT ${arg}`);
     } else if (action === "chat") {
       if (!arg) throw new Error('"chat" requires a message argument');
-      const outputPath = process.argv[4];
+      const outputPath = process.argv[5];
       if (!outputPath) throw new Error('"chat" requires an output screenshot path');
       const before = String(await client.evaluate("document.body.innerText"));
       const beforeAssistantCount = Number(
@@ -254,7 +254,7 @@ async function main() {
            (() => ({
              streaming: Boolean(document.querySelector('button[title="Stop generation"]')),
              body: document.body.innerText,
-            errors: document.querySelectorAll(".border-red-500\\/30").length,
+             errors: document.querySelectorAll('[class*="border-red-500/30"]').length,
             assistantCount: document.querySelectorAll("div.flex.justify-start").length,
            }))()
         `) as { streaming: boolean; body: string; errors: number; assistantCount: number };
