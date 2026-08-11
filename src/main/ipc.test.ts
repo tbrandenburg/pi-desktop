@@ -488,14 +488,24 @@ describe("IPC settings round-trip integration", () => {
 
       const models = await invoke("model:list");
 
-      expect(models).toEqual([
-        expect.objectContaining({
-          id: "bundled-picker-provider/bundled-picker-model",
-          providerId: "bundled-picker-provider",
-          configured: true,
-        }),
-      ]);
-      expect(models).toHaveLength(1);
+      // `model:list` intentionally returns the full built-in provider
+      // catalog alongside app-configured ones (unconfigured entries are
+      // still listed, with `configured: false`, so the picker can show them
+      // as available-but-not-set-up) -- it is not scoped down to only
+      // configured providers. This test's point (issue #215) is that the
+      // bundled extension's provider is present and correctly marked
+      // `configured: true` via the same real registry inputs the chat path
+      // uses, not that it is the *only* entry.
+      expect(models).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "bundled-picker-provider/bundled-picker-model",
+            providerId: "bundled-picker-provider",
+            configured: true,
+          }),
+        ]),
+      );
+      expect(models.filter((m) => m.providerId === "bundled-picker-provider")).toHaveLength(1);
     } finally {
       if (originalHome === undefined) delete process.env.HOME;
       else process.env.HOME = originalHome;
