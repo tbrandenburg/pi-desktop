@@ -3,7 +3,12 @@ import { app, type BrowserWindow, dialog, ipcMain } from "electron";
 import { startChatRequestSchema, providerSettingsSchema, workspaceDirSchema } from "../shared/schemas";
 import type { CommandInfo, ExtensionUIResponse, ModelInfo, PackageInfo, WorkspaceInfo } from "../shared/events";
 import { ChatService } from "./chat/service";
-import { buildModelsRegistry, type AppSettingsProviderInput, type ModelsLoaders } from "./model/registry";
+import {
+  createModelsRegistryLoader,
+  modelsLoadersFor,
+  type ModelsLoaders,
+  type ModelsRegistryInputs,
+} from "./model/registry";
 import { listConfiguredModels, resolvePiDefault } from "./model/pi-config";
 import { getCachedModels, invalidateModelsCache, setCachedModels } from "./model/registry-cache";
 import { applyStatus, onStatusChange } from "./model/model-status";
@@ -121,6 +126,16 @@ export function registerIpcHandlers(
       repoRoot: process.cwd(),
     });
 
+  const registryInputs: ModelsRegistryInputs = {
+    homeDir: os.homedir(),
+    cwd: process.cwd(),
+    bundledExtensionPaths,
+    loaders: {
+      ...deps.modelsLoaders,
+      codingAgentLoaders: deps.codingAgentLoaders,
+    },
+  };
+
   const agentRuntime = deps.agentRuntime ?? new AgentRuntime(deps.codingAgentLoaders, bundledExtensionPaths);
   const chatService = new ChatService(
     settingsStore,
@@ -131,12 +146,7 @@ export function registerIpcHandlers(
     // with "is not configured". Passing `undefined` here previously fell
     // back to `ChatService`'s own no-argument default, which sees neither
     // the bundled extension paths nor this process's homeDir/cwd.
-    (settings: AppSettingsProviderInput) =>
-      buildModelsRegistry(os.homedir(), process.cwd(), settings, {
-        ...deps.modelsLoaders,
-        codingAgentLoaders: deps.codingAgentLoaders,
-        bundledExtensionPaths,
-      }),
+    createModelsRegistryLoader(registryInputs),
     getWorkspaceDir,
     agentRuntime,
     uiContextBridge,
@@ -160,8 +170,7 @@ export function registerIpcHandlers(
     // duplicate the underlying .pi/agent provider under a misleading label.
     const hasSavedApiKey = await settingsStore.hasSavedApiKey();
     const appSettingsInput = hasSavedApiKey ? settings : undefined;
-    const homeDir = os.homedir();
-    const cwd = process.cwd();
+    const { homeDir, cwd } = registryInputs;
     // Issue #166 part A: `listConfiguredModels` rebuilds the whole registry
     // (including the ~2.3-2.6s extension-activation pass) on every call --
     // cache it, keyed by the inputs that actually affect the result, and
@@ -174,14 +183,14 @@ export function registerIpcHandlers(
       // the slow extensionProviderSource pass) finishes. Purely an
       // additional side-channel -- the final `models` value returned below
       // is unaffected.
-      models = await listConfiguredModels(homeDir, cwd, appSettingsInput, { bundledExtensionPaths }, (partial) => {
+      models = await listConfiguredModels(homeDir, cwd, appSettingsInput, modelsLoadersFor(registryInputs), (partial) => {
         const win = getWindow();
         if (!win || win.isDestroyed()) return;
         win.webContents.send("model:list-updated", partial);
       });
       setCachedModels(homeDir, cwd, appSettingsInput, models);
     }
-    const piDefault = await resolvePiDefault();
+    const piDefault = await resolvePiDefault(homeDir, cwd, modelsLoadersFor(registryInputs));
 
     // `piDefault.model` and `settings.model` are both *bare* model ids (see
     // ResolvedPiDefault/StoredSettings) -- equal here means the currently

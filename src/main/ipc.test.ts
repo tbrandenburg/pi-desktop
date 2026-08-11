@@ -432,4 +432,54 @@ describe("IPC settings round-trip integration", () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it("lists a bundled extension's provider through the same real registry inputs as chat (issue #215)", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "pi-desktop-ipc-picker-home-"));
+    const originalHome = process.env.HOME;
+    const bundledDir = path.join(home, "pi-extensions", "pi-bundled-picker-fixture");
+    fs.mkdirSync(path.join(bundledDir, "dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(bundledDir, "package.json"),
+      JSON.stringify({ name: "pi-bundled-picker-fixture", version: "1.0.0", pi: { extensions: ["dist/index.js"] } }),
+    );
+    fs.writeFileSync(
+      path.join(bundledDir, "dist", "index.js"),
+      `module.exports = function (pi) {
+        pi.registerProvider("bundled-picker-provider", {
+          baseUrl: "https://bundled-picker-fixture.example/v1",
+          api: "openai-completions",
+          apiKey: "fixture-key",
+          models: [{ id: "bundled-picker-model", name: "Bundled Picker Model" }],
+        });
+      };`,
+    );
+
+    try {
+      process.env.HOME = home;
+      const actual = await vi.importActual<typeof import("./model/pi-config")>("./model/pi-config");
+      const { listConfiguredModels } = await import("./model/pi-config");
+      vi.mocked(listConfiguredModels).mockImplementation((...args) => actual.listConfiguredModels(...args));
+      registerIpcHandlers(() => null as unknown as BrowserWindow, {
+        agentCoreLoaders: realAgentCoreLoaders,
+        codingAgentLoaders: realCodingAgentLoaders,
+        bundledExtensionPaths: [path.join(bundledDir, "dist", "index.js")],
+        modelsLoaders: realModelsLoaders,
+      });
+
+      const models = await invoke("model:list");
+
+      expect(models).toEqual([
+        expect.objectContaining({
+          id: "bundled-picker-provider/bundled-picker-model",
+          providerId: "bundled-picker-provider",
+          configured: true,
+        }),
+      ]);
+      expect(models).toHaveLength(1);
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }, 15_000);
 });
