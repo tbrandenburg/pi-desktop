@@ -1,5 +1,6 @@
 import fs from "node:fs";
-import type { Session, SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import { buildContextEntries } from "@earendil-works/pi-agent-core";
+import type { Entry, Session } from "@earendil-works/pi-agent-core";
 import { qualifyModelId, asBareModelId } from "../model/registry";
 import type { ActivityRecord, ChatMessage, SessionRecord, SessionSummary } from "../../shared/events";
 
@@ -23,11 +24,8 @@ import type { ActivityRecord, ChatMessage, SessionRecord, SessionSummary } from 
  */
 const TITLE_MAX_LENGTH = 80;
 
-function deriveTitle(entries: readonly SessionTreeEntry[]): string {
-  const sessionInfo = [...entries].reverse().find((entry) => entry.type === "session_info");
-  if (sessionInfo?.type === "session_info" && sessionInfo.name) {
-    return sessionInfo.name;
-  }
+function deriveTitle(entries: readonly Entry[], sessionName: string | undefined): string {
+  if (sessionName) return sessionName;
 
   const firstUserMessage = entries.find(
     (entry) => entry.type === "message" && entry.message.role === "user",
@@ -44,11 +42,11 @@ function deriveTitle(entries: readonly SessionTreeEntry[]): string {
   return "(untitled)";
 }
 
-function textFromContentBlocks(content: { type: string; text?: string }[]): string {
+function textFromContentBlocks(content: { type: string; text?: string }[], separator = " "): string {
   return content
     .filter((block): block is { type: "text"; text: string } => block.type === "text")
     .map((block) => block.text)
-    .join(" ");
+    .join(separator);
 }
 
 /**
@@ -102,7 +100,7 @@ function firstStringField(record: Record<string, unknown>, keys: string[]): stri
   return undefined;
 }
 
-function deriveModel(entries: readonly SessionTreeEntry[]): string {
+function deriveModel(entries: readonly Entry[]): string {
   const modelChange = [...entries].reverse().find((entry) => entry.type === "model_change");
   if (modelChange?.type === "model_change") {
     return qualifyModelId(modelChange.provider, asBareModelId(modelChange.modelId));
@@ -131,7 +129,7 @@ interface PendingToolCall {
  * `runtime.ts` while a chat is live), so `durationMs` is always `0` here for
  * restored sessions -- not a fabricated value, just "unknown".
  */
-function entriesToMessages(entries: readonly SessionTreeEntry[]): ChatMessage[] {
+function entriesToMessages(entries: readonly Entry[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const pendingToolCalls = new Map<string, PendingToolCall>();
   let pendingActivity: ActivityRecord[] = [];
@@ -153,10 +151,7 @@ function entriesToMessages(entries: readonly SessionTreeEntry[]): ChatMessage[] 
           typeof message.content === "string" ? message.content : textFromContentBlocks(message.content);
         messages.push({ role: "user", content });
       } else if (message.role === "assistant") {
-        const content = message.content
-          .filter((block): block is { type: "text"; text: string } => block.type === "text")
-          .map((block) => block.text)
-          .join("");
+        const content = textFromContentBlocks(message.content, "");
         for (const block of message.content) {
           if (block.type === "toolCall") {
             pendingToolCalls.set(block.id, { toolName: block.name, args: block.arguments });
@@ -194,12 +189,12 @@ export async function projectSessionSummary(
   metadataPath: string,
 ): Promise<SessionSummary> {
   const metadata = await session.getMetadata();
-  const entries = await session.getEntries();
+  const entries = await session.findEntries({ order: "oldestFirst" });
   const updatedAt = fs.existsSync(metadataPath) ? fs.statSync(metadataPath).mtimeMs : Date.now();
 
   return {
     id: metadata.id,
-    title: deriveTitle(entries),
+    title: deriveTitle(entries, await session.getName()),
     model: deriveModel(entries),
     updatedAt,
   };
@@ -210,6 +205,6 @@ export async function projectSessionRecord(
   metadataPath: string,
 ): Promise<SessionRecord> {
   const summary = await projectSessionSummary(session, metadataPath);
-  const entries = await session.buildContextEntries();
+  const entries = buildContextEntries(await session.findEntriesOnBranch({ order: "oldestFirst" }));
   return { ...summary, messages: entriesToMessages(entries) };
 }

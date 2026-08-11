@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Session } from "@earendil-works/pi-agent-core";
 import { projectSessionRecord, projectSessionSummary } from "./projection";
 import { realAgentCoreLoaders } from "../agent/test-support/real-agent-core-loaders";
 
@@ -23,6 +24,13 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
     return new JsonlSessionRepo({ fs: env, sessionsRoot: cwd });
   }
 
+  async function appendModelChange(session: Session, provider: string, modelId: string) {
+    await session.appendEntry(
+      { type: "model_change", id: session.idGenerator.next(), provider, modelId },
+      "main",
+    );
+  }
+
   it("titles a session from its first real user message, trimmed and truncated", async () => {
     const repo = await makeRepo();
     const session = await repo.create({ cwd, id: "s1" });
@@ -31,7 +39,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
       content: `  ${"x".repeat(100)}  `,
       timestamp: Date.now(),
     });
-    await session.appendModelChange("openai", "gpt-4o-mini");
+    await appendModelChange(session, "openai", "gpt-4o-mini");
 
     const metadata = await session.getMetadata();
     const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
@@ -45,7 +53,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
     const repo = await makeRepo();
     const session = await repo.create({ cwd, id: "s2" });
     await session.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
-    await session.appendSessionName("Custom Title");
+    await session.setName("Custom Title");
 
     const metadata = await session.getMetadata();
     const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
@@ -67,7 +75,16 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
     const repo = await makeRepo();
     const session = await repo.create({ cwd, id: "s4" });
     await session.appendMessage({ role: "user", content: "turn one", timestamp: Date.now() });
-    await session.appendCompaction("Summary of turn one", undefined, 100);
+    await session.appendEntry(
+      {
+        type: "compaction",
+        id: session.idGenerator.next(),
+        summary: "Summary of turn one",
+        retainedTail: [],
+        tokensBefore: 100,
+      },
+      "main",
+    );
     await session.appendMessage({ role: "user", content: "turn two", timestamp: Date.now() });
 
     const metadata = await session.getMetadata();
@@ -83,7 +100,15 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
     const repo = await makeRepo();
     const session = await repo.create({ cwd, id: "s4b" });
     const entryId = await session.appendMessage({ role: "user", content: "turn one", timestamp: Date.now() });
-    await session.moveTo(entryId, { summary: "Branch summary text" });
+    await session.appendEntry(
+      {
+        type: "branch_summary",
+        id: session.idGenerator.next(),
+        fromId: entryId,
+        summary: "Branch summary text",
+      },
+      "main",
+    );
 
     const metadata = await session.getMetadata();
     const record = await projectSessionRecord(session, (metadata as { path: string }).path);
@@ -97,9 +122,9 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   it("prefers the most recently appended session_info entry when multiple exist", async () => {
     const repo = await makeRepo();
     const session = await repo.create({ cwd, id: "s5" });
-    await session.appendSessionName("First Title");
+    await session.setName("First Title");
     await session.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
-    await session.appendSessionName("Second Title");
+    await session.setName("Second Title");
 
     const metadata = await session.getMetadata();
     const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
@@ -111,9 +136,9 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   it("prefers the most recently appended model_change entry when multiple exist", async () => {
     const repo = await makeRepo();
     const session = await repo.create({ cwd, id: "s6" });
-    await session.appendModelChange("openai", "gpt-4o-mini");
+    await appendModelChange(session, "openai", "gpt-4o-mini");
     await session.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
-    await session.appendModelChange("anthropic", "claude-3");
+    await appendModelChange(session, "anthropic", "claude-3");
 
     const metadata = await session.getMetadata();
     const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
