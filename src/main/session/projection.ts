@@ -1,14 +1,14 @@
 import fs from "node:fs";
-import { buildContextEntries } from "@earendil-works/pi-agent-core";
-import type { Entry, Session } from "@earendil-works/pi-agent-core";
 import { qualifyModelId, asBareModelId } from "../model/registry";
+import type { SessionEntry, SessionManager } from "../agent/coding-agent-loaders";
 import type { ActivityRecord, ChatMessage, SessionRecord, SessionSummary } from "../../shared/events";
 
 /**
- * Adapts `@earendil-works/pi-agent-core`'s `JsonlSessionRepo` (session tree
- * + `JsonlSessionMetadata`) to this app's flat `SessionSummary`/`SessionRecord`
- * shapes -- the on-disk format has no `title`/`updatedAt`/`model` fields, so
- * all three are derived here.
+ * Adapts `@earendil-works/pi-coding-agent`'s `SessionManager` (session tree
+ * + `SessionInfo`/`SessionHeader`) to this app's flat `SessionSummary`/
+ * `SessionRecord` shapes -- the on-disk format has no `title`/`updatedAt`
+ * field, so both are derived here (`model` is read from `getEntries()`'s own
+ * `model_change` entries).
  *
  * Title derivation and the compaction-aware entry-to-message projection are
  * deliberately reduced-scope adaptations of two upstream patterns from
@@ -17,14 +17,15 @@ import type { ActivityRecord, ChatMessage, SessionRecord, SessionSummary } from 
  * tree->flat projection, ~lines 401-459): latest `session_info` name wins,
  * else the first user message (trimmed/truncated), else "(untitled)".
  *
- * `updatedAt` has no equivalent in `JsonlSessionMetadata` at all -- this
- * uses the on-disk JSONL file's mtime, which is simpler and just as accurate
- * as re-deriving a timestamp from the last session entry, since every
- * `Session.append*` call appends to (and touches the mtime of) that same file.
+ * `updatedAt` has no equivalent on `SessionHeader`/`SessionInfo` at all --
+ * this uses the on-disk JSONL file's mtime, which is simpler and just as
+ * accurate as re-deriving a timestamp from the last session entry, since
+ * every `SessionManager.append*` call appends to (and touches the mtime of)
+ * that same file once it has been flushed to disk.
  */
 const TITLE_MAX_LENGTH = 80;
 
-function deriveTitle(entries: readonly Entry[], sessionName: string | undefined): string {
+function deriveTitle(entries: readonly SessionEntry[], sessionName: string | undefined): string {
   if (sessionName) return sessionName;
 
   const firstUserMessage = entries.find(
@@ -100,7 +101,7 @@ function firstStringField(record: Record<string, unknown>, keys: string[]): stri
   return undefined;
 }
 
-function deriveModel(entries: readonly Entry[]): string {
+function deriveModel(entries: readonly SessionEntry[]): string {
   const modelChange = [...entries].reverse().find((entry) => entry.type === "model_change");
   if (modelChange?.type === "model_change") {
     return qualifyModelId(modelChange.provider, asBareModelId(modelChange.modelId));
@@ -129,7 +130,7 @@ interface PendingToolCall {
  * `runtime.ts` while a chat is live), so `durationMs` is always `0` here for
  * restored sessions -- not a fabricated value, just "unknown".
  */
-function entriesToMessages(entries: readonly Entry[]): ChatMessage[] {
+function entriesToMessages(entries: readonly SessionEntry[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
   const pendingToolCalls = new Map<string, PendingToolCall>();
   let pendingActivity: ActivityRecord[] = [];
@@ -185,26 +186,27 @@ function entriesToMessages(entries: readonly Entry[]): ChatMessage[] {
 }
 
 export async function projectSessionSummary(
-  session: Session,
+  session: SessionManager,
   metadataPath: string,
 ): Promise<SessionSummary> {
-  const metadata = await session.getMetadata();
-  const entries = await session.findEntries({ order: "oldestFirst" });
+  const header = session.getHeader();
+  if (!header) throw new Error("Cannot project an in-memory session without a header");
+  const entries = session.getEntries();
   const updatedAt = fs.existsSync(metadataPath) ? fs.statSync(metadataPath).mtimeMs : Date.now();
 
   return {
-    id: metadata.id,
-    title: deriveTitle(entries, await session.getName()),
+    id: header.id,
+    title: deriveTitle(entries, session.getSessionName()),
     model: deriveModel(entries),
     updatedAt,
   };
 }
 
 export async function projectSessionRecord(
-  session: Session,
+  session: SessionManager,
   metadataPath: string,
 ): Promise<SessionRecord> {
   const summary = await projectSessionSummary(session, metadataPath);
-  const entries = buildContextEntries(await session.findEntriesOnBranch({ order: "oldestFirst" }));
+  const entries = session.buildContextEntries();
   return { ...summary, messages: entriesToMessages(entries) };
 }

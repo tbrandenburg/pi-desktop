@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Session } from "@earendil-works/pi-agent-core";
+import type { SessionManager } from "../agent/coding-agent-loaders";
 import { projectSessionRecord, projectSessionSummary } from "./projection";
-import { realAgentCoreLoaders } from "../agent/test-support/real-agent-core-loaders";
+import { realCodingAgentLoaders } from "../agent/test-support/real-coding-agent-loaders";
 
-describe("session-projection (real JsonlSessionRepo, real disk)", () => {
+describe("session-projection (real pi-coding-agent SessionManager, real disk)", () => {
   let cwd: string;
 
   beforeEach(() => {
@@ -17,23 +17,23 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
     fs.rmSync(cwd, { recursive: true, force: true });
   });
 
-  async function makeRepo() {
-    const { JsonlSessionRepo } = await realAgentCoreLoaders.loadAgentCore!();
-    const { NodeExecutionEnv } = await realAgentCoreLoaders.loadAgentCoreNode!();
-    const env = new NodeExecutionEnv({ cwd });
-    return new JsonlSessionRepo({ fs: env, sessionsRoot: cwd });
+  async function makeSession(id: string): Promise<SessionManager> {
+    const { SessionManager } = await realCodingAgentLoaders.loadCodingAgent!();
+    return SessionManager.create(cwd, cwd, { id });
   }
 
-  async function appendModelChange(session: Session, provider: string, modelId: string) {
-    await session.appendEntry(
-      { type: "model_change", id: session.idGenerator.next(), provider, modelId },
-      "main",
-    );
+  function sessionPath(session: SessionManager): string {
+    const sessionFile = session.getSessionFile();
+    if (!sessionFile) throw new Error("expected a persisted session file");
+    return sessionFile;
+  }
+
+  function appendModelChange(session: SessionManager, provider: string, modelId: string) {
+    session.appendModelChange(provider, modelId);
   }
 
   it("titles a session from its first real user message, trimmed and truncated", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s1" });
+    const session = await makeSession("s1");
     await session.appendMessage({
       role: "user",
       content: `  ${"x".repeat(100)}  `,
@@ -41,8 +41,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
     });
     await appendModelChange(session, "openai", "gpt-4o-mini");
 
-    const metadata = await session.getMetadata();
-    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+    const summary = await projectSessionSummary(session, sessionPath(session));
 
     expect(summary.title).toBe(`${"x".repeat(80)}...`);
     expect(summary.model).toBe("openai/gpt-4o-mini");
@@ -50,45 +49,30 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   });
 
   it("prefers an explicit session_info name over the first user message", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s2" });
+    const session = await makeSession("s2");
     await session.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
-    await session.setName("Custom Title");
+    session.appendSessionInfo("Custom Title");
 
-    const metadata = await session.getMetadata();
-    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+    const summary = await projectSessionSummary(session, sessionPath(session));
 
     expect(summary.title).toBe("Custom Title");
   });
 
   it("falls back to '(untitled)' when there is no user message or session name", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s3" });
+    const session = await makeSession("s3");
 
-    const metadata = await session.getMetadata();
-    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+    const summary = await projectSessionSummary(session, sessionPath(session));
 
     expect(summary.title).toBe("(untitled)");
   });
 
   it("projects a compaction entry as a single summary bubble, omitting summarized turns", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s4" });
+    const session = await makeSession("s4");
     await session.appendMessage({ role: "user", content: "turn one", timestamp: Date.now() });
-    await session.appendEntry(
-      {
-        type: "compaction",
-        id: session.idGenerator.next(),
-        summary: "Summary of turn one",
-        retainedTail: [],
-        tokensBefore: 100,
-      },
-      "main",
-    );
+    session.appendCompaction("Summary of turn one", "no-retained-entry", 100);
     await session.appendMessage({ role: "user", content: "turn two", timestamp: Date.now() });
 
-    const metadata = await session.getMetadata();
-    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+    const record = await projectSessionRecord(session, sessionPath(session));
 
     expect(record.messages).toEqual([
       { role: "system", content: "Summary of turn one" },
@@ -97,21 +81,11 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   });
 
   it("projects a branch_summary entry as a system bubble", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s4b" });
+    const session = await makeSession("s4b");
     const entryId = await session.appendMessage({ role: "user", content: "turn one", timestamp: Date.now() });
-    await session.appendEntry(
-      {
-        type: "branch_summary",
-        id: session.idGenerator.next(),
-        fromId: entryId,
-        summary: "Branch summary text",
-      },
-      "main",
-    );
+    session.branchWithSummary(entryId, "Branch summary text");
 
-    const metadata = await session.getMetadata();
-    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+    const record = await projectSessionRecord(session, sessionPath(session));
 
     expect(record.messages).toEqual([
       { role: "user", content: "turn one" },
@@ -120,36 +94,31 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   });
 
   it("prefers the most recently appended session_info entry when multiple exist", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s5" });
-    await session.setName("First Title");
+    const session = await makeSession("s5");
+    session.appendSessionInfo("First Title");
     await session.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
-    await session.setName("Second Title");
+    session.appendSessionInfo("Second Title");
 
-    const metadata = await session.getMetadata();
-    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+    const summary = await projectSessionSummary(session, sessionPath(session));
 
     expect(summary.title).toBe("Second Title");
     expect(summary.title).not.toBe("First Title");
   });
 
   it("prefers the most recently appended model_change entry when multiple exist", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s6" });
+    const session = await makeSession("s6");
     await appendModelChange(session, "openai", "gpt-4o-mini");
     await session.appendMessage({ role: "user", content: "hi", timestamp: Date.now() });
     await appendModelChange(session, "anthropic", "claude-3");
 
-    const metadata = await session.getMetadata();
-    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+    const summary = await projectSessionSummary(session, sessionPath(session));
 
     expect(summary.model).toBe("anthropic/claude-3");
     expect(summary.model).not.toBe("openai/gpt-4o-mini");
   });
 
   it("skips a leading assistant message and titles from the first real user message", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s7" });
+    const session = await makeSession("s7");
     await session.appendMessage({
       role: "assistant",
       content: [{ type: "text", text: "assistant said this first" }],
@@ -162,16 +131,14 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
     });
     await session.appendMessage({ role: "user", content: "the real user message", timestamp: Date.now() });
 
-    const metadata = await session.getMetadata();
-    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+    const summary = await projectSessionSummary(session, sessionPath(session));
 
     expect(summary.title).toBe("the real user message");
     expect(summary.title).not.toContain("assistant said this first");
   });
 
   it("derives the title from a user message whose content is content blocks, not a plain string", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s8" });
+    const session = await makeSession("s8");
     await session.appendMessage({
       role: "user",
       content: [
@@ -181,39 +148,33 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
       timestamp: Date.now(),
     });
 
-    const metadata = await session.getMetadata();
-    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+    const summary = await projectSessionSummary(session, sessionPath(session));
 
     expect(summary.title).toBe("block one block two");
   });
 
   it("falls back to '(untitled)' when the only user message trims to an empty string", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s9" });
+    const session = await makeSession("s9");
     await session.appendMessage({ role: "user", content: "   ", timestamp: Date.now() });
 
-    const metadata = await session.getMetadata();
-    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+    const summary = await projectSessionSummary(session, sessionPath(session));
 
     expect(summary.title).toBe("(untitled)");
   });
 
   it("does not truncate or add ellipsis to a title exactly at the max length boundary", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s10" });
+    const session = await makeSession("s10");
     const exact = "y".repeat(80);
     await session.appendMessage({ role: "user", content: exact, timestamp: Date.now() });
 
-    const metadata = await session.getMetadata();
-    const summary = await projectSessionSummary(session, (metadata as { path: string }).path);
+    const summary = await projectSessionSummary(session, sessionPath(session));
 
     expect(summary.title).toBe(exact);
     expect(summary.title.endsWith("...")).toBe(false);
   });
 
   it("projects an assistant message's text content blocks joined into a single message", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s11" });
+    const session = await makeSession("s11");
     await session.appendMessage({ role: "user", content: "question", timestamp: Date.now() });
     await session.appendMessage({
       role: "assistant",
@@ -229,8 +190,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
       timestamp: Date.now(),
     });
 
-    const metadata = await session.getMetadata();
-    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+    const record = await projectSessionRecord(session, sessionPath(session));
 
     expect(record.messages).toEqual([
       { role: "user", content: "question" },
@@ -239,8 +199,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   });
 
   it("projects a matched toolCall/toolResult pair into the following assistant message's activity", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s13" });
+    const session = await makeSession("s13");
     await session.appendMessage({ role: "user", content: "list files", timestamp: Date.now() });
     await session.appendMessage({
       role: "assistant",
@@ -271,8 +230,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
       timestamp: Date.now(),
     });
 
-    const metadata = await session.getMetadata();
-    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+    const record = await projectSessionRecord(session, sessionPath(session));
 
     const finalAssistant = record.messages.find(
       (message) => message.role === "assistant" && message.content === "Found one file.",
@@ -282,8 +240,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   });
 
   it("projects a toolResult with a source-shaped 'details' payload into ActivityRecord.sources (issue #157)", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s13b" });
+    const session = await makeSession("s13b");
     await session.appendMessage({ role: "user", content: "search the web", timestamp: Date.now() });
     await session.appendMessage({
       role: "assistant",
@@ -315,8 +272,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
       timestamp: Date.now(),
     });
 
-    const metadata = await session.getMetadata();
-    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+    const record = await projectSessionRecord(session, sessionPath(session));
 
     const finalAssistant = record.messages.find(
       (message) => message.role === "assistant" && message.content === "It's sunny.",
@@ -328,8 +284,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   });
 
   it("leaves ActivityRecord.sources absent (not an empty array) when the toolResult's 'details' payload has no recognizable source shape", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s13c" });
+    const session = await makeSession("s13c");
     await session.appendMessage({ role: "user", content: "list files", timestamp: Date.now() });
     await session.appendMessage({
       role: "assistant",
@@ -361,8 +316,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
       timestamp: Date.now(),
     });
 
-    const metadata = await session.getMetadata();
-    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+    const record = await projectSessionRecord(session, sessionPath(session));
 
     const finalAssistant = record.messages.find(
       (message) => message.role === "assistant" && message.content === "Found one file.",
@@ -372,8 +326,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   });
 
   it("does not add an activity field to a plain-text assistant message with no tool calls", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s14" });
+    const session = await makeSession("s14");
     await session.appendMessage({ role: "user", content: "hello", timestamp: Date.now() });
     await session.appendMessage({
       role: "assistant",
@@ -386,8 +339,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
       timestamp: Date.now(),
     });
 
-    const metadata = await session.getMetadata();
-    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+    const record = await projectSessionRecord(session, sessionPath(session));
 
     const assistantMessage = record.messages.find((message) => message.role === "assistant");
     expect(assistantMessage?.content).toBe("hi there");
@@ -395,8 +347,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   });
 
   it("does not throw on an unmatched toolCall with no corresponding toolResult", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s15" });
+    const session = await makeSession("s15");
     await session.appendMessage({ role: "user", content: "do something", timestamp: Date.now() });
     await session.appendMessage({
       role: "assistant",
@@ -409,8 +360,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
       timestamp: Date.now(),
     });
 
-    const metadata = await session.getMetadata();
-    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+    const record = await projectSessionRecord(session, sessionPath(session));
 
     const assistantMessage = record.messages.find((message) => message.role === "assistant");
     expect(assistantMessage?.content).toBe("");
@@ -418,8 +368,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
   });
 
   it("projects a user message whose content is content blocks (not a string) into joined text", async () => {
-    const repo = await makeRepo();
-    const session = await repo.create({ cwd, id: "s12" });
+    const session = await makeSession("s12");
     await session.appendMessage({
       role: "user",
       content: [
@@ -429,8 +378,7 @@ describe("session-projection (real JsonlSessionRepo, real disk)", () => {
       timestamp: Date.now(),
     });
 
-    const metadata = await session.getMetadata();
-    const record = await projectSessionRecord(session, (metadata as { path: string }).path);
+    const record = await projectSessionRecord(session, sessionPath(session));
 
     expect(record.messages).toEqual([{ role: "user", content: "hello world" }]);
   });
