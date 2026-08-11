@@ -45,7 +45,40 @@ if [ ! -f "$SUMMARY_FILE" ]; then
 fi
 
 baseline=$(tr -d '[:space:]' < "$BASELINE_FILE")
-current=$(node -p "require('./$SUMMARY_FILE').total.statements.pct")
+current=$(node - "$SUMMARY_FILE" <<'NODE'
+const fs = require("fs");
+
+const summaryFile = process.argv[2];
+let summary;
+try {
+  summary = JSON.parse(fs.readFileSync(summaryFile, "utf8"));
+} catch {
+  console.error(`error: ${summaryFile} is not a valid coverage summary.`);
+  process.exit(1);
+}
+const statements = summary.total?.statements;
+const pct = statements?.pct;
+
+if (
+  !statements ||
+  !Number.isFinite(statements.total) ||
+  statements.total <= 0 ||
+  !Number.isFinite(statements.covered) ||
+  statements.covered < 0 ||
+  statements.covered > statements.total ||
+  !Number.isFinite(pct) ||
+  pct < 0 ||
+  pct > 100
+) {
+  console.error(
+    `error: ${summaryFile} has invalid statement coverage (expected a nonzero total and a percentage from 0 to 100).`,
+  );
+  process.exit(1);
+}
+
+process.stdout.write(String(pct));
+NODE
+)
 
 if [ -z "$baseline" ]; then
   echo "error: $BASELINE_FILE is empty." >&2
