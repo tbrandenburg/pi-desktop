@@ -135,6 +135,36 @@ stylesheet or a per-component test. Use the browser fake bridge for renderer UI 
   after merge. Quote backtick-containing GitHub bodies safely and re-fetch them.
 - Check `git status`/`git log` after interrupted work, and compare branches with
   read-only `git diff`; never use a repo-wide `git checkout <branch> -- .`.
+- 2026-08-11: A lockstep dependency bump (`npm ci` + `npm run check` green) is not
+  proof of compatibility if the two updated packages disagree on a shared on-disk
+  format they both claim to support (here: `pi-coding-agent@0.84.1` writes session
+  JSONL v3, `pi-agent-core@0.84.1` requires v4). Root-cause by reading each
+  package's own compiled constants/source before rewriting call sites; the correct
+  fix was routing all reads through the same library that already owns writing,
+  not reconciling two disagreeing libraries.
+- 2026-08-11: A duration/behavior breach in `make test` naming a file no branch
+  touched is not automatically a regression, but is not automatically flake
+  either — isolate the single file, then re-run the full suite once cleanly
+  before concluding either way.
+- 2026-08-11: When a merged test asserts an exact array/length against a real
+  (non-mocked) production registry, verify what the production function
+  actually, intentionally returns (e.g. a full catalog with per-entry
+  `configured` flags, not a pre-filtered list) before assuming the assertion —
+  not the code — is correct.
+- 2026-08-11: After fixing a typecheck error found by `make lint`, re-run
+  `git status --short` before considering the branch clean; a verified fix that
+  was never `git add`/committed is invisible to the next validation pass and
+  will resurface as a false regression later.
+- 2026-08-11: A model's status glyph is not simply "configured y/n" — this
+  app's Tier 1 credential-state glyphs (`○` missing, `◌` free/keyless, `◐`
+  OAuth resolved, `⚿` OAuth session expired) mean different things; read
+  `modelStatus()`'s own tests before interpreting a picker glyph as a bug.
+- 2026-08-11: A real E2E failure against one specific provider/model (here,
+  Anthropic-route models via OpenRouter rejecting a `cache_control` tool
+  field) does not block a PR whose own changes are unrelated to that request
+  path — isolate by trying a different model/provider first; if the
+  alternate path succeeds end-to-end, file the specific failure as a separate
+  follow-up instead of treating it as a regression in the change under review.
 
 ## Archived incident narratives
 
