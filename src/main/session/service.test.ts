@@ -12,19 +12,21 @@ import type { ChatEvent, StartChatRequest } from "../../shared/events";
 /**
  * Proves the issue #90 follow-up fix end-to-end: a session written by the
  * real `AgentRuntime`/`SessionManager` path (pi-coding-agent) is genuinely
- * visible via `SessionService.list()`/`.get()` (pi-agent-core's
- * `JsonlSessionRepo`), against a real throwaway disk directory -- not a
- * mock of either session API. Before the fix, `SessionService` pointed its
- * `JsonlSessionRepo` at bare `cwd` while `AgentRuntime` wrote to
- * `<agentDir>/sessions/<encoded-cwd>`, so `list()` always returned `[]` for
- * a session `AgentRuntime` had just created.
+ * visible via `SessionService.list()`/`.get()`, which reads through that
+ * same `SessionManager` class (issue #208 follow-up -- not
+ * `@earendil-works/pi-agent-core`'s `JsonlSessionRepo`, which expects a
+ * different on-disk session format), against a real throwaway disk
+ * directory -- not a mock of either session API. Before the #90 fix,
+ * `SessionService` pointed its session lookup at bare `cwd` while
+ * `AgentRuntime` wrote to `<agentDir>/sessions/<encoded-cwd>`, so `list()`
+ * always returned `[]` for a session `AgentRuntime` had just created.
  *
  * Isolation from the real developer's `~/.pi/agent` uses the same
  * `PI_CODING_AGENT_DIR` env var trick `runtime.test.ts` uses: both `AgentRuntime`
  * (via `SessionManager`'s default resolution) and `SessionService` (via
- * `getAgentDir()` directly) independently honor it, so they land on the
- * exact same real default `<agentDir>/sessions/<encoded-cwd>` directory
- * with zero extra plumbing.
+ * `SessionManager.list`'s own default resolution) independently honor it,
+ * so they land on the exact same real default
+ * `<agentDir>/sessions/<encoded-cwd>` directory with zero extra plumbing.
  */
 describe("SessionService sees sessions written by the real AgentRuntime (issue #90 follow-up)", () => {
   let cwd: string;

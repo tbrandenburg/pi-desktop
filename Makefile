@@ -9,6 +9,7 @@ VERSION = $(shell node -p "require('./package.json').version")
 .PHONY: help install run stop test lint check audit build build-renderer build-main clean \
         dist dist-linux dist-win dist-mac pack \
         run-bundled run-linux run-win run-mac \
+        e2e-packaged e2e-stop \
         install-app install-app-linux uninstall-app uninstall-app-linux \
         version-patch version-minor version-major release publish \
         release-patch release-minor release-major
@@ -40,6 +41,10 @@ help:
 	@echo "  make run-win     Run the built Windows app (native .exe, or via"
 	@echo "                   'wine' when cross-running from Linux/macOS)"
 	@echo "  make run-mac     Run the built macOS app (macOS only)"
+	@echo "  make e2e-packaged MSG=..."
+	@echo "                   Launch the packaged AppImage and verify a real chat"
+	@echo "                   turn via CDP; writes a screenshot and cleans up"
+	@echo "  make e2e-stop     Stop the owned packaged E2E process safely"
 	@echo "  make install-app Install the built Linux AppImage as the 'pi-desktop'"
 	@echo "                   command (~/.local/bin) + app launcher entry"
 	@echo "                   (make dist-linux must have run first; Linux only)"
@@ -234,6 +239,18 @@ run-mac:
 	fi; \
 	echo "Running: $$app"; \
 	open "$$app"
+
+## Run one real packaged-app chat turn through CDP.
+## Requires an existing release/*.AppImage and MSG="...". The script chooses
+## a free debug port, waits for the page target, verifies submission + idle
+## reply, writes a PNG, and tears down only its own process group.
+e2e-packaged: export MSG := $(MSG)
+e2e-packaged:
+	@bash scripts/e2e-packaged.sh
+
+## Stop the packaged E2E process recorded by e2e-packaged.
+e2e-stop:
+	bash scripts/e2e-packaged.sh stop
 
 ## --- Install/uninstall the bundled app as a 'pi-desktop' command ----------
 ##

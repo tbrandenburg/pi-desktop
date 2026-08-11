@@ -357,7 +357,10 @@ describe("readProvidersFromAgentDir", () => {
     expect(options).toHaveLength(1);
     expect(options[0].id).toBe("myprovider");
     expect(options[0].models).toHaveLength(2);
-    const auth = await options[0].auth.apiKey?.resolve({ ctx: {} as never });
+    const auth = await options[0].auth.apiKey?.resolve({
+      ctx: { env: async (name) => process.env[name], fileExists: async () => false },
+      signal: new AbortController().signal,
+    });
     expect(auth?.auth.apiKey).toBe("sk-literal");
   });
 
@@ -378,7 +381,10 @@ describe("readProvidersFromAgentDir", () => {
     );
     const options = await readProvidersFromAgentDir(dir, loadApiModule);
     expect(options).toHaveLength(1);
-    const auth = await options[0].auth.apiKey?.resolve({ ctx: {} as never });
+    const auth = await options[0].auth.apiKey?.resolve({
+      ctx: { env: async (name) => process.env[name], fileExists: async () => false },
+      signal: new AbortController().signal,
+    });
     expect(auth?.auth.apiKey).toBe("sk-from-env");
   });
 
