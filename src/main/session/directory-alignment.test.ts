@@ -12,8 +12,8 @@ import type { ChatEvent, StartChatRequest } from "../../shared/events";
 /**
  * Regression test for issue #112: proves `AgentRuntime` (via
  * `SessionManager`'s default cwd-encoded session directory) and
- * `SessionService` (via a hand-built `JsonlSessionRepo` pointed at
- * `<agentDir>/sessions`, see `service.ts`'s own doc comment) independently
+ * `SessionService` (which reads through that same `SessionManager` class,
+ * see `service.ts`'s own doc comment and issue #208's follow-up) independently
  * resolve to the *same* on-disk directory for a *given* cwd -- not just
  * that some directory happens to be readable by both.
  *
@@ -28,8 +28,8 @@ import type { ChatEvent, StartChatRequest } from "../../shared/events";
  *    merely that they happen to share one single directory in a
  *    single-cwd test.
  * 2. A real (uncommitted-break) demonstration that this test genuinely
- *    fails when the alignment is broken: a `JsonlSessionRepo` pointed at
- *    the pre-#90-fix, incorrect `sessionsRoot` (bare `cwd`, the historical
+ *    fails when the alignment is broken: `SessionManager.list()` pointed at
+ *    the pre-#90-fix, incorrect session directory (bare `cwd`, the historical
  *    bug `service.ts`'s own comment references) does NOT see the session
  *    `AgentRuntime` wrote -- confirming this test class would have caught
  *    that regression, without modifying `service.ts` itself.
@@ -110,16 +110,13 @@ describe("AgentRuntime and SessionService agree on session-directory encoding (i
       expect(events.at(-1)).toEqual({ type: "completed", requestId: "req-1" });
 
       // Deliberately mirror the historical bug this issue is guarding
-      // against: a `JsonlSessionRepo` rooted at bare `cwd` instead of
+      // against: `SessionManager.list()` rooted at bare `cwd` instead of
       // `<agentDir>/sessions` (i.e. `service.ts` before the #90 fix). This
-      // does not modify `service.ts`; it's a standalone repo built inline
-      // from the same real, unmocked `pi-agent-core` classes to prove the
-      // alignment check has real discriminating power.
-      const { JsonlSessionRepo } = await realAgentCoreLoaders.loadAgentCore!();
-      const { NodeExecutionEnv } = await realAgentCoreLoaders.loadAgentCoreNode!();
-      const env = new NodeExecutionEnv({ cwd });
-      const brokenRepo = new JsonlSessionRepo({ fs: env, sessionsRoot: cwd });
-      const brokenList = await brokenRepo.list({ cwd });
+      // does not modify `service.ts`; it's a standalone call using the same
+      // real, unmocked `SessionManager` class to prove the alignment check
+      // has real discriminating power.
+      const { SessionManager } = await realCodingAgentLoaders.loadCodingAgent!();
+      const brokenList = await SessionManager.list(cwd, cwd);
 
       expect(brokenList).toHaveLength(0);
 

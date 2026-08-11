@@ -10,8 +10,10 @@ import type {
   DefaultResourceLoader as DefaultResourceLoaderType,
   ModelRuntime as ModelRuntimeType,
   CreateModelRuntimeOptions as CreateModelRuntimeOptionsType,
-  ProjectTrustStore as ProjectTrustStoreType,
-  SessionManager as SessionManagerType,
+   ProjectTrustStore as ProjectTrustStoreType,
+   SessionManager as SessionManagerType,
+   SessionEntry as SessionEntryType,
+   SessionInfo as SessionInfoType,
   SettingsManager as SettingsManagerType,
   ToolDefinition as ToolDefinitionType,
 } from "@earendil-works/pi-coding-agent";
@@ -47,11 +49,11 @@ export interface CodingAgentModule {
    * Resolves pi-coding-agent's config directory (`~/.pi/agent`, or
    * `$PI_CODING_AGENT_DIR` if set). `AgentRuntime` relies on this being the *same*
    * default `createAgentSession`/`SessionManager`/`ModelRuntime` already use
-   * internally when no `agentDir` override is passed -- `SessionService`
-   * (`src/main/session/service.ts`) uses it to point its own
-   * `JsonlSessionRepo` at the exact same `<agentDir>/sessions/<encoded-cwd>`
-   * directory `SessionManager` writes to, so both read/write the same
-   * on-disk session files (see issue #90 follow-up).
+   * internally when no `agentDir` override is passed. `SessionService`
+   * (`src/main/session/service.ts`) reads/lists/deletes sessions through this
+   * same `SessionManager` class -- not `@earendil-works/pi-agent-core`'s
+   * `JsonlSessionRepo` -- so both write and read the identical v3 JSONL
+   * format via one single library (see issue #208 follow-up).
    */
   getAgentDir: typeof getAgentDirType;
   /** Reuses pi's own `DefaultPackageManager` AS-IS (ADR 0001 §3.6/§3.7, issue #92) -- see `../packages/service.ts`. */
@@ -99,4 +101,7 @@ export type {
   CreateModelRuntimeOptionsType as CreateModelRuntimeOptions,
   ModelRuntimeType as ModelRuntime,
   ToolDefinitionType as ToolDefinition,
+  SessionManagerType as SessionManager,
+  SessionEntryType as SessionEntry,
+  SessionInfoType as SessionInfo,
 };
