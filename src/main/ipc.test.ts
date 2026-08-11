@@ -6,7 +6,7 @@ import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { AgentRuntime as RealAgentRuntime } from "./agent/runtime";
 import type { AgentRuntime, AgentRuntimeRunArgs } from "./agent/runtime";
-import type { ChatEvent, StartChatRequest } from "../shared/events";
+import type { ChatEvent, ModelInfo, StartChatRequest } from "../shared/events";
 import { realAgentCoreLoaders } from "./agent/test-support/real-agent-core-loaders";
 import { realCodingAgentLoaders } from "./agent/test-support/real-coding-agent-loaders";
 import { buildFakeModelRuntime, FAKE_PROVIDER_ID } from "./agent/test-support/fake-model-runtime";
@@ -486,7 +486,7 @@ describe("IPC settings round-trip integration", () => {
         modelsLoaders: realModelsLoaders,
       });
 
-      const models = await invoke("model:list");
+      const models = (await invoke("model:list")) as ModelInfo[];
 
       // `model:list` intentionally returns the full built-in provider
       // catalog alongside app-configured ones (unconfigured entries are
