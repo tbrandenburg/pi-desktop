@@ -9,6 +9,7 @@ import {
 } from "./coding-agent-loaders";
 import { setModelVerification } from "../model/model-status";
 import { qualifyModelId, asBareModelId } from "../model/registry";
+import { logTurnTiming } from "../debug-timing";
 
 export interface AgentRuntimeRunArgs {
   requestId: string;
@@ -127,7 +128,9 @@ export class AgentRuntime {
     // `ModelRuntime.create()` discovers models the exact same way the `pi`
     // CLI does: built-in provider catalogs plus `~/.pi/agent/auth.json` /
     // `models.json`.
+    const modelRuntimeStart = Date.now();
     const modelRuntime = injectedModelRuntime ?? (await ModelRuntime.create({ allowModelNetwork: false }));
+    logTurnTiming(requestId, "ModelRuntime.create", Date.now() - modelRuntimeStart);
     // `ModelRuntime`'s own discovery (builtin catalogs + `~/.pi/agent/{auth,models}.json`)
     // covers most providers already. It does not know about pi-desktop's
     // own single-slot `app-settings` provider (baseUrl/model configured
@@ -183,6 +186,7 @@ export class AgentRuntime {
       resourceLoader ??
       (await this.buildBundledExtensionsResourceLoader(DefaultResourceLoader, SettingsManager, getAgentDir, cwd));
 
+    const sessionStart = Date.now();
     const { session } = await createAgentSession({
       cwd,
       modelRuntime,
@@ -190,6 +194,7 @@ export class AgentRuntime {
       sessionManager,
       resourceLoader: effectiveResourceLoader,
     });
+    logTurnTiming(requestId, "createAgentSession", Date.now() - sessionStart);
 
     // Phase 2 (ADR 0001 §3.4, issue #91): wire the real IPC-backed
     // `ExtensionUIContext` so `ctx.ui.select/confirm/input/notify` calls
@@ -204,8 +209,18 @@ export class AgentRuntime {
     }
 
     const startedToolCallIds = new Set<string>();
+    const streamStart = Date.now();
+    let firstTokenLogged = false;
     const unsubscribe = session.subscribe((event) => {
       if (event.type === "tool_execution_start") startedToolCallIds.add(event.toolCallId);
+      if (
+        !firstTokenLogged &&
+        event.type === "message_update" &&
+        event.assistantMessageEvent.type === "text_delta"
+      ) {
+        firstTokenLogged = true;
+        logTurnTiming(requestId, "firstToken", Date.now() - streamStart);
+      }
       this.forward(requestId, event, emit);
     });
     const onAbort = () => {
@@ -223,6 +238,7 @@ export class AgentRuntime {
 
     try {
       await session.prompt(lastUserMessage.content);
+      logTurnTiming(requestId, "streamComplete", Date.now() - streamStart);
 
       // `session.prompt()` deliberately never throws for a request/model/
       // runtime failure (see pi-agent-core's `StreamFn` contract) -- a

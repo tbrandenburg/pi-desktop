@@ -14,6 +14,7 @@ import {
 import type { SettingsStore } from "../settings/store";
 import { AgentRuntime } from "../agent/runtime";
 import { IpcUIContextBridge } from "../agent/ui-context";
+import { logTurnTiming } from "../debug-timing";
 
 async function loadModelsRegistryForChat(
   settings: { apiKey: string; baseUrl: string; model: string },
@@ -159,7 +160,9 @@ export class ChatService {
         return;
       }
 
+      const registryStart = Date.now();
       const registry = await this.loadModelsRegistry(settings);
+      logTurnTiming(requestId, "loadModelsRegistry", Date.now() - registryStart);
       const found = findModelById(registry.models, modelId);
       if (!found) {
         this.emit({
