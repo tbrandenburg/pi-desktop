@@ -88,6 +88,79 @@ export function probeDurationSeconds(videoPath: string): number {
 }
 
 /**
+ * Probes a video's average frame rate (fps) using ffprobe's `r_frame_rate`
+ * (a rational like "30000/1001" or "10/1"). Throws on failure.
+ */
+export function probeFrameRateFps(videoPath: string): number {
+  const childProcess = loadChildProcess();
+  const result = childProcess.spawnSync(
+    "ffprobe",
+    [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=r_frame_rate",
+      "-of",
+      "default=noprint_wrappers=1:nokey=1",
+      videoPath,
+    ],
+    { encoding: "utf-8" },
+  );
+  if (result.status !== 0) {
+    throw new FfmpegExtractionError(
+      `ffprobe failed to read frame rate for "${videoPath}" (exit ${result.status})`,
+      result.stderr,
+    );
+  }
+  const raw = result.stdout.trim();
+  const [numeratorText, denominatorText] = raw.split("/");
+  const numerator = Number.parseFloat(numeratorText ?? "");
+  const denominator = denominatorText === undefined ? 1 : Number.parseFloat(denominatorText);
+  const fps = denominator === 0 ? Number.NaN : numerator / denominator;
+  if (!Number.isFinite(fps) || fps <= 0) {
+    throw new FfmpegExtractionError(`ffprobe returned an invalid frame rate for "${videoPath}": "${raw}"`, result.stderr);
+  }
+  return fps;
+}
+
+/**
+ * Computes the maximum `frameCount` that can safely be extracted from a clip
+ * of the given duration and source frame rate, without the last inset
+ * timestamp landing past the last decodable frame.
+ *
+ * Frames are requested at inset fractions `(i + 0.5) / frameCount` of the
+ * duration (see `extractFramesAsBase64Jpegs`), so the last requested
+ * timestamp is `duration * (frameCount - 0.5) / frameCount`. The last frame a
+ * container actually has decodable is at approximately `duration - 1/fps`
+ * (one source-frame-interval before the reported duration): ffmpeg's `-ss`
+ * seek finds no frame and silently exits 0 with an empty output file for any
+ * later timestamp (verified against real fixtures below). Solving
+ * `duration * (frameCount - 0.5) / frameCount <= duration - 1/fps` for an
+ * integer frameCount gives `floor(fps * duration / 2)`.
+ *
+ * Verified against real synthetic fixtures (10fps testsrc, real ffmpeg
+ * subprocess calls, no mocking):
+ *   - 2s @ 10fps: formula gives max=10. frameCount=10 (last ts=1.900s)
+ *     produced a real frame; frameCount=11 (last ts=1.909s) produced no
+ *     output file despite ffmpeg exiting 0.
+ *   - 5s @ 10fps: formula gives max=25. frameCount=25 (last ts=4.900s)
+ *     produced a real frame; frameCount=26 (last ts=4.904s) produced no
+ *     output file despite ffmpeg exiting 0.
+ *
+ * If `fps` is not finite/positive (e.g. probing failed upstream), no clamp
+ * is applied (returns `Number.MAX_SAFE_INTEGER`) rather than blocking a
+ * request based on unreliable data.
+ */
+export function computeMaxSafeFrameCount(durationSeconds: number, fps: number): number {
+  if (!Number.isFinite(fps) || fps <= 0 || !Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return Math.max(1, Math.floor((fps * durationSeconds) / 2));
+}
+
+/**
  * Extracts `frameCount` evenly-spaced JPEG frames from a local video file
  * using a real ffmpeg subprocess call, and returns each frame's base64-encoded
  * JPEG bytes. Frames are written to a temp directory that is cleaned up
@@ -319,9 +392,17 @@ export async function understandVideoViaApi(
 
 /**
  * End-to-end helper: extracts frames from a local video file with ffmpeg and
- * sends them to the vision API. Never throws: both the ffmpeg extraction
- * step and the network call are caught and translated into `isError: true`
- * tool results, matching the audio tool's contract.
+ * sends them to the vision API. Never throws: probing failures, the
+ * upfront frameCount clamp, the ffmpeg extraction step, and the network call
+ * are all caught/handled and translated into a `VideoToolResult`, matching
+ * the audio tool's contract.
+ *
+ * Before calling ffmpeg, this probes the real duration and frame rate and
+ * clamps an over-aggressive `frameCount` down to `computeMaxSafeFrameCount`
+ * (clamp-and-warn, not a hard rejection) so a request like "50 frames from a
+ * 5s clip" degrades gracefully to the actual maximum decodable frame count
+ * instead of failing after ffmpeg has already run. The returned text is
+ * prefixed with a note when a clamp occurred.
  */
 export async function understandVideo(
   videoPath: string,
@@ -329,9 +410,31 @@ export async function understandVideo(
   frameCount: number,
   options: UnderstandVideoOptions,
 ): Promise<VideoToolResult> {
+  let effectiveFrameCount = frameCount;
+  let clampNote = "";
+
+  if (Number.isInteger(frameCount) && frameCount >= 1) {
+    try {
+      const duration = probeDurationSeconds(videoPath);
+      const fps = probeFrameRateFps(videoPath);
+      const maxSafeFrameCount = computeMaxSafeFrameCount(duration, fps);
+      if (frameCount > maxSafeFrameCount) {
+        effectiveFrameCount = maxSafeFrameCount;
+        clampNote =
+          `Note: requested frameCount ${frameCount} exceeds the ${maxSafeFrameCount} frames decodable from this ` +
+          `${duration.toFixed(2)}s clip at ~${fps.toFixed(2)}fps (frames near the tail become unseekable beyond ` +
+          `that point); reduced to ${maxSafeFrameCount}.\n\n`;
+      }
+    } catch {
+      // Probing failed upfront (e.g. corrupt file); fall through and let
+      // extractFramesAsBase64Jpegs's own probing/extraction report the
+      // concrete failure below, rather than silently swallowing it here.
+    }
+  }
+
   let frames: string[];
   try {
-    frames = extractFramesAsBase64Jpegs(videoPath, frameCount);
+    frames = extractFramesAsBase64Jpegs(videoPath, effectiveFrameCount);
   } catch (error) {
     return {
       isError: true,
@@ -344,5 +447,9 @@ export async function understandVideo(
     };
   }
 
-  return understandVideoViaApi(frames, prompt, options);
+  const result = await understandVideoViaApi(frames, prompt, options);
+  if (clampNote && !result.isError && result.content[0]) {
+    result.content[0].text = clampNote + result.content[0].text;
+  }
+  return result;
 }

@@ -5,9 +5,11 @@ import { join } from "path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   buildVideoRequest,
+  computeMaxSafeFrameCount,
   extractFramesAsBase64Jpegs,
   extractVideoResponseText,
   FfmpegExtractionError,
+  probeFrameRateFps,
   understandVideo,
   understandVideoViaApi,
   VIDEO_MODEL,
@@ -23,11 +25,17 @@ import {
  */
 let fixtureDir: string;
 let FIXTURE_VIDEO_PATH: string;
+/** A longer (5s, 10fps) fixture used to test the frameCount clamp against a real ffmpeg tail-seek failure. */
+let LONG_FIXTURE_VIDEO_PATH: string;
 
 beforeAll(() => {
   fixtureDir = mkdtempSync(join(tmpdir(), "pi-multimedia-video-fixture-"));
   FIXTURE_VIDEO_PATH = join(fixtureDir, "fixture.mp4");
   execFileSync("ffmpeg", ["-y", "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=10", FIXTURE_VIDEO_PATH], {
+    stdio: "pipe",
+  });
+  LONG_FIXTURE_VIDEO_PATH = join(fixtureDir, "fixture-long.mp4");
+  execFileSync("ffmpeg", ["-y", "-f", "lavfi", "-i", "testsrc=duration=5:size=320x240:rate=10", LONG_FIXTURE_VIDEO_PATH], {
     stdio: "pipe",
   });
 });
@@ -68,6 +76,86 @@ describe("extractFramesAsBase64Jpegs (real ffmpeg subprocess, no network)", () =
     const frames = extractFramesAsBase64Jpegs(FIXTURE_VIDEO_PATH, 10);
     expect(frames).toHaveLength(10);
     expect(frames.every((frame) => frame.length > 0)).toBe(true);
+  });
+});
+
+describe("probeFrameRateFps (real ffprobe subprocess, no network)", () => {
+  it("reports ~10fps for the real 10fps synthetic fixture", () => {
+    const fps = probeFrameRateFps(FIXTURE_VIDEO_PATH);
+    expect(fps).toBeCloseTo(10, 5);
+  });
+
+  it("throws FfmpegExtractionError for a non-existent video file", () => {
+    expect(() => probeFrameRateFps("/tmp/opencode/does-not-exist-12345.mp4")).toThrow(FfmpegExtractionError);
+  });
+});
+
+describe("computeMaxSafeFrameCount", () => {
+  it("matches the real ffmpeg tail-seek boundary measured against a 2s@10fps fixture (max=10)", () => {
+    // Independently derived from real ffmpeg runs (not from the code under
+    // test): requesting frameCount=10 from this real 2s@10fps clip succeeds
+    // (last inset timestamp 1.900s), frameCount=11 fails (last inset
+    // timestamp 1.909s produces no output despite ffmpeg exiting 0).
+    expect(computeMaxSafeFrameCount(2, 10)).toBe(10);
+  });
+
+  it("matches the real ffmpeg tail-seek boundary measured against a 5s@10fps fixture (max=25)", () => {
+    // Independently derived from real ffmpeg runs: frameCount=25 from a real
+    // 5s@10fps clip succeeds (last inset timestamp 4.900s), frameCount=26
+    // fails (last inset timestamp 4.904s produces no output).
+    expect(computeMaxSafeFrameCount(5, 10)).toBe(25);
+  });
+
+  it("does not clamp (returns MAX_SAFE_INTEGER) when fps is unknown/invalid", () => {
+    expect(computeMaxSafeFrameCount(5, 0)).toBe(Number.MAX_SAFE_INTEGER);
+    expect(computeMaxSafeFrameCount(5, Number.NaN)).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("never returns less than 1 even for a very short clip", () => {
+    expect(computeMaxSafeFrameCount(0.01, 10)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("understandVideo frameCount clamp (real ffmpeg + ffprobe, mocked HTTP)", () => {
+  it("succeeds at the exact boundary frameCount (25 frames from the real 5s@10fps clip) without any clamp note", async () => {
+    const fetchFn: FetchFn = async (_url, init) => {
+      const parsedBody = JSON.parse((init as { body: string }).body);
+      const imageBlockCount = parsedBody.messages[0].content.filter((b: { type: string }) => b.type === "image_url").length;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ choices: [{ message: { content: `frames:${imageBlockCount}` } }] }),
+      };
+    };
+
+    const result = await understandVideo(LONG_FIXTURE_VIDEO_PATH, "Describe this.", 25, { apiKey: "test-key", fetchFn });
+
+    expect(result.isError).toBe(false);
+    expect(result.content[0].text).toBe("frames:25");
+    expect(result.content[0].text).not.toContain("Note:");
+  });
+
+  it("clamps an aggressive over-request (50 frames from a real 5s@10fps clip) to the real max BEFORE any ffmpeg failure, and warns in the text", async () => {
+    const fetchFn: FetchFn = async (_url, init) => {
+      const parsedBody = JSON.parse((init as { body: string }).body);
+      const imageBlockCount = parsedBody.messages[0].content.filter((b: { type: string }) => b.type === "image_url").length;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ choices: [{ message: { content: `frames:${imageBlockCount}` } }] }),
+      };
+    };
+
+    const result = await understandVideo(LONG_FIXTURE_VIDEO_PATH, "Describe this.", 50, { apiKey: "test-key", fetchFn });
+
+    // The API only ever receives the clamped 25 frames, not 50: the
+    // over-request never reaches a failing ffmpeg tail-seek call.
+    expect(result.isError).toBe(false);
+    expect(result.content[0].text).toContain("frames:25");
+    expect(result.content[0].text).toContain("requested frameCount 50");
+    expect(result.content[0].text).toContain("reduced to 25");
   });
 });
 
