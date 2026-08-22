@@ -36,7 +36,8 @@ app.whenReady().then(async () => {
   // criterion, even if the env var were somehow set there.
   if (!app.isPackaged && process.env.PI_DESKTOP_WEB_BRIDGE === "1") {
     const port = Number(process.env.PI_DESKTOP_WEB_BRIDGE_PORT) || 4756;
-    await startWebBridgeServer(registry, port);
+    const bridge = await startWebBridgeServer(registry, port);
+    console.log(`[web-bridge] listening on http://127.0.0.1:${bridge.port}`);
   }
 
   if (process.env.PI_DESKTOP_WEB_BRIDGE_HEADLESS !== "1") {

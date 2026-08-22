@@ -72,20 +72,30 @@ install:
 
 ## Start service in dev mode
 run:
-	npm run dev
+	@bash scripts/run-with-sandbox-check.sh dev
 
 ## Start dev mode with the opt-in local web bridge (issue #228): no Electron
 ## window, so a plain browser tab at the printed Vite dev server URL talks to
 ## the real backend instead of the fake bridge. Stop with 'make stop'.
 run-web:
-	npm run dev:web
+	@bash scripts/run-with-sandbox-check.sh dev:web
 
-## Stop any running dev/electron processes started by 'make run'
+## Stop any running dev/electron processes started by 'make run'/'make
+## run-web' in *this* repo. Never uses a bare 'pkill -f <name>': that matches
+## same-named dev servers from unrelated projects (e.g. another repo's Vite)
+## and kills them too. Instead, only kill PIDs whose cwd resolves to this
+## repo's directory.
 stop:
-	-pkill -f "vite" 2>/dev/null || true
-	-pkill -f "tsc -p tsconfig.main.json -w" 2>/dev/null || true
-	-pkill -f "scripts/run-electron-dev.ts" 2>/dev/null || true
-	-pkill -f "electron \." 2>/dev/null || true
+	@repo_dir=$$(pwd); \
+	for pattern in "vite" "tsc -p tsconfig.main.json -w" "scripts/run-electron-dev.ts" "electron \."; do \
+		pgrep -f "$$pattern" 2>/dev/null | while read -r pid; do \
+			pid_cwd=$$(readlink -f "/proc/$$pid/cwd" 2>/dev/null); \
+			if [ "$$pid_cwd" = "$$repo_dir" ]; then \
+				kill "$$pid" 2>/dev/null && echo "make: stopped $$pattern (pid $$pid)"; \
+			fi; \
+		done; \
+	done; \
+	true
 
 ## Run all tests (warns on duration budget overruns via scripts/check-test-duration.sh,
 ## but never fails on slowness alone; see issue #185)

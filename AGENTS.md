@@ -169,6 +169,53 @@ stylesheet or a per-component test. Use the browser fake bridge for renderer UI 
   path — isolate by trying a different model/provider first; if the
   alternate path succeeds end-to-end, file the specific failure as a separate
   follow-up instead of treating it as a regression in the change under review.
+- 2026-08-22: `make run-web`/`npm run dev:web` still spawns a real (headless)
+  Electron process via `app.whenReady()`, so it needs a working Chromium
+  sandbox even though no window is created. If `chrome-sandbox` isn't
+  root-owned/4755, set `ELECTRON_DISABLE_SANDBOX=1` on the env before the npm
+  script rather than trying to pass `--no-sandbox`/`--disable-gpu` as CLI args
+  after `electron .` — the app's own `cli-args` positional-arg parser swallows
+  those as an (invalid) workspace-dir argument instead of Electron consuming
+  them as switches.
+- 2026-08-22: The model picker's `<select>` can have hundreds of options
+  (all catalog models across every provider); the Playwright accessibility
+  snapshot truncates long option lists, which can look like "no models
+  available" even though keyless/OAuth options (`⚿ llm7/*`,
+  `⚿ github-copilot/*`) are present and one is auto-selected. Verify with
+  `page.evaluate(() => Array.from(document.querySelector('select').options).map(o => o.textContent))`
+   before concluding a provider is missing from the picker.
+- 2026-08-22: `make stop`'s old `pkill -f "vite"` (and similar bare patterns)
+  matched and killed an unrelated Vite dev server from a different project on
+  the same machine, not just this repo's own process. Fixed by scoping `make
+  stop` to only kill PIDs whose `/proc/<pid>/cwd` resolves to this repo's
+  directory. Never `pkill -f <generic-tool-name>`; always check a candidate
+  PID's cwd/cmdline (or the owning port) belongs to *this* repo before
+  killing it, per the existing "never kill an unrelated process" rule above.
+- 2026-08-22: Fixed-port dev servers (the web-bridge's `PI_DESKTOP_WEB_BRIDGE_PORT`/`4756`)
+  broke the moment the port was already taken, unlike Vite's own renderer
+  dev server (`server.port` + no `strictPort`: auto-fall-back to the next
+  free port, see https://vite.dev/config/server-options.html#server-strictport).
+  Fixed by mirroring that same try-preferred-then-OS-assigned-free-port
+  pattern everywhere a port is chosen: `startWebBridgeServer` now probes the
+  requested port and falls back to `listen(0, ...)` (OS-assigned) on
+  `EADDRINUSE` instead of crashing dev-mode startup, and `scripts/dev-web.ts`
+  resolves the web-bridge port *once*, up front, and threads that single
+  value through `PI_DESKTOP_WEB_BRIDGE_PORT`/`VITE_WEB_BRIDGE_URL` so the
+  main process, the renderer's CSP `connect-src`, and the renderer's bridge
+  client can never disagree on the port (previously hardcoded independently
+  in three places). When adding a new dev-only network listener, prefer
+  `listen(0)`/an OS-assigned port over a second hardcoded default, and if
+  the port must be shared across independently-started processes, resolve
+  it once in a single place before spawning them, not independently in each.
+- 2026-08-22: `child_process.spawn(cmd, args, { shell: true })` on POSIX does
+  *not* preserve `args` array element boundaries -- it space-joins the whole
+  array into one command line, so an array element containing its own spaces
+  (e.g. `"tsx scripts/run-electron-dev.ts"` meant as one `concurrently`
+  sub-command) silently splits into multiple top-level arguments instead.
+  Symptom looked unrelated to quoting: `/bin/sh: 1: scripts/run-electron-dev.ts:
+  Permission denied` (the path was being executed directly as its own
+  command). Fixed by invoking the local binary directly (no `shell: true`)
+  so each array element is passed through as one literal argv token.
 
 ## Archived incident narratives
 

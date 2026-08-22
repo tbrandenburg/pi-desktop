@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
@@ -141,6 +142,33 @@ describe("web-bridge server (issue #228)", () => {
       socket.close();
     } finally {
       await wsServer.close();
+    }
+  });
+
+  it("falls back to an OS-assigned port when the requested port is already taken, instead of crashing startup", async () => {
+    const occupied = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      occupied.once("error", reject);
+      occupied.listen(0, "127.0.0.1", () => resolve());
+    });
+    const occupiedPort = (occupied.address() as net.AddressInfo).port;
+
+    const registry = createIpcHandlerRegistry(() => null, {
+      agentCoreLoaders: realAgentCoreLoaders,
+      codingAgentLoaders: realCodingAgentLoaders,
+    });
+    const fallbackServer = await startWebBridgeServer(registry, occupiedPort);
+    try {
+      expect(fallbackServer.port).not.toBe(occupiedPort);
+      const response = await fetch(`http://127.0.0.1:${fallbackServer.port}/api/app:get-version`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args: [] }),
+      });
+      expect(response.status).toBe(200);
+    } finally {
+      await fallbackServer.close();
+      await new Promise<void>((resolve) => occupied.close(() => resolve()));
     }
   });
 });

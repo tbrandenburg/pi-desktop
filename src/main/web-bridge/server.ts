@@ -1,4 +1,5 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import net from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { IpcHandlerRegistry } from "../ipc";
 
@@ -35,12 +36,48 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 /**
+ * Resolves `preferredPort` if free, otherwise an OS-assigned free port --
+ * mirrors Vite's own dev-server port fallback (`server.port` + no
+ * `strictPort`: try the preferred port, auto-fall-back if it's taken)
+ * instead of crashing dev-mode startup with a raw `EADDRINUSE`. Probes with
+ * a short-lived throwaway server rather than retrying `listen()` on the real
+ * server instance, which avoids re-`listen()`-after-`error()` races on the
+ * same `http.Server`.
+ */
+async function resolveListenPort(preferredPort: number, host: string): Promise<number> {
+  const tryListen = (port: number): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const probe = net.createServer();
+      probe.once("error", (error: NodeJS.ErrnoException) => {
+        probe.close();
+        reject(error);
+      });
+      probe.listen(port, host, () => {
+        const address = probe.address();
+        const boundPort = typeof address === "object" && address ? address.port : port;
+        probe.close(() => resolve(boundPort));
+      });
+    });
+
+  if (preferredPort === 0) return tryListen(0);
+  try {
+    return await tryListen(preferredPort);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+    console.warn(`[web-bridge] port ${preferredPort} is in use; falling back to an OS-assigned port`);
+    return tryListen(0);
+  }
+}
+
+/**
  * Starts the bridge on `port` (0 = OS-assigned, used by tests). Every
  * `POST /api/<channel>` body is `{ "args": [...] }`; the response is
  * `{ "result": ... }` on success or `{ "error": "..." }` (4xx/5xx) on
  * failure -- callers never see a handler's internal exception shape.
  */
-export function startWebBridgeServer(registry: IpcHandlerRegistry, port = 4756): Promise<WebBridgeServer> {
+export async function startWebBridgeServer(registry: IpcHandlerRegistry, port = 4756): Promise<WebBridgeServer> {
+  const resolvedPort = await resolveListenPort(port, "127.0.0.1");
+
   const server = http.createServer((req, res) => {
     void handleRequest(req, res);
   });
@@ -92,10 +129,10 @@ export function startWebBridgeServer(registry: IpcHandlerRegistry, port = 4756):
   );
 
   return new Promise((resolve, reject) => {
-    server.on("error", reject);
-    server.listen(port, "127.0.0.1", () => {
+    server.once("error", reject);
+    server.listen(resolvedPort, "127.0.0.1", () => {
       const address = server.address();
-      const boundPort = typeof address === "object" && address ? address.port : port;
+      const boundPort = typeof address === "object" && address ? address.port : resolvedPort;
       resolve({
         port: boundPort,
         close: () =>
