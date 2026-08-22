@@ -7,6 +7,7 @@ import { registerIpcHandlers } from "./ipc";
 import { createMainWindow } from "./windows";
 import { resolveLaunchDirectoryArg } from "./cli-args";
 import { SettingsStore } from "./settings/store";
+import { startWebBridgeServer } from "./web-bridge/server";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -26,8 +27,21 @@ app.whenReady().then(async () => {
     initialWorkspaceDir = launchDir;
   }
 
-  registerIpcHandlers(getWindow, { initialWorkspaceDir });
-  mainWindow = createMainWindow();
+  const registry = registerIpcHandlers(getWindow, { initialWorkspaceDir });
+
+  // Issue #228: opt-in, dev/PoC-grade local web bridge so a plain browser
+  // tab (no `ipcRenderer`) can reach the same real backend a `BrowserWindow`
+  // does. Never starts unless explicitly enabled -- and never in a packaged
+  // build, matching the issue's "no change to production" acceptance
+  // criterion, even if the env var were somehow set there.
+  if (!app.isPackaged && process.env.PI_DESKTOP_WEB_BRIDGE === "1") {
+    const port = Number(process.env.PI_DESKTOP_WEB_BRIDGE_PORT) || 4756;
+    await startWebBridgeServer(registry, port);
+  }
+
+  if (process.env.PI_DESKTOP_WEB_BRIDGE_HEADLESS !== "1") {
+    mainWindow = createMainWindow();
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

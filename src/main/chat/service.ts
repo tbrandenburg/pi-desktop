@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { BrowserWindow } from "electron";
 import type { ChatEvent, CommandInfo, ExtensionUIRequest, ExtensionUIResponse, StartChatRequest } from "../../shared/events";
+import type { BridgeWindowLike } from "../web-bridge/events";
 import {
   buildModelsRegistry,
   findModelById,
@@ -41,7 +41,7 @@ export class ChatService {
 
   constructor(
     private readonly settingsStore: SettingsStore,
-    private readonly getWindow: () => BrowserWindow | null,
+    private readonly getWindow: () => BridgeWindowLike | null,
     private readonly loadModelsRegistry: (
       settings: { apiKey: string; baseUrl: string; model: string },
     ) => Promise<ModelsRegistry> = loadModelsRegistryForChat,
