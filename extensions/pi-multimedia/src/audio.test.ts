@@ -2,11 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   AUDIO_MODEL,
   buildAudioRequest,
+  buildTranscriptionFormData,
   detectAudioFormat,
   extractResponseText,
+  extractTranscriptionText,
+  realMultipartFactory,
+  TRANSCRIBE_MODEL,
+  transcribeAudioViaApi,
   understandAudioViaApi,
   UnsupportedAudioFormatError,
   type FetchFn,
+  type MinimalFormData,
+  type TranscribeFetchFn,
 } from "./audio.js";
 
 /**
@@ -172,5 +179,124 @@ describe("understandAudioViaApi", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text.length).toBeGreaterThan(0);
+  });
+});
+
+describe("buildTranscriptionFormData", () => {
+  it("builds a real multipart FormData with a file field (real filename+content-type) and a model field", async () => {
+    const base64 = buildSyntheticWavBase64();
+    const form = buildTranscriptionFormData(base64, "wav", realMultipartFactory) as unknown as FormData;
+
+    const filePart = form.get("file") as File;
+    expect(filePart).toBeInstanceOf(Blob);
+    expect(filePart.name).toBe("audio.wav");
+    expect(filePart.type).toBe("audio/wav");
+    expect(form.get("model")).toBe(TRANSCRIBE_MODEL);
+  });
+
+  it("round-trips the exact original bytes through the multipart file part (no base64 inflation)", async () => {
+    const base64 = buildSyntheticWavBase64();
+    const originalBytes = Buffer.from(base64, "base64");
+    const form = buildTranscriptionFormData(base64, "wav", realMultipartFactory) as unknown as FormData;
+
+    const filePart = form.get("file") as File;
+    const roundTrippedBytes = new Uint8Array(await filePart.arrayBuffer());
+
+    expect(filePart.size).toBe(originalBytes.length);
+    expect(Buffer.from(roundTrippedBytes)).toEqual(originalBytes);
+  });
+
+  it("uses mp3 content-type and filename for mp3 format", () => {
+    const base64 = buildSyntheticWavBase64();
+    const form = buildTranscriptionFormData(base64, "mp3", realMultipartFactory) as unknown as FormData;
+
+    const filePart = form.get("file") as File;
+    expect(filePart.name).toBe("audio.mp3");
+    expect(filePart.type).toBe("audio/mpeg");
+  });
+});
+
+describe("extractTranscriptionText", () => {
+  it("trims and returns the text field when present", () => {
+    expect(extractTranscriptionText({ text: "  hello world  " })).toBe("hello world");
+  });
+
+  it("returns an empty string (not a throw) when text is absent, e.g. non-speech audio", () => {
+    expect(extractTranscriptionText({})).toBe("");
+    expect(extractTranscriptionText({ text: "" })).toBe("");
+  });
+});
+
+describe("transcribeAudioViaApi", () => {
+  const base64 = buildSyntheticWavBase64();
+
+  it("returns a non-error TextContent result from a successful mocked transcription response", async () => {
+    const fetchFn: TranscribeFetchFn = async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ text: "hello from the transcript" }),
+    });
+
+    const result = await transcribeAudioViaApi(base64, "wav", { apiKey: "test-key", fetchFn });
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toEqual([{ type: "text", text: "hello from the transcript" }]);
+  });
+
+  it("sends the Authorization header, POSTs to /audio/transcriptions, and never sets a Content-Type header itself", async () => {
+    let capturedUrl = "";
+    let capturedInit: { method: string; headers: Record<string, string>; body: MinimalFormData } | undefined;
+    const fetchFn: TranscribeFetchFn = async (url, init) => {
+      capturedUrl = url;
+      capturedInit = init;
+      return { ok: true, status: 200, statusText: "OK", json: async () => ({ text: "ok" }) };
+    };
+
+    await transcribeAudioViaApi(base64, "wav", { apiKey: "sk-abc", fetchFn });
+
+    expect(capturedUrl).toBe("https://api.openai.com/v1/audio/transcriptions");
+    expect(capturedInit?.method).toBe("POST");
+    expect(capturedInit?.headers).toEqual({ Authorization: "Bearer sk-abc" });
+    expect(capturedInit?.headers["Content-Type"]).toBeUndefined();
+  });
+
+  it("returns an empty-text non-error result (not isError:true) for a successful call with no speech", async () => {
+    const fetchFn: TranscribeFetchFn = async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ text: "" }),
+    });
+
+    const result = await transcribeAudioViaApi(base64, "wav", { apiKey: "test-key", fetchFn });
+
+    expect(result.isError).toBe(false);
+    expect(result.content[0].text).toContain("no speech detected");
+  });
+
+  it("returns isError:true with a helpful message on network failure instead of throwing", async () => {
+    const fetchFn: TranscribeFetchFn = async () => {
+      throw new Error("ECONNREFUSED");
+    };
+
+    const result = await transcribeAudioViaApi(base64, "wav", { apiKey: "test-key", fetchFn });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("ECONNREFUSED");
+  });
+
+  it("returns isError:true on a non-ok HTTP response instead of throwing", async () => {
+    const fetchFn: TranscribeFetchFn = async () => ({
+      ok: false,
+      status: 415,
+      statusText: "Unsupported Media Type",
+      json: async () => ({}),
+    });
+
+    const result = await transcribeAudioViaApi(base64, "wav", { apiKey: "test-key", fetchFn });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("415");
   });
 });

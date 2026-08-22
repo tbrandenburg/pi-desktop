@@ -13,7 +13,13 @@
  * options (frame-extraction-as-images vs. a native-video-model call).
  */
 import { Type } from "typebox";
-import { detectAudioFormat, understandAudioViaApi, type AudioToolResult } from "./audio.js";
+import {
+  detectAudioFormat,
+  transcribeAudioViaApi,
+  understandAudioViaApi,
+  type AudioToolResult,
+  type TranscribeFetchFn,
+} from "./audio.js";
 import { readFileAsBase64 } from "./fs-io.js";
 import { understandVideo, understandVideoViaApi, type VideoToolResult } from "./video.js";
 
@@ -34,8 +40,18 @@ export const VIDEO_BASE_URL_ENV = "MULTIMEDIA_VIDEO_BASE_URL";
 
 const UnderstandAudioParams = Type.Object({
   path: Type.String({ description: "Absolute or workspace-relative path to a local audio file (wav/mp3/m4a)." }),
+  mode: Type.Optional(
+    Type.Union([Type.Literal("transcribe"), Type.Literal("understand")], {
+      description:
+        "'transcribe' (default): cheap speech-to-text via the dedicated gpt-transcribe endpoint — use this for " +
+        "'what is said in this file?'. 'understand': reasoning about tone/background/non-speech sound via the " +
+        "audio-capable chat model — requires `prompt`; use only when transcription alone isn't enough.",
+    }),
+  ),
   prompt: Type.Optional(
-    Type.String({ description: "What to ask about the audio. Defaults to a transcribe+describe prompt." }),
+    Type.String({
+      description: "Required when mode is 'understand'. What to ask about the audio (e.g. describe tone/background/music).",
+    }),
   ),
 });
 
@@ -57,6 +73,8 @@ interface MinimalToolDefinition<TParameters = unknown, TParams = unknown, TResul
   name: string;
   label: string;
   description: string;
+  promptSnippet?: string;
+  promptGuidelines?: string[];
   parameters: TParameters;
   execute: (
     toolCallId: string,
@@ -76,17 +94,30 @@ interface MinimalExtensionApi {
 export function buildUnderstandAudioTool(
   env: Record<string, string | undefined>,
   fetchFn: typeof fetch = fetch,
-): MinimalToolDefinition<typeof UnderstandAudioParams, { path: string; prompt?: string }, AudioToolResult> {
+): MinimalToolDefinition<typeof UnderstandAudioParams, { path: string; mode?: "transcribe" | "understand"; prompt?: string }, AudioToolResult> {
   return {
     name: "understand_audio",
     label: "Understand Audio",
     description:
-      "Understands the contents of a local audio file (wav/mp3/m4a) by sending it to an audio-capable model " +
-      "and returns a text transcription/description. Bypasses ordinary chat message content, which has no " +
-      "native audio block type.",
+      "Transcribes or understands the contents of a local audio file (wav/mp3/m4a). Default mode ('transcribe') " +
+      "returns cheap speech-to-text via the dedicated gpt-transcribe endpoint. Opt-in mode ('understand', requires " +
+      "`prompt`) sends the audio to a reasoning-capable audio model for questions beyond words, e.g. tone or " +
+      "background sound. Bypasses ordinary chat message content, which has no native audio block type.",
+    promptSnippet:
+      "Call `understand_audio` whenever the user references a local audio file path (wav/mp3/m4a) and wants to " +
+      "know what is said in it, or wants it summarized/transcribed.",
+    promptGuidelines: [
+      "Use the default `mode: 'transcribe'` for 'what does this say' / 'transcribe this' requests — it is the " +
+        "cheap, speech-oriented path.",
+      "Only use `mode: 'understand'` (and supply a `prompt`) when the user asks about qualities beyond words, " +
+        "e.g. tone, emotion, background noise, or music description — it is a more expensive reasoning call.",
+      "If the audio is music or otherwise non-speech, `transcribe` mode may return an empty/near-empty result; " +
+        "that is expected, not an error — switch to `understand` mode if a description is actually wanted.",
+    ],
     parameters: UnderstandAudioParams,
     execute: async (_toolCallId, params) => {
-      const prompt = params.prompt?.trim() || DEFAULT_PROMPT;
+      const mode = params.mode ?? "transcribe";
+
       let format: ReturnType<typeof detectAudioFormat>;
       try {
         format = detectAudioFormat(params.path);
@@ -114,10 +145,20 @@ export function buildUnderstandAudioTool(
         };
       }
 
-      const result = await understandAudioViaApi(base64Audio, format, prompt, {
+      if (mode === "understand") {
+        const prompt = params.prompt?.trim() || DEFAULT_PROMPT;
+        const result = await understandAudioViaApi(base64Audio, format, prompt, {
+          apiKey: env[AUDIO_API_KEY_ENV] ?? "",
+          baseUrl: env[AUDIO_BASE_URL_ENV],
+          fetchFn: fetchFn as never,
+        });
+        return { ...result, details: undefined };
+      }
+
+      const result = await transcribeAudioViaApi(base64Audio, format, {
         apiKey: env[AUDIO_API_KEY_ENV] ?? "",
         baseUrl: env[AUDIO_BASE_URL_ENV],
-        fetchFn: fetchFn as never,
+        fetchFn: fetchFn as unknown as TranscribeFetchFn,
       });
       return { ...result, details: undefined };
     },
@@ -136,6 +177,14 @@ export function buildUnderstandVideoTool(
       "Understands the contents of a local video file by extracting evenly-spaced frames with ffmpeg and " +
       "sending them as images to a vision-capable model, returning a text description. Bypasses ordinary chat " +
       "message content, which has no native video block type.",
+    promptSnippet:
+      "Call `understand_video` whenever the user references a local video file path and wants to know what " +
+      "happens in it, or wants it described/summarized.",
+    promptGuidelines: [
+      "This tool extracts a handful of evenly-spaced still frames (default 3, tune with `frameCount`) — it does " +
+        "not read audio from the video; use `understand_audio` separately if speech/sound content also matters.",
+      "Prefer a higher `frameCount` for longer or fast-changing videos where a few frames may miss key content.",
+    ],
     parameters: UnderstandVideoParams,
     execute: async (_toolCallId, params) => {
       const prompt = params.prompt?.trim() || DEFAULT_VIDEO_PROMPT;
@@ -164,5 +213,5 @@ export default function piMultimedia(pi: MinimalExtensionApi): void {
   });
 }
 
-export { detectAudioFormat, understandAudioViaApi };
+export { detectAudioFormat, transcribeAudioViaApi, understandAudioViaApi };
 export { understandVideo, understandVideoViaApi };

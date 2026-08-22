@@ -114,6 +114,169 @@ export type FetchFn = (url: string, init: {
   body: string;
 }) => Promise<{ ok: boolean; status: number; statusText: string; json(): Promise<unknown> }>;
 
+/**
+ * Injectable network boundary for the multipart transcription endpoint.
+ * Only `headers` (Authorization; never Content-Type — the FormData boundary
+ * must be set by the runtime's own multipart serializer) and a `FormData`
+ * body are needed, matching the real global `fetch` signature's shape for
+ * this call.
+ */
+export type TranscribeFetchFn = (url: string, init: {
+  method: string;
+  headers: Record<string, string>;
+  body: MinimalFormData;
+}) => Promise<{ ok: boolean; status: number; statusText: string; json(): Promise<unknown> }>;
+
+/** The minimal `FormData`-like surface this module needs (real global `FormData` satisfies it). */
+export interface MinimalFormData {
+  append(name: string, value: MinimalBlob | string, fileName?: string): void;
+}
+
+/** The minimal `Blob`-like surface this module needs (real global `Blob` satisfies it). */
+export interface MinimalBlob {
+  readonly size: number;
+}
+
+/** Factory boundary for constructing `FormData`/`Blob`, injected for testability. */
+export interface MultipartFactory {
+  createFormData(): MinimalFormData;
+  createBlob(bytes: Uint8Array, contentType: string): MinimalBlob;
+}
+
+/** Maps an accepted audio format to its multipart `Content-Type`. */
+const FORMAT_TO_CONTENT_TYPE: Record<AudioFormat, string> = {
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
+};
+
+export const TRANSCRIBE_MODEL = "gpt-transcribe";
+
+/** Decodes a base64 string into raw bytes (works in both Node and browser-like `atob` environments). */
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+declare function atob(data: string): string;
+
+/**
+ * Builds the multipart/form-data body for `POST /v1/audio/transcriptions`:
+ * a `file` field (binary audio, real filename+content-type, NOT base64 —
+ * multipart avoids the ~33% base64 size inflation of the chat-completions
+ * JSON approach) and a `model` field.
+ */
+export function buildTranscriptionFormData(
+  base64Audio: string,
+  format: AudioFormat,
+  factory: MultipartFactory,
+): MinimalFormData {
+  const bytes = base64ToBytes(base64Audio);
+  const blob = factory.createBlob(bytes, FORMAT_TO_CONTENT_TYPE[format]);
+  const form = factory.createFormData();
+  form.append("file", blob, `audio.${format}`);
+  form.append("model", TRANSCRIBE_MODEL);
+  return form;
+}
+
+/** Real global `FormData`/`Blob` factory, used outside of tests. Node 22+ and browsers both expose these globally. */
+export const realMultipartFactory: MultipartFactory = {
+  createFormData: () => new (globalThis as unknown as { FormData: new () => MinimalFormData }).FormData(),
+  createBlob: (bytes, contentType) =>
+    new (globalThis as unknown as { Blob: new (parts: unknown[], options?: { type?: string }) => MinimalBlob }).Blob(
+      [bytes],
+      { type: contentType },
+    ),
+};
+
+/** Minimal shape this module reads from the transcription endpoint's response. */
+export interface TranscriptionResponse {
+  text?: string;
+  language?: string;
+  languages?: string[];
+}
+
+/** Extracts the transcript text out of a transcription response. Empty/whitespace-only text is valid (e.g. music/non-speech audio). */
+export function extractTranscriptionText(response: TranscriptionResponse): string {
+  return (response.text ?? "").trim();
+}
+
+export interface TranscribeAudioOptions {
+  apiKey: string;
+  baseUrl?: string;
+  fetchFn: TranscribeFetchFn;
+  multipartFactory?: MultipartFactory;
+}
+
+/**
+ * Calls the dedicated `gpt-transcribe` transcription endpoint
+ * (`POST /v1/audio/transcriptions`, multipart/form-data, NOT the
+ * chat-completions JSON+base64 shape) and returns a tool-result-shaped
+ * object. Never throws: network/API failures are encoded as `isError: true`
+ * results. Music/non-speech audio may yield an empty transcript rather than
+ * an error — that is reported as a non-error empty-text result, since the
+ * API call itself succeeded.
+ */
+export async function transcribeAudioViaApi(
+  base64Audio: string,
+  format: AudioFormat,
+  options: TranscribeAudioOptions,
+): Promise<AudioToolResult> {
+  const url = `${options.baseUrl ?? "https://api.openai.com/v1"}/audio/transcriptions`;
+  const form = buildTranscriptionFormData(base64Audio, format, options.multipartFactory ?? realMultipartFactory);
+
+  let response: Awaited<ReturnType<TranscribeFetchFn>>;
+  try {
+    response = await options.fetchFn(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${options.apiKey}` },
+      body: form,
+    });
+  } catch (error) {
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Failed to reach the transcription API: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+    };
+  }
+
+  if (!response.ok) {
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Transcription API returned an error: ${response.status} ${response.statusText}`,
+        },
+      ],
+    };
+  }
+
+  try {
+    const json = (await response.json()) as TranscriptionResponse;
+    const text = extractTranscriptionText(json);
+    return {
+      isError: false,
+      content: [{ type: "text", text: text || "(no speech detected in audio — the clip may be music, silence, or non-verbal sound)" }],
+    };
+  } catch (error) {
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Failed to parse transcription API response: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+    };
+  }
+}
+
 export interface UnderstandAudioOptions {
   apiKey: string;
   baseUrl?: string;
