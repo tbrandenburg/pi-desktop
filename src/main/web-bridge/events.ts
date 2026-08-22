@@ -41,7 +41,7 @@ export interface BridgeWindowLike {
  * Wraps a real `getWindow()` so every `webContents.send(...)` also reaches
  * `bridgeEvents` -- the real `BrowserWindow` path is completely unchanged
  * (issue #228 acceptance criterion: "Electron's own window continues to
- * work identically"). When no real window exists (dev:web-bridge mode,
+ * work identically"). When no real window exists (`dev:web` mode,
  * no `BrowserWindow` ever created), the facade reports "not destroyed" so
  * handlers still emit to the bridge instead of silently no-op'ing.
  */

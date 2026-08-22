@@ -19,7 +19,7 @@
     "dev:renderer": "vite",
     "dev:main": "tsc -p tsconfig.main.json -w",
     "dev": "concurrently -k \"npm:dev:main\" \"tsx scripts/run-electron-dev.ts\"",
-    "dev:web-bridge": "concurrently -k \"npm:dev:main\" \"PI_DESKTOP_WEB_BRIDGE=1 PI_DESKTOP_WEB_BRIDGE_HEADLESS=1 VITE_WEB_BRIDGE_URL=http://localhost:4756 tsx scripts/run-electron-dev.ts\"",
+    "dev:web": "concurrently -k \"npm:dev:main\" \"PI_DESKTOP_WEB_BRIDGE=1 PI_DESKTOP_WEB_BRIDGE_HEADLESS=1 VITE_WEB_BRIDGE_URL=http://localhost:4756 tsx scripts/run-electron-dev.ts\"",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
     "build:extensions": "npm run build --workspaces --if-present",

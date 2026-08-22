@@ -6,7 +6,7 @@ import type { DesktopAgentApi } from "../../shared/events";
  * Issue #228: opt-in web-bridge URL, injected at Vite build/dev time (e.g.
  * `.env.local`: `VITE_WEB_BRIDGE_URL=http://localhost:4756`). Only takes
  * effect in a plain browser tab that has no `window.desktopApi` (the real
- * preload bridge always wins inside Electron) -- lets `npm run dev:web-bridge`
+ * preload bridge always wins inside Electron) -- lets `npm run dev:web`
  * point a normal browser tab at the real backend instead of the fake one.
  */
 const WEB_BRIDGE_URL = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_WEB_BRIDGE_URL;
