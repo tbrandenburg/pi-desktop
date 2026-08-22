@@ -167,6 +167,38 @@ describe("understandAudioViaApi", () => {
     expect(result.content[0].text).toContain("429");
   });
 
+  it("returns an informative rate-limit message with the real seconds-to-wait when a 429 carries a Retry-After header", async () => {
+    const fetchFn: FetchFn = async () => ({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      headers: { get: (name: string) => (name === "retry-after" ? "20" : null) },
+      json: async () => ({}),
+    });
+
+    const result = await understandAudioViaApi(base64, "wav", "hi", { apiKey: "test-key", fetchFn });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Rate limited");
+    expect(result.content[0].text).toContain("20 second");
+  });
+
+  it("still returns a sensible rate-limit fallback message for a 429 with no retry header at all", async () => {
+    const fetchFn: FetchFn = async () => ({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      headers: { get: () => null },
+      json: async () => ({}),
+    });
+
+    const result = await understandAudioViaApi(base64, "wav", "hi", { apiKey: "test-key", fetchFn });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Rate limited");
+    expect(result.content[0].text).toContain("429");
+  });
+
   it("returns isError:true when the response body cannot be parsed into text", async () => {
     const fetchFn: FetchFn = async () => ({
       ok: true,
@@ -298,5 +330,21 @@ describe("transcribeAudioViaApi", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("415");
+  });
+
+  it("returns an informative rate-limit message with the real reset window when a 429 carries x-ratelimit-reset-requests but no Retry-After", async () => {
+    const fetchFn: TranscribeFetchFn = async () => ({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      headers: { get: (name: string) => (name === "x-ratelimit-reset-requests" ? "350ms" : null) },
+      json: async () => ({}),
+    });
+
+    const result = await transcribeAudioViaApi(base64, "wav", { apiKey: "test-key", fetchFn });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Rate limited");
+    expect(result.content[0].text).toContain("350ms");
   });
 });

@@ -202,12 +202,44 @@ export function extractVideoResponseText(response: VideoChatCompletionsResponse)
   throw new Error("Video model response contained no text content.");
 }
 
+/** Minimal response-headers reader, satisfied by the real `fetch` Response's `headers`. */
+export interface MinimalResponseHeaders {
+  get(name: string): string | null;
+}
+
 /** Injectable network boundary: identical shape to the global `fetch`. */
 export type FetchFn = (url: string, init: {
   method: string;
   headers: Record<string, string>;
   body: string;
-}) => Promise<{ ok: boolean; status: number; statusText: string; json(): Promise<unknown> }>;
+}) => Promise<{ ok: boolean; status: number; statusText: string; headers?: MinimalResponseHeaders; json(): Promise<unknown> }>;
+
+/**
+ * Builds an informative error message for a non-ok HTTP response, mirroring
+ * audio.ts's rate-limit handling (see that module's comment for the real
+ * evidence this is based on: a real burst of 25 concurrent OpenAI calls
+ * returned 200 with `x-ratelimit-reset-requests` present; a genuine 429 was
+ * not reproduced within the safe attempt budget).
+ */
+function buildErrorMessage(
+  apiLabel: string,
+  status: number,
+  statusText: string,
+  headers?: MinimalResponseHeaders,
+): string {
+  if (status !== 429) {
+    return `${apiLabel} returned an error: ${status} ${statusText}`;
+  }
+  const retryAfter = headers?.get("retry-after");
+  if (retryAfter) {
+    return `Rate limited by OpenAI (${apiLabel}): retry after ${retryAfter} second(s).`;
+  }
+  const resetRequests = headers?.get("x-ratelimit-reset-requests");
+  if (resetRequests) {
+    return `Rate limited by OpenAI (${apiLabel}): request quota resets in ${resetRequests}.`;
+  }
+  return `Rate limited by OpenAI (${apiLabel}): too many requests (429). No Retry-After or x-ratelimit-reset-requests header was present; retry after a short delay.`;
+}
 
 export interface UnderstandVideoOptions {
   apiKey: string;
@@ -262,7 +294,7 @@ export async function understandVideoViaApi(
       content: [
         {
           type: "text",
-          text: `Video understanding API returned an error: ${response.status} ${response.statusText}`,
+          text: buildErrorMessage("Video understanding API", response.status, response.statusText, response.headers),
         },
       ],
     };

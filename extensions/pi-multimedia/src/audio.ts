@@ -107,12 +107,17 @@ export function extractResponseText(response: AudioChatCompletionsResponse): str
   throw new Error("Audio model response contained no text or transcript content.");
 }
 
+/** Minimal response-headers reader, satisfied by the real `fetch` Response's `headers`. */
+export interface MinimalResponseHeaders {
+  get(name: string): string | null;
+}
+
 /** Injectable network boundary: identical shape to the global `fetch`. */
 export type FetchFn = (url: string, init: {
   method: string;
   headers: Record<string, string>;
   body: string;
-}) => Promise<{ ok: boolean; status: number; statusText: string; json(): Promise<unknown> }>;
+}) => Promise<{ ok: boolean; status: number; statusText: string; headers?: MinimalResponseHeaders; json(): Promise<unknown> }>;
 
 /**
  * Injectable network boundary for the multipart transcription endpoint.
@@ -125,7 +130,7 @@ export type TranscribeFetchFn = (url: string, init: {
   method: string;
   headers: Record<string, string>;
   body: MinimalFormData;
-}) => Promise<{ ok: boolean; status: number; statusText: string; json(): Promise<unknown> }>;
+}) => Promise<{ ok: boolean; status: number; statusText: string; headers?: MinimalResponseHeaders; json(): Promise<unknown> }>;
 
 /** The minimal `FormData`-like surface this module needs (real global `FormData` satisfies it). */
 export interface MinimalFormData {
@@ -148,6 +153,39 @@ const FORMAT_TO_CONTENT_TYPE: Record<AudioFormat, string> = {
   wav: "audio/wav",
   mp3: "audio/mpeg",
 };
+
+/**
+ * Builds an informative error message for a non-ok HTTP response. On a real
+ * 429, OpenAI documents a `Retry-After` header (seconds until the rate limit
+ * window resets) and, on every response including 200s, `x-ratelimit-reset-requests`
+ * (verified live 2026-08-22 against a real burst of 25 concurrent
+ * `gpt-transcribe` calls — all returned 200 with this header present, e.g.
+ * "120ms"/"680ms"; a genuine 429 was not reproduced within the safe attempt
+ * budget, so `Retry-After`'s exact real format on a 429 is inferred from
+ * OpenAI's public rate-limit docs, not directly observed). Falls back to the
+ * `x-ratelimit-reset-requests` header, then to a generic message, so a 429
+ * without any retry header still gets a clear rate-limit-specific message
+ * instead of the bare "429 Too Many Requests" bucket.
+ */
+function buildErrorMessage(
+  apiLabel: string,
+  status: number,
+  statusText: string,
+  headers?: MinimalResponseHeaders,
+): string {
+  if (status !== 429) {
+    return `${apiLabel} returned an error: ${status} ${statusText}`;
+  }
+  const retryAfter = headers?.get("retry-after");
+  if (retryAfter) {
+    return `Rate limited by OpenAI (${apiLabel}): retry after ${retryAfter} second(s).`;
+  }
+  const resetRequests = headers?.get("x-ratelimit-reset-requests");
+  if (resetRequests) {
+    return `Rate limited by OpenAI (${apiLabel}): request quota resets in ${resetRequests}.`;
+  }
+  return `Rate limited by OpenAI (${apiLabel}): too many requests (429). No Retry-After or x-ratelimit-reset-requests header was present; retry after a short delay.`;
+}
 
 export const TRANSCRIBE_MODEL = "gpt-transcribe";
 
@@ -251,7 +289,7 @@ export async function transcribeAudioViaApi(
       content: [
         {
           type: "text",
-          text: `Transcription API returned an error: ${response.status} ${response.statusText}`,
+          text: buildErrorMessage("Transcription API", response.status, response.statusText, response.headers),
         },
       ],
     };
@@ -331,7 +369,7 @@ export async function understandAudioViaApi(
       content: [
         {
           type: "text",
-          text: `Audio understanding API returned an error: ${response.status} ${response.statusText}`,
+          text: buildErrorMessage("Audio understanding API", response.status, response.statusText, response.headers),
         },
       ],
     };

@@ -154,6 +154,38 @@ describe("understandVideoViaApi (mocked HTTP, no real network)", () => {
     expect(result.content[0].text).toContain("429");
   });
 
+  it("returns an informative rate-limit message with the real seconds-to-wait when a 429 carries a Retry-After header", async () => {
+    const fetchFn: FetchFn = async () => ({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      headers: { get: (name: string) => (name === "retry-after" ? "5" : null) },
+      json: async () => ({}),
+    });
+
+    const result = await understandVideoViaApi(["AAA="], "hi", { apiKey: "test-key", fetchFn });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Rate limited");
+    expect(result.content[0].text).toContain("5 second");
+  });
+
+  it("still returns a sensible rate-limit fallback message for a 429 with no retry header at all", async () => {
+    const fetchFn: FetchFn = async () => ({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      headers: { get: () => null },
+      json: async () => ({}),
+    });
+
+    const result = await understandVideoViaApi(["AAA="], "hi", { apiKey: "test-key", fetchFn });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Rate limited");
+    expect(result.content[0].text).toContain("429");
+  });
+
   it("returns isError:true when the response body cannot be parsed into text", async () => {
     const fetchFn: FetchFn = async () => ({ ok: true, status: 200, statusText: "OK", json: async () => ({ choices: [] }) });
 
