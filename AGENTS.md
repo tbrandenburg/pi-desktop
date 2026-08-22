@@ -217,6 +217,18 @@ stylesheet or a per-component test. Use the browser fake bridge for renderer UI 
   command). Fixed by invoking the local binary directly (no `shell: true`)
   so each array element is passed through as one literal argv token.
 
+- 2026-08-22: A git worktree created under `.worktrees/` does not get its own
+  `node_modules`; `npm run <script>` for `tsc`/`vitest`/`oxlint` still works
+  because Node's module resolution walks up parent directories to the main
+  repo's `node_modules`, giving a false impression that the worktree is fully
+  usable. But scripts that spawn a binary by direct path (e.g.
+  `scripts/dev-web.ts` spawning `node_modules/.bin/concurrently`) fail with
+  `ENOENT` in the worktree since that binary literally isn't there. For
+  subagent work in a worktree, run typecheck/lint/unit-test validation inside
+  the worktree, but run any dev-server/E2E validation (`make run-web`, real
+  browser checks) only after merging into a tree with a full `npm install`
+  (e.g. the coordinator's main tree), not inside the worktree itself.
+
 ## Archived incident narratives
 
 The detailed incident records that motivated these rules are archived here:
