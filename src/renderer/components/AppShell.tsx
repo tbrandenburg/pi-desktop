@@ -11,6 +11,7 @@ import { SettingsDialog } from "./SettingsDialog";
 import { Sidebar } from "./Sidebar";
 import { desktopApi } from "../lib/desktop-api";
 import { normalizeShortcutEvent } from "../lib/shortcut-key";
+import { DEFAULT_ZOOM, ZOOM_STEP, getZoom, setZoom } from "../lib/zoom";
 import { useChatStore } from "../state/chat-store";
 import { useExtensionUIStore } from "../state/extension-ui-store";
 import { useSettingsStore } from "../state/settings-store";
@@ -105,6 +106,38 @@ export function AppShell() {
     return () => {
       cancelled = true;
       window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
+  // Global UI zoom (issue #232): ctrl+=/ctrl+- adjust, ctrl+0 resets, and
+  // ctrl+mousewheel adjusts the same way. Applied on top of the pre-paint
+  // zoom set by theme-init.ts.
+  useEffect(() => {
+    const onZoomKeyDown = (event: KeyboardEvent) => {
+      const combo = normalizeShortcutEvent(event);
+      if (combo === "ctrl+=" || combo === "ctrl++") {
+        event.preventDefault();
+        setZoom(getZoom() + ZOOM_STEP);
+      } else if (combo === "ctrl+-") {
+        event.preventDefault();
+        setZoom(getZoom() - ZOOM_STEP);
+      } else if (combo === "ctrl+0") {
+        event.preventDefault();
+        setZoom(DEFAULT_ZOOM);
+      }
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      setZoom(getZoom() + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
+    };
+
+    window.addEventListener("keydown", onZoomKeyDown);
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      window.removeEventListener("keydown", onZoomKeyDown);
+      window.removeEventListener("wheel", onWheel);
     };
   }, []);
 
