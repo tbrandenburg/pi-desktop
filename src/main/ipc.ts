@@ -20,6 +20,30 @@ import { IpcUIContextBridge } from "./agent/ui-context";
 import { PackageService } from "./packages/service";
 import type { AgentCoreLoaders } from "./agent/core";
 import type { CodingAgentLoaders } from "./agent/coding-agent-loaders";
+import { BridgeEvents, createBridgeWindow, type BridgeWindowLike } from "./web-bridge/events";
+
+/**
+ * One channel-name -> handler-function entry. First parameter mirrors
+ * `ipcMain.handle`'s listener shape (an unused "event" placeholder for
+ * handlers that take real args) so handler bodies below are unchanged from
+ * before this registry existed; the web-bridge HTTP server (issue #228)
+ * calls the same functions with `undefined` in that slot.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type IpcHandlerFn = (...args: any[]) => unknown;
+
+/**
+ * Every `DesktopAgentApi` request/response channel's handler, reachable by
+ * name -- built once and registered against both Electron's `ipcMain` (this
+ * module) and the opt-in local web-bridge HTTP server (issue #228,
+ * `web-bridge/server.ts`), so a second transport calls the exact same
+ * functions instead of duplicating handler bodies.
+ */
+export interface IpcHandlerRegistry {
+  handlers: Record<string, IpcHandlerFn>;
+  /** Push/streaming side of the same 3 `on*` subscriptions, shared by both transports. */
+  bridgeEvents: BridgeEvents;
+}
 
 export interface RegisterIpcHandlersDeps {
   agentCoreLoaders?: AgentCoreLoaders;
@@ -59,10 +83,21 @@ export interface RegisterIpcHandlersDeps {
   modelsLoaders?: ModelsLoaders;
 }
 
-export function registerIpcHandlers(
-  getWindow: () => BrowserWindow | null,
+/**
+ * Builds every `DesktopAgentApi` channel's handler function plus the shared
+ * push-event bus, without registering anything against `ipcMain` -- the
+ * reusable core both `registerIpcHandlers()` (below, real Electron IPC) and
+ * the opt-in web-bridge server (issue #228) register against, so a second
+ * transport never duplicates a handler body.
+ */
+export function createIpcHandlerRegistry(
+  getRealWindow: () => BridgeWindowLike | null,
   deps: RegisterIpcHandlersDeps = {},
-): void {
+): IpcHandlerRegistry {
+  const bridgeEvents = new BridgeEvents();
+  const getWindow = createBridgeWindow(getRealWindow, bridgeEvents);
+  const handlers: Record<string, IpcHandlerFn> = {};
+
   const settingsStore = new SettingsStore();
   let currentWorkspaceDir = deps.initialWorkspaceDir ?? "";
   const getWorkspaceDir = () => currentWorkspaceDir;
@@ -152,11 +187,11 @@ export function registerIpcHandlers(
     uiContextBridge,
   );
 
-  ipcMain.handle("app:get-version", (): string => {
+  handlers["app:get-version"] = ((): string => {
     return app.getVersion();
   });
 
-  ipcMain.handle("model:list", async (): Promise<ModelInfo[]> => {
+  handlers["model:list"] = (async (): Promise<ModelInfo[]> => {
     // The model list is sourced entirely from the providers configured in
     // `.pi/agent` (project-local, then global) -- no hardcoded placeholder
     // models. If the user hasn't saved their own settings yet, the model
@@ -225,54 +260,57 @@ export function registerIpcHandlers(
     return applyStatus(lastFullModels);
   });
 
-  ipcMain.handle("chat:start", async (_event, rawRequest: unknown) => {
+  handlers["chat:start"] = (async (_event, rawRequest: unknown) => {
     const request = startChatRequestSchema.parse(rawRequest);
     const requestId = await chatService.startChat(request);
     return { requestId };
   });
 
-  ipcMain.handle("chat:cancel", async (_event, requestId: string) => {
+  handlers["chat:cancel"] = (async (_event, requestId: string) => {
     chatService.cancel(requestId);
   });
 
-  ipcMain.handle("chat:list-commands", async (): Promise<CommandInfo[]> => {
+  handlers["chat:list-commands"] = (async (): Promise<CommandInfo[]> => {
     return chatService.listCommands();
   });
 
-  ipcMain.handle("extension-ui:respond", async (_event, requestId: string, response: ExtensionUIResponse) => {
+  handlers["extension-ui:respond"] = (async (_event, requestId: string, response: ExtensionUIResponse) => {
     chatService.respondExtensionUI(requestId, response);
   });
 
-  ipcMain.handle("settings:save", async (_event, rawSettings: unknown) => {
+  handlers["settings:save"] = (async (_event, rawSettings: unknown) => {
     const settings = providerSettingsSchema.parse(rawSettings);
     await settingsStore.save(settings);
     invalidateModelsCache();
   });
 
-  ipcMain.handle("settings:get", async () => {
+  handlers["settings:get"] = (async () => {
     return settingsStore.getSummary();
   });
 
-  ipcMain.handle("sessions:list", async () => {
+  handlers["sessions:list"] = (async () => {
     return sessionService.list();
   });
 
-  ipcMain.handle("sessions:get", async (_event, id: string) => {
+  handlers["sessions:get"] = (async (_event, id: string) => {
     return sessionService.get(id);
   });
 
-  ipcMain.handle("sessions:delete", async (_event, id: string) => {
+  handlers["sessions:delete"] = (async (_event, id: string) => {
     await sessionService.delete(id);
   });
 
-  ipcMain.handle("workspace:get", async (): Promise<WorkspaceInfo> => {
+  handlers["workspace:get"] = (async (): Promise<WorkspaceInfo> => {
     const dir = await settingsStore.getWorkspaceDir();
     currentWorkspaceDir = dir;
     return { dir };
   });
 
-  ipcMain.handle("workspace:choose", async (): Promise<WorkspaceInfo | null> => {
-    const win = getWindow();
+  handlers["workspace:choose"] = (async (): Promise<WorkspaceInfo | null> => {
+    // Real Electron `BrowserWindow` only -- `dialog.showOpenDialog` has no
+    // browser equivalent and is unsupported over the web-bridge transport
+    // (issue #228 non-goals), where `getRealWindow()` is always `null`.
+    const win = getRealWindow() as unknown as BrowserWindow | null;
     const result = win
       ? await dialog.showOpenDialog(win, { properties: ["openDirectory"] })
       : await dialog.showOpenDialog({ properties: ["openDirectory"] });
@@ -284,43 +322,43 @@ export function registerIpcHandlers(
     return { dir };
   });
 
-  ipcMain.handle("packages:list", async (): Promise<PackageInfo[]> => {
+  handlers["packages:list"] = (async (): Promise<PackageInfo[]> => {
     return packageService.list();
   });
 
-  ipcMain.handle("packages:install", async (_event, source: string): Promise<PackageInfo> => {
+  handlers["packages:install"] = (async (_event, source: string): Promise<PackageInfo> => {
     const result = await packageService.install(source);
     invalidateModelsCache();
     return result;
   });
 
-  ipcMain.handle("packages:remove", async (_event, source: string): Promise<void> => {
+  handlers["packages:remove"] = (async (_event, source: string): Promise<void> => {
     await packageService.remove(source);
     invalidateModelsCache();
   });
 
-  ipcMain.handle("packages:update", async (_event, source: string): Promise<void> => {
+  handlers["packages:update"] = (async (_event, source: string): Promise<void> => {
     await packageService.update(source);
     invalidateModelsCache();
   });
 
-  ipcMain.handle("extension-ui:get-tools-expanded", (): boolean => {
+  handlers["extension-ui:get-tools-expanded"] = ((): boolean => {
     return uiContextBridge.uiContext.getToolsExpanded();
   });
 
-  ipcMain.handle("extension-ui:report-tools-expanded", (_event, value: boolean): void => {
+  handlers["extension-ui:report-tools-expanded"] = ((_event, value: boolean): void => {
     uiContextBridge.reportToolsExpanded(value);
   });
 
-  ipcMain.handle("extension-ui:get-editor-text", (): string => {
+  handlers["extension-ui:get-editor-text"] = ((): string => {
     return uiContextBridge.uiContext.getEditorText();
   });
 
-  ipcMain.handle("extension-ui:report-editor-text", (_event, text: string): void => {
+  handlers["extension-ui:report-editor-text"] = ((_event, text: string): void => {
     uiContextBridge.reportEditorText(text);
   });
 
-  ipcMain.handle("extension-ui:query-autocomplete", async (_event, text: string) => {
+  handlers["extension-ui:query-autocomplete"] = (async (_event, text: string) => {
     return uiContextBridge.queryAutocomplete(text);
   });
 
@@ -334,9 +372,31 @@ export function registerIpcHandlers(
   // shortcuts from outside a live TUI session, so these honestly report
   // "none registered" rather than fabricating support pi-coding-agent
   // doesn't expose (see issue #142's handoff notes / follow-up issue).
-  ipcMain.handle("shortcuts:list", () => {
+  handlers["shortcuts:list"] = (() => {
     return [];
   });
 
-  ipcMain.handle("shortcuts:trigger", () => {});
+  handlers["shortcuts:trigger"] = (() => {});
+
+  return { handlers, bridgeEvents };
+}
+
+/**
+ * Registers every `DesktopAgentApi` channel against Electron's real
+ * `ipcMain` -- unchanged behavior for the packaged app. Returns the same
+ * `IpcHandlerRegistry` `createIpcHandlerRegistry()` built, so
+ * `main/index.ts` can additionally hand it to the opt-in web-bridge server
+ * (issue #228) without building a second, divergent set of services.
+ */
+export function registerIpcHandlers(
+  getWindow: () => BrowserWindow | null,
+  deps: RegisterIpcHandlersDeps = {},
+): IpcHandlerRegistry {
+  const registry = createIpcHandlerRegistry(getWindow, deps);
+  for (const [channel, fn] of Object.entries(registry.handlers)) {
+    ipcMain.handle(channel, (event: unknown, ...args: unknown[]) =>
+      (fn as (...a: unknown[]) => unknown)(event, ...args),
+    );
+  }
+  return registry;
 }

@@ -8,6 +8,10 @@ The Makefile is the source of truth (`make help` always reflects it exactly).
 
 - `make install`: install dependencies.
 - `make run`: start dev mode.
+- `make run-web`: start dev mode with the opt-in local web bridge (issue
+  #228) instead of an Electron window — open the printed Vite dev server
+  URL in a plain browser tab to talk to the real backend (real models,
+  chat streaming, sessions). Equivalent to `npm run dev:web`.
 - `make stop`: stop dev/electron processes started by `make run`.
 - `make test`: run unit tests.
 - `make lint` / `make check`: type-check renderer and main; do not auto-fix.

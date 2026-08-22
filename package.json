@@ -19,6 +19,7 @@
     "dev:renderer": "vite",
     "dev:main": "tsc -p tsconfig.main.json -w",
     "dev": "concurrently -k \"npm:dev:main\" \"tsx scripts/run-electron-dev.ts\"",
+    "dev:web": "concurrently -k \"npm:dev:main\" \"PI_DESKTOP_WEB_BRIDGE=1 PI_DESKTOP_WEB_BRIDGE_HEADLESS=1 VITE_WEB_BRIDGE_URL=http://localhost:4756 tsx scripts/run-electron-dev.ts\"",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
     "build:extensions": "npm run build --workspaces --if-present",
@@ -52,6 +53,7 @@
     "react-markdown": "^9.0.1",
     "react-syntax-highlighter": "^15.6.1",
     "remark-gfm": "^4.0.0",
+    "ws": "^8.21.3",
     "zod": "^3.24.1",
     "zustand": "^5.0.3"
   },
@@ -66,6 +68,7 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@types/react-syntax-highlighter": "^15.5.13",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
     "@vitest/coverage-v8": "^4.1.10",
     "concurrently": "^9.1.2",
