@@ -15,6 +15,7 @@
 import { Type } from "typebox";
 import { detectAudioFormat, understandAudioViaApi, type AudioToolResult } from "./audio.js";
 import { readFileAsBase64 } from "./fs-io.js";
+import { understandVideo, understandVideoViaApi, type VideoToolResult } from "./video.js";
 
 // Minimal ambient declaration: the shared extension tsconfig deliberately has
 // no Node type definitions, and this package must not add dependencies.
@@ -28,6 +29,8 @@ declare function fetch(url: string, init?: unknown): Promise<{
 
 export const AUDIO_API_KEY_ENV = "MULTIMEDIA_AUDIO_API_KEY";
 export const AUDIO_BASE_URL_ENV = "MULTIMEDIA_AUDIO_BASE_URL";
+export const VIDEO_API_KEY_ENV = "MULTIMEDIA_VIDEO_API_KEY";
+export const VIDEO_BASE_URL_ENV = "MULTIMEDIA_VIDEO_BASE_URL";
 
 const UnderstandAudioParams = Type.Object({
   path: Type.String({ description: "Absolute or workspace-relative path to a local audio file (wav/mp3/m4a)." }),
@@ -36,17 +39,29 @@ const UnderstandAudioParams = Type.Object({
   ),
 });
 
-const DEFAULT_PROMPT = "Transcribe and describe this audio.";
+const UnderstandVideoParams = Type.Object({
+  path: Type.String({ description: "Absolute or workspace-relative path to a local video file (e.g. mp4)." }),
+  prompt: Type.Optional(
+    Type.String({ description: "What to ask about the video. Defaults to a describe prompt." }),
+  ),
+  frameCount: Type.Optional(
+    Type.Integer({ description: "How many evenly-spaced frames to extract via ffmpeg. Defaults to 3.", minimum: 1 }),
+  ),
+});
 
-interface MinimalToolDefinition {
+const DEFAULT_PROMPT = "Transcribe and describe this audio.";
+const DEFAULT_VIDEO_PROMPT = "Describe what happens in this video.";
+const DEFAULT_FRAME_COUNT = 3;
+
+interface MinimalToolDefinition<TParameters = unknown, TParams = unknown, TResult extends { content: unknown } = { content: unknown }> {
   name: string;
   label: string;
   description: string;
-  parameters: typeof UnderstandAudioParams;
+  parameters: TParameters;
   execute: (
     toolCallId: string,
-    params: { path: string; prompt?: string },
-  ) => Promise<{ content: AudioToolResult["content"]; details: unknown; isError?: boolean }>;
+    params: TParams,
+  ) => Promise<{ content: TResult["content"]; details: unknown; isError?: boolean }>;
 }
 
 interface MinimalExtensionApi {
@@ -54,14 +69,14 @@ interface MinimalExtensionApi {
     name: string,
     command: { description: string; handler: (args: string, ctx: unknown) => void | Promise<void> },
   ): void;
-  registerTool(tool: MinimalToolDefinition): void;
+  registerTool(tool: MinimalToolDefinition<unknown, never, { content: unknown }>): void;
 }
 
 /** Builds the `understand_audio` tool definition, given a real or injected fetch. */
 export function buildUnderstandAudioTool(
   env: Record<string, string | undefined>,
   fetchFn: typeof fetch = fetch,
-): MinimalToolDefinition {
+): MinimalToolDefinition<typeof UnderstandAudioParams, { path: string; prompt?: string }, AudioToolResult> {
   return {
     name: "understand_audio",
     label: "Understand Audio",
@@ -109,8 +124,36 @@ export function buildUnderstandAudioTool(
   };
 }
 
+/** Builds the `understand_video` tool definition, given a real or injected fetch. */
+export function buildUnderstandVideoTool(
+  env: Record<string, string | undefined>,
+  fetchFn: typeof fetch = fetch,
+): MinimalToolDefinition<typeof UnderstandVideoParams, { path: string; prompt?: string; frameCount?: number }, VideoToolResult> {
+  return {
+    name: "understand_video",
+    label: "Understand Video",
+    description:
+      "Understands the contents of a local video file by extracting evenly-spaced frames with ffmpeg and " +
+      "sending them as images to a vision-capable model, returning a text description. Bypasses ordinary chat " +
+      "message content, which has no native video block type.",
+    parameters: UnderstandVideoParams,
+    execute: async (_toolCallId, params) => {
+      const prompt = params.prompt?.trim() || DEFAULT_VIDEO_PROMPT;
+      const frameCount = params.frameCount ?? DEFAULT_FRAME_COUNT;
+
+      const result = await understandVideo(params.path, prompt, frameCount, {
+        apiKey: env[VIDEO_API_KEY_ENV] ?? "",
+        baseUrl: env[VIDEO_BASE_URL_ENV],
+        fetchFn: fetchFn as never,
+      });
+      return { ...result, details: undefined };
+    },
+  };
+}
+
 export default function piMultimedia(pi: MinimalExtensionApi): void {
   pi.registerTool(buildUnderstandAudioTool(process.env));
+  pi.registerTool(buildUnderstandVideoTool(process.env));
 
   pi.registerCommand("multimedia-status", {
     description: "Reports that pi-desktop's bundled pi-multimedia extension is loaded.",
@@ -122,3 +165,4 @@ export default function piMultimedia(pi: MinimalExtensionApi): void {
 }
 
 export { detectAudioFormat, understandAudioViaApi };
+export { understandVideo, understandVideoViaApi };

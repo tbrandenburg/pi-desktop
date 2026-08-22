@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import piMultimedia, { buildUnderstandAudioTool } from "./index.js";
+import piMultimedia, { buildUnderstandAudioTool, buildUnderstandVideoTool } from "./index.js";
 import type { FetchFn } from "./audio.js";
 
 interface RegisteredTool {
@@ -21,11 +21,11 @@ function collect(): { tools: RegisteredTool[]; commands: string[] } {
 }
 
 describe("piMultimedia extension factory", () => {
-  it("registers exactly the understand_audio tool", () => {
+  it("registers exactly the understand_audio and understand_video tools", () => {
     const { tools } = collect();
 
-    expect(tools.map((t) => t.name)).toEqual(["understand_audio"]);
-    expect(tools).toHaveLength(1);
+    expect(tools.map((t) => t.name)).toEqual(["understand_audio", "understand_video"]);
+    expect(tools).toHaveLength(2);
   });
 
   it("registers the multimedia-status signal command", () => {
@@ -59,5 +59,19 @@ describe("buildUnderstandAudioTool execute()", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("ogg");
+  });
+});
+
+describe("buildUnderstandVideoTool execute()", () => {
+  it("returns isError:true for a non-existent video file without throwing (real ffmpeg failure)", async () => {
+    const fetchFn: FetchFn = async () => {
+      throw new Error("should not be called");
+    };
+    const tool = buildUnderstandVideoTool({}, fetchFn as unknown as typeof fetch);
+
+    const result = await tool.execute("call-3", { path: "/nonexistent/does-not-exist.mp4" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("does-not-exist.mp4");
   });
 });
