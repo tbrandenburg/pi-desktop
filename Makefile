@@ -26,7 +26,7 @@ help:
 	@echo "  make test        Run unit tests (vitest); warns on duration budget"
 	@echo "                   overruns (90s local / 150s CI total, 1s node-env"
 	@echo "                   file / 5s jsdom file), never fails on slowness alone"
-	@echo "  make lint        Type-check renderer + main; runs oxlint; warns on files >500 LOC and test:source LOC ratio >2:1; fails on coverage regression below .coverage-baseline"
+	@echo "  make lint        Type-check renderer + main; runs oxlint; warns on files >500 LOC and test:source LOC ratio >2:1; fails on coverage regression below .coverage-baseline; also runs the duration-budget check (reuses this same run's JSON report, no second test run)"
 	@echo "  make audit       Audit dependencies for known vulnerabilities"
 	@echo "  make build       Build renderer + main for production"
 	@echo "  make pack        Build and package app dir (no installer, fast local check)"
@@ -100,8 +100,12 @@ lint:
 	npm run check:pi-lockstep
 	@find src \( -name "*.ts" -o -name "*.tsx" \) | grep -Ev '\.test\.' | xargs wc -l | grep -v ' total$$' | awk '$$1>500{print "WARNING: " $$2 " has " $$1 " lines"}'
 	npm run check:test-ratio
-	npm test -- --coverage
+	npm test -- --coverage --reporter=default --reporter=json --outputFile.json=/tmp/pi-desktop-test-report.json
 	bash scripts/check-coverage-ratchet.sh
+	@# Reuses the coverage run's own JSON reporter output above instead of
+	@# running the whole suite a second time (issue #228 follow-up) -- see
+	@# check-test-duration.sh's `--report` mode.
+	bash scripts/check-test-duration.sh --report /tmp/pi-desktop-test-report.json
 
 ## Alias for lint (type-check), kept for convention parity
 check: lint
@@ -335,21 +339,24 @@ uninstall-app-linux:
 
 ## --- Versioning & release -------------------------------------------------
 ##
-## Version bumps always run `npm run check` + `npm test` first (never tag a
-## broken commit), then `npm version <bump>`, which updates package.json +
-## package-lock.json, commits "chore(release): vX.Y.Z", and creates the
-## matching annotated git tag "vX.Y.Z" — all locally, nothing pushed yet.
+## Version bumps always run `make check` first (never tag a broken commit) --
+## `check`'s own coverage test run also performs the duration-budget check
+## (see `lint`'s `check-test-duration.sh --report` step), so the whole test
+## suite runs exactly once per version bump, not twice -- then
+## `npm version <bump>`, which updates package.json + package-lock.json,
+## commits "chore(release): vX.Y.Z", and creates the matching annotated git
+## tag "vX.Y.Z" -- all locally, nothing pushed yet.
 
 ## Bump patch version (0.1.0 -> 0.1.1): commit + git tag, no push
-version-patch: check test
+version-patch: check
 	npm version patch -m "chore(release): v%s"
 
 ## Bump minor version (0.1.0 -> 0.2.0): commit + git tag, no push
-version-minor: check test
+version-minor: check
 	npm version minor -m "chore(release): v%s"
 
 ## Bump major version (0.1.0 -> 1.0.0): commit + git tag, no push
-version-major: check test
+version-major: check
 	npm version major -m "chore(release): v%s"
 
 ## Push the current release commit and its version tag to origin.

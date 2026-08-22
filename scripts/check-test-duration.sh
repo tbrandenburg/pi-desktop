@@ -29,6 +29,20 @@
 # The suite's own pass/fail exit status is preserved and combined with the
 # hard-breach status (either one failing means this script exits non-zero),
 # so callers (e.g. `make test`) can rely on it.
+#
+# Usage:
+#   scripts/check-test-duration.sh                  # runs `npm run test` itself
+#   scripts/check-test-duration.sh --report <file>   # analyzes an existing JSON
+#                                                     # report instead of running
+#                                                     # the suite again -- lets
+#                                                     # `make lint`'s own coverage
+#                                                     # run (which already emits a
+#                                                     # JSON reporter output, see
+#                                                     # `Makefile`) double as this
+#                                                     # check's input, so a release
+#                                                     # (`make check test`) runs
+#                                                     # the whole suite once, not
+#                                                     # twice (issue #228 follow-up).
 
 set -uo pipefail
 
@@ -50,15 +64,28 @@ if [ -n "${CI:-}" ]; then
   env_label="CI"
 fi
 
-report_file=$(mktemp /tmp/vitest-report.XXXXXX.json)
-trap 'rm -f "$report_file"' EXIT
+# `--report <file>`: reuse an already-produced JSON report (e.g. `make
+# lint`'s own coverage run) instead of running the suite a second time.
+# That run already succeeded (a Makefile recipe stops on the first failing
+# line), so there is no separate test_status to capture here.
+if [ "${1:-}" = "--report" ]; then
+  report_file="$2"
+  test_status=0
+  if [ ! -s "$report_file" ]; then
+    echo "check-test-duration: ERROR: no JSON report found at $report_file" >&2
+    exit 1
+  fi
+else
+  report_file=$(mktemp /tmp/vitest-report.XXXXXX.json)
+  trap 'rm -f "$report_file"' EXIT
 
-npm run test -- --reporter=json --outputFile="$report_file"
-test_status=$?
+  npm run test -- --reporter=json --outputFile="$report_file"
+  test_status=$?
 
-if [ ! -s "$report_file" ]; then
-  echo "check-test-duration: ERROR: vitest produced no JSON report at $report_file" >&2
-  exit 1
+  if [ ! -s "$report_file" ]; then
+    echo "check-test-duration: ERROR: vitest produced no JSON report at $report_file" >&2
+    exit 1
+  fi
 fi
 
 warn() {
