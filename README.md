@@ -76,6 +76,10 @@ or provider APIs directly, and credentials never leave the main process.
   credentials never leave the main process.
 - **No dev tools required** 📦 — Double-click installer/AppImage for Linux
   and Windows.
+- **Local web-bridge dev mode** 🌉 — Opt-in `npm run dev:web`/`make run-web`
+  lets a plain browser tab talk to the real backend (real models, chat
+  streaming, sessions) without launching Electron — dev-only, never in a
+  packaged build.
 
 ### Planned
 
@@ -135,6 +139,17 @@ automatically from your `~/.pi/agent` config — no manual setup required.
 > Prefer `make`? `make install && make run` does the same thing — see
 > [Scripts](#scripts) for the full command surface.
 
+**Want to test it in a plain browser tab instead of Electron?**
+
+```bash
+npm run dev:web   # or: make run-web
+```
+
+Opens the same real backend (real models, real streaming chat, real
+sessions) behind a small opt-in local bridge — no Electron window at all,
+just open the printed Vite dev server URL in your regular browser. Dev-only:
+this bridge never starts in a packaged build.
+
 ## Configuration
 
 Pi Desktop currently relies on the standard [Pi agent](https://pi.dev)
@@ -190,6 +205,7 @@ stable, beats a sprawling one that's merely "done."
 | --- | --- |
 | `make install` | Install dependencies (`npm install`) |
 | `make run` / `make stop` | Start / stop dev mode (Vite + main + Electron) |
+| `make run-web` | Start dev mode with the opt-in local web bridge, no Electron window (`make stop` also stops it) |
 | `make test` | Run unit tests (`vitest`) |
 | `make lint` / `make check` | Type-check renderer + main (`tsc --noEmit`) |
 | `make build` | Build renderer + main for production |
@@ -210,6 +226,7 @@ npm run check       # tsc --noEmit for both renderer and main
 npm test            # vitest unit/integration tests
 npm run build        # build renderer + main for production
 npm run dist:linux   # package a Linux AppImage (release/)
+npm run dev:web      # dev mode via the opt-in local web bridge, no Electron window
 ```
 
 </details>

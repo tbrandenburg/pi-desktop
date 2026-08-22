@@ -6,7 +6,7 @@ SHELL := /bin/bash
 # even within the same `make` invocation (e.g. `make release-patch`).
 VERSION = $(shell node -p "require('./package.json').version")
 
-.PHONY: help install run stop test lint check audit build build-renderer build-main clean \
+.PHONY: help install run run-web stop test lint check audit build build-renderer build-main clean \
         dist dist-linux dist-win dist-mac pack \
         run-bundled run-linux run-win run-mac \
         e2e-packaged e2e-stop \
@@ -19,6 +19,9 @@ help:
 	@echo "Available targets:"
 	@echo "  make install     Install all dependencies"
 	@echo "  make run         Start app in dev mode (renderer + main + electron)"
+	@echo "  make run-web     Start dev mode with the opt-in local web bridge"
+	@echo "                   (issue #228): no Electron window, plain browser tab"
+	@echo "                   at the printed Vite URL talks to the real backend"
 	@echo "  make stop        Kill any running dev/electron processes"
 	@echo "  make test        Run unit tests (vitest); warns on duration budget"
 	@echo "                   overruns (90s local / 150s CI total, 1s node-env"
@@ -70,6 +73,12 @@ install:
 ## Start service in dev mode
 run:
 	npm run dev
+
+## Start dev mode with the opt-in local web bridge (issue #228): no Electron
+## window, so a plain browser tab at the printed Vite dev server URL talks to
+## the real backend instead of the fake bridge. Stop with 'make stop'.
+run-web:
+	npm run dev:web
 
 ## Stop any running dev/electron processes started by 'make run'
 stop:
