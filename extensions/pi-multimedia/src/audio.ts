@@ -10,7 +10,7 @@
  */
 
 /** Audio formats accepted by the target audio-capable chat completions API. */
-export type AudioFormat = "wav" | "mp3";
+export type AudioFormat = "wav" | "mp3" | "webm";
 
 /** Maps a lowercased file extension (no dot) to the API's accepted format string. */
 const EXTENSION_TO_FORMAT: Record<string, AudioFormat> = {
@@ -21,11 +21,16 @@ const EXTENSION_TO_FORMAT: Record<string, AudioFormat> = {
   // transcode. A future implementation would transcode m4a -> wav/mp3
   // before sending (see README "Known limitations").
   m4a: "mp3",
+  // webm is what the browser's MediaRecorder produces by default (issue
+  // #245's mic-record composer button). OpenAI's `/v1/audio/transcriptions`
+  // (Whisper-based) endpoint natively accepts webm, so it is passed through
+  // as-is with no transcoding — see `transcribeAudioViaApi` below.
+  webm: "webm",
 };
 
 export class UnsupportedAudioFormatError extends Error {
   constructor(extension: string) {
-    super(`Unsupported audio file extension: ".${extension}". Supported: wav, mp3, m4a.`);
+    super(`Unsupported audio file extension: ".${extension}". Supported: wav, mp3, m4a, webm.`);
     this.name = "UnsupportedAudioFormatError";
   }
 }
@@ -189,6 +194,7 @@ export interface MultipartFactory {
 const FORMAT_TO_CONTENT_TYPE: Record<AudioFormat, string> = {
   wav: "audio/wav",
   mp3: "audio/mpeg",
+  webm: "audio/webm",
 };
 
 /**
