@@ -114,7 +114,7 @@ export interface ResolvedPiDefault {
   label: string;
 }
 
-async function resolveFromRegistry(
+export async function resolveFromRegistry(
   registry: ModelsRegistry,
   providerId: string,
   modelId: string | undefined,
@@ -126,7 +126,14 @@ async function resolveFromRegistry(
   const model = (modelId && providerModels.find((m) => m.id === modelId)) || providerModels[0];
   if (!model) return null;
 
-  const auth = await registry.models.getAuth(providerId);
+  // A broken/expired credential for this one provider (e.g. a suspended
+  // github-copilot OAuth account) must never propagate out of here: this is
+  // called from resolvePiDefault's fallback loop over *every* available
+  // provider, so an uncaught rejection would abort resolution for all of
+  // them -- including other, unrelated, healthy providers -- instead of
+  // just skipping this one (issue #241). Mirrors isProviderConfigured's
+  // existing catch-and-degrade pattern above.
+  const auth = await registry.models.getAuth(providerId).catch(() => undefined);
   if (!auth?.auth.apiKey) return null;
 
   return {
@@ -164,11 +171,17 @@ export async function resolvePiDefault(
   }
 
   // No usable configured default: fall back to the first available
-  // (auth-configured) model from any provider.
+  // (auth-configured) model from any provider. `resolveFromRegistry` itself
+  // degrades a broken credential to `null` (issue #241), but that alone
+  // would still stop at the first candidate; keep scanning subsequent
+  // candidates so one provider's broken OAuth credential can't block an
+  // otherwise-healthy fallback provider further down the list.
   const available = await registry.models.getAvailable();
-  const first = available[0];
-  if (!first) return null;
-  return resolveFromRegistry(registry, first.provider, first.id);
+  for (const candidate of available) {
+    const resolved = await resolveFromRegistry(registry, candidate.provider, candidate.id);
+    if (resolved) return resolved;
+  }
+  return null;
 }
 
 /**
