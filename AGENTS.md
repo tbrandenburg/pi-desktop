@@ -228,6 +228,16 @@ stylesheet or a per-component test. Use the browser fake bridge for renderer UI 
   the worktree, but run any dev-server/E2E validation (`make run-web`, real
   browser checks) only after merging into a tree with a full `npm install`
   (e.g. the coordinator's main tree), not inside the worktree itself.
+- 2026-08-23: A workspace package's tests passing locally is not proof they
+  pass in CI when the tests shell out to a real external binary
+  (`extensions/pi-multimedia/src/video.test.ts` calling real `ffmpeg` to
+  generate synthetic fixtures) -- the local dev machine already had `ffmpeg`
+  installed, masking that `ubuntu-latest` GitHub Actions runners do not ship
+  it by default (`spawnSync ffmpeg ENOENT`). Before trusting a green local
+  `make check`/`make test` as sufficient evidence for a PR that adds tests
+  depending on a system binary, check whether that binary is installed by
+  the CI workflow (`.github/workflows/*.yml`), not just present locally, and
+  add an explicit install step if missing.
 
 ## Archived incident narratives
 
