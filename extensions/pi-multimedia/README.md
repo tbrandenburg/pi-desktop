@@ -50,16 +50,19 @@ both degrade to `isError: true` instead of throwing.
 
 ## Configuration
 
-Both tools read their API key/base URL from process environment variables,
-independent of pi-desktop's own per-model settings store
+Both tools read their API key/base URL/model from process environment
+variables, independent of pi-desktop's own per-model settings store
 (`src/main/settings/store.ts`):
 
 | Variable | Purpose |
 | --- | --- |
 | `MULTIMEDIA_AUDIO_API_KEY` | API key for `understand_audio` |
 | `MULTIMEDIA_AUDIO_BASE_URL` | Optional override of the audio API base URL |
+| `MULTIMEDIA_AUDIO_MODEL` | Optional override of the `understand` mode model (default `gpt-audio-1.5`) |
+| `MULTIMEDIA_TRANSCRIBE_MODEL` | Optional override of the `transcribe` mode model (default `gpt-transcribe`) |
 | `MULTIMEDIA_VIDEO_API_KEY` | API key for `understand_video` |
 | `MULTIMEDIA_VIDEO_BASE_URL` | Optional override of the video/vision API base URL |
+| `MULTIMEDIA_VIDEO_MODEL` | Optional override of the vision model (default `gpt-4o`) |
 
 Without a key set, `execute()` returns a normal `isError` tool result (never
 throws) explaining the missing configuration. `understand_video` additionally

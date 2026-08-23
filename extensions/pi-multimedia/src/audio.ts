@@ -71,9 +71,14 @@ export interface AudioChatCompletionsRequest {
 export const AUDIO_MODEL = "gpt-audio-1.5";
 
 /** Builds the OpenAI-style chat completions request body for audio understanding. */
-export function buildAudioRequest(base64Audio: string, format: AudioFormat, prompt: string): AudioChatCompletionsRequest {
+export function buildAudioRequest(
+  base64Audio: string,
+  format: AudioFormat,
+  prompt: string,
+  model: string = AUDIO_MODEL,
+): AudioChatCompletionsRequest {
   return {
-    model: AUDIO_MODEL,
+    model,
     modalities: ["text"],
     messages: [
       {
@@ -209,12 +214,13 @@ export function buildTranscriptionFormData(
   base64Audio: string,
   format: AudioFormat,
   factory: MultipartFactory,
+  model: string = TRANSCRIBE_MODEL,
 ): MinimalFormData {
   const bytes = base64ToBytes(base64Audio);
   const blob = factory.createBlob(bytes, FORMAT_TO_CONTENT_TYPE[format]);
   const form = factory.createFormData();
   form.append("file", blob, `audio.${format}`);
-  form.append("model", TRANSCRIBE_MODEL);
+  form.append("model", model);
   return form;
 }
 
@@ -245,6 +251,8 @@ export interface TranscribeAudioOptions {
   baseUrl?: string;
   fetchFn: TranscribeFetchFn;
   multipartFactory?: MultipartFactory;
+  /** Overrides `TRANSCRIBE_MODEL`, e.g. to point at a different provider's transcription model. */
+  model?: string;
 }
 
 /**
@@ -262,7 +270,12 @@ export async function transcribeAudioViaApi(
   options: TranscribeAudioOptions,
 ): Promise<AudioToolResult> {
   const url = `${options.baseUrl ?? "https://api.openai.com/v1"}/audio/transcriptions`;
-  const form = buildTranscriptionFormData(base64Audio, format, options.multipartFactory ?? realMultipartFactory);
+  const form = buildTranscriptionFormData(
+    base64Audio,
+    format,
+    options.multipartFactory ?? realMultipartFactory,
+    options.model,
+  );
 
   let response: Awaited<ReturnType<TranscribeFetchFn>>;
   try {
@@ -319,6 +332,8 @@ export interface UnderstandAudioOptions {
   apiKey: string;
   baseUrl?: string;
   fetchFn: FetchFn;
+  /** Overrides `AUDIO_MODEL`, e.g. to point at a different provider's audio-capable model. */
+  model?: string;
 }
 
 /** Simple text-only tool result content, matching AgentToolResult<unknown>["content"]. */
@@ -339,7 +354,7 @@ export async function understandAudioViaApi(
   options: UnderstandAudioOptions,
 ): Promise<AudioToolResult> {
   const url = `${options.baseUrl ?? "https://api.openai.com/v1"}/chat/completions`;
-  const body = buildAudioRequest(base64Audio, format, prompt);
+  const body = buildAudioRequest(base64Audio, format, prompt, options.model);
 
   let response: Awaited<ReturnType<FetchFn>>;
   try {

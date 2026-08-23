@@ -243,13 +243,17 @@ export interface VideoChatCompletionsRequest {
 export const VIDEO_MODEL = "gpt-4o";
 
 /** Builds the OpenAI-style chat completions request body for video-frame understanding. */
-export function buildVideoRequest(base64Frames: string[], prompt: string): VideoChatCompletionsRequest {
+export function buildVideoRequest(
+  base64Frames: string[],
+  prompt: string,
+  model: string = VIDEO_MODEL,
+): VideoChatCompletionsRequest {
   const imageBlocks: ImageUrlContentBlock[] = base64Frames.map((frame) => ({
     type: "image_url",
     image_url: { url: `data:image/jpeg;base64,${frame}` },
   }));
   return {
-    model: VIDEO_MODEL,
+    model,
     messages: [
       {
         role: "user",
@@ -318,6 +322,8 @@ export interface UnderstandVideoOptions {
   apiKey: string;
   baseUrl?: string;
   fetchFn: FetchFn;
+  /** Overrides `VIDEO_MODEL`, e.g. to point at a different provider's vision-capable model. */
+  model?: string;
 }
 
 /** Simple text-only tool result content, matching AgentToolResult<unknown>["content"]. */
@@ -337,7 +343,7 @@ export async function understandVideoViaApi(
   options: UnderstandVideoOptions,
 ): Promise<VideoToolResult> {
   const url = `${options.baseUrl ?? "https://api.openai.com/v1"}/chat/completions`;
-  const body = buildVideoRequest(base64Frames, prompt);
+  const body = buildVideoRequest(base64Frames, prompt, options.model);
 
   let response: Awaited<ReturnType<FetchFn>>;
   try {
