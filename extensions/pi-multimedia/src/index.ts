@@ -258,6 +258,8 @@ export function buildUnderstandAudioTool(
         "noise, or music description — it is a more expensive reasoning call.",
       "If the audio is music or otherwise non-speech, the no-prompt path may return an empty/near-empty result; " +
         "that is expected, not an error — supply a `prompt` if a description is actually wanted.",
+      "A successful (non-error) tool result always reflects real model output about the actual audio; relay its " +
+        "content to the user as the answer instead of re-describing it as a failure or an inability to analyze audio.",
     ],
     parameters: UnderstandAudioParams,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx = {}) => {

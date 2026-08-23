@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AUDIO_MODEL,
+  AUDIO_UNDERSTANDING_SYSTEM_PROMPT,
   buildAudioRequest,
   buildTranscriptionFormData,
   detectAudioFormat,
@@ -70,19 +71,35 @@ describe("buildAudioRequest", () => {
 
     expect(request.model).toBe(AUDIO_MODEL);
     expect(request.modalities).toEqual(["text"]);
-    expect(request.messages).toHaveLength(1);
+    expect(request.messages).toHaveLength(2);
   });
 
-  it("nests the text prompt and input_audio blocks with the real base64 payload", () => {
+  it("nests the text prompt and input_audio blocks with the real base64 payload in the user message", () => {
     const base64 = buildSyntheticWavBase64();
     const request = buildAudioRequest(base64, "mp3", "What is said?");
 
-    const [message] = request.messages;
+    const [, message] = request.messages;
     expect(message.content).toEqual([
       { type: "text", text: "What is said?" },
       { type: "input_audio", input_audio: { data: base64, format: "mp3" } },
     ]);
     expect(message.content[1].input_audio.data.length).toBeGreaterThan(0);
+  });
+
+  it("prepends a system message instructing the model to answer directly instead of hedging (issue #247)", () => {
+    const base64 = buildSyntheticWavBase64();
+    const request = buildAudioRequest(base64, "wav", "Describe the tone of voice.");
+
+    const [system] = request.messages;
+    expect(system.role).toBe("system");
+    expect(system.content).toBe(AUDIO_UNDERSTANDING_SYSTEM_PROMPT);
+    // The guidance must reference the specific paralinguistic capabilities
+    // (tone/emotion/background sound) and explicitly discourage refusal, so
+    // regressing this to a generic/empty string would silently reintroduce
+    // the hedging behavior from issue #247.
+    expect(system.content).toMatch(/tone of voice/i);
+    expect(system.content).toMatch(/background sounds/i);
+    expect(system.content).toMatch(/do not refuse/i);
   });
 });
 
@@ -139,7 +156,8 @@ describe("understandAudioViaApi", () => {
 
     expect(capturedInit?.headers.Authorization).toBe("Bearer sk-abc");
     const parsedBody = JSON.parse(capturedInit?.body ?? "{}");
-    expect(parsedBody.messages[0].content[1].input_audio.format).toBe("wav");
+    expect(parsedBody.messages[0].role).toBe("system");
+    expect(parsedBody.messages[1].content[1].input_audio.format).toBe("wav");
   });
 
   it("returns isError:true with a helpful message on network failure instead of throwing", async () => {
