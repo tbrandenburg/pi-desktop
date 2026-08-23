@@ -17,8 +17,8 @@ const EXTENSION_TO_FORMAT: Record<string, AudioFormat> = {
   wav: "wav",
   mp3: "mp3",
   // m4a has no native "input_audio" format on this API; re-labeled as mp3
-  // container-wise this is lossy metadata-only guidance for a PoC, not a
-  // transcode. A production implementation would transcode m4a -> wav/mp3
+  // container-wise this is lossy metadata-only guidance, not a real
+  // transcode. A future implementation would transcode m4a -> wav/mp3
   // before sending (see README "Known limitations").
   m4a: "mp3",
 };

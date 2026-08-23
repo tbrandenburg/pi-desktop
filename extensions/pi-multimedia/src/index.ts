@@ -1,16 +1,14 @@
 /**
- * pi-multimedia — PoC first-party pi extension registering an
- * `understand_audio` tool.
+ * pi-multimedia — first-party pi extension, bundled with pi-desktop,
+ * registering `understand_audio` and `understand_video` tools.
  *
  * pi-ai's Message schema (as of @earendil-works/pi-ai@0.84.1) has no
- * AudioContent/VideoContent block type, so audio understanding can't be
- * expressed as ordinary LLM message content. This tool instead makes a raw
- * HTTP call to an audio-capable chat completions API directly from tool
- * `execute()` and returns the answer as a plain `TextContent` block, which
- * fits the existing `AgentToolResult<TDetails>` contract unchanged.
- *
- * Video would extend the same pattern; see README.md for the two concrete
- * options (frame-extraction-as-images vs. a native-video-model call).
+ * AudioContent/VideoContent block type, so audio/video understanding can't
+ * be expressed as ordinary LLM message content. These tools instead make a
+ * raw HTTP call to an audio/vision-capable chat completions API directly
+ * from tool `execute()` and return the answer as a plain `TextContent`
+ * block, which fits the existing `AgentToolResult<TDetails>` contract
+ * unchanged. See README.md and issue #234 for the full design rationale.
  */
 import { Type } from "typebox";
 import {
