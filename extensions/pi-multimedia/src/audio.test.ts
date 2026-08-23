@@ -86,20 +86,24 @@ describe("buildAudioRequest", () => {
     expect(message.content[1].input_audio.data.length).toBeGreaterThan(0);
   });
 
-  it("prepends a system message instructing the model to answer directly instead of hedging (issue #247)", () => {
+  it("prepends a light, conversational system message that reduces generic audio refusals (issue #247)", () => {
     const base64 = buildSyntheticWavBase64();
     const request = buildAudioRequest(base64, "wav", "Describe the tone of voice.");
 
     const [system] = request.messages;
     expect(system.role).toBe("system");
     expect(system.content).toBe(AUDIO_UNDERSTANDING_SYSTEM_PROMPT);
-    // The guidance must reference the specific paralinguistic capabilities
-    // (tone/emotion/background sound) and explicitly discourage refusal, so
-    // regressing this to a generic/empty string would silently reintroduce
-    // the hedging behavior from issue #247.
+    // Must nudge the model to weave in tone/background details conversationally
+    // (not as a formal analysis) and must explicitly still allow an honest "no
+    // clear speech" answer -- live testing against real gpt-audio showed that
+    // forbidding *any* hedge instead causes the model to hallucinate a fake
+    // voice/tone for audio that has no speech at all, which is worse than the
+    // original refusal. It must still discourage the generic, conversation-
+    // breaking "I can't process audio at all" refusal.
     expect(system.content).toMatch(/tone of voice/i);
-    expect(system.content).toMatch(/background sounds/i);
-    expect(system.content).toMatch(/do not refuse/i);
+    expect(system.content).toMatch(/background sound/i);
+    expect(system.content).toMatch(/don't hear something clearly/i);
+    expect(system.content).toMatch(/can't process audio at all/i);
   });
 });
 

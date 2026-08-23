@@ -73,23 +73,33 @@ export const AUDIO_MODEL = "gpt-audio-1.5";
 
 /**
  * System instruction prepended to every "understanding" (prompted) request.
- * Rationale (issue #247): a real live E2E run showed the underlying
- * `gpt-audio` model return a genuinely successful HTTP 200 response, but
- * with content that hedged/declined as if it could not analyze paralinguistic
- * qualities (tone, emotion, background sound/music) — the orchestrating chat
- * model then relayed that hedge to the end user as an apparent failure, even
- * though the tool call itself succeeded. This message tells the audio model
- * directly and explicitly that answering these questions from the audio is
- * exactly the expected task, to reduce the model's default cautious/generic
- * "I can't process audio" framing. This is a best-effort mitigation, not a
- * verified fix — it has not been confirmed against a live API call.
+ *
+ * Rationale (issue #247), confirmed with real, live OpenRouter calls against
+ * `openai/gpt-audio` (see PR discussion for the raw request/response pairs):
+ * - A clip with clear speech never hedges, with or without this prompt.
+ * - A clip with no clear speech (e.g. pure background noise) sometimes makes
+ *   the raw model emit a generic "I don't have the ability to analyze audio"
+ *   refusal, and the orchestrating chat model then faithfully relays that
+ *   refusal as if the tool itself had failed, even though the HTTP call
+ *   succeeded.
+ * - An earlier, heavier version of this prompt ("you are an audio analysis
+ *   assistant... do not refuse") measurably traded that refusal for
+ *   hallucination: it made the model confidently invent a fake tone of voice
+ *   and background sound for the same no-speech clip. That is worse than a
+ *   visible hedge, so this prompt intentionally does NOT forbid saying "no
+ *   speech" — it only forbids the generic, conversation-breaking "I can't
+ *   process audio at all" refusal.
+ * - This is a real, measured improvement (fewer generic refusals across
+ *   repeated live runs), not a guaranteed fix: `gpt-audio` remains
+ *   stochastic on ambiguous/non-speech audio and can still occasionally
+ *   describe background texture that isn't clearly a voice. Keep this
+ *   prompt short and conversational so it stays part of a fluent reply
+ *   instead of prompting a formal "analysis report".
  */
 export const AUDIO_UNDERSTANDING_SYSTEM_PROMPT =
-  "You are an audio analysis assistant. You can hear and directly analyze the " +
-  "attached audio clip, including its spoken content, tone of voice, emotion, " +
-  "and any background sounds or music. Answer the user's question concretely " +
-  "based on what you actually hear in the clip. Do not refuse or claim you " +
-  "are unable to analyze audio — you have already received and processed it.";
+  "Reply naturally, as part of a normal conversation. Weave in what you notice in the audio -- tone of voice, " +
+  "emotion, background sound -- as relevant details, not as a formal analysis. If you don't hear something " +
+  "clearly (e.g. no speech), just say so briefly instead of claiming you can't process audio at all.";
 
 /** Builds the OpenAI-style chat completions request body for audio understanding. */
 export function buildAudioRequest(
