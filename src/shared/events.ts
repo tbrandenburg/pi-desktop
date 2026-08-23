@@ -267,4 +267,12 @@ export interface DesktopAgentApi {
   listShortcuts(): Promise<ShortcutInfo[]>;
   /** Invokes the extension callback registered for the given shortcut id. */
   triggerShortcut(id: string): Promise<void>;
+  /**
+   * Persists a recorded mic audio blob (base64-encoded) to a temp file so the
+   * bundled `pi-multimedia` extension's `understand_audio` tool can
+   * transcribe it via a normal agent tool call (issue #245). No cleanup of
+   * the temp file happens after write -- recordings live in `os.tmpdir()`
+   * (accepted known gap).
+   */
+  saveRecording(base64Audio: string, mimeType: string): Promise<{ path: string }>;
 }

@@ -1,6 +1,14 @@
 import os from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { app, type BrowserWindow, dialog, ipcMain } from "electron";
-import { startChatRequestSchema, providerSettingsSchema, workspaceDirSchema } from "../shared/schemas";
+import {
+  startChatRequestSchema,
+  providerSettingsSchema,
+  workspaceDirSchema,
+  saveRecordingSchema,
+} from "../shared/schemas";
 import type { CommandInfo, ExtensionUIResponse, ModelInfo, PackageInfo, WorkspaceInfo } from "../shared/events";
 import { ChatService } from "./chat/service";
 import {
@@ -377,6 +385,37 @@ export function createIpcHandlerRegistry(
   });
 
   handlers["shortcuts:trigger"] = (() => {});
+
+  handlers["audio:save"] = (async (
+    _event,
+    rawBase64Audio: unknown,
+    rawMimeType: unknown,
+  ): Promise<{ path: string }> => {
+    const { base64Audio } = saveRecordingSchema.parse({
+      base64Audio: rawBase64Audio,
+      mimeType: rawMimeType,
+    });
+
+    let buffer: Buffer;
+    try {
+      buffer = Buffer.from(base64Audio, "base64");
+    } catch (error) {
+      throw new Error(
+        `Failed to decode recording audio: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    const filePath = path.join(os.tmpdir(), `pi-desktop-recording-${randomUUID()}.webm`);
+    try {
+      await writeFile(filePath, buffer);
+    } catch (error) {
+      throw new Error(
+        `Failed to save recording to ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return { path: filePath };
+  });
 
   return { handlers, bridgeEvents };
 }

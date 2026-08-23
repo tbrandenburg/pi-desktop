@@ -163,6 +163,9 @@ export function createWebBridgeDesktopApi(baseUrl: string): DesktopAgentApi {
     triggerShortcut(id: string): Promise<void> {
       return call(baseUrl, "shortcuts:trigger", id);
     },
+    saveRecording(base64Audio: string, mimeType: string): Promise<{ path: string }> {
+      return call(baseUrl, "audio:save", base64Audio, mimeType);
+    },
   };
 }
 
