@@ -16,7 +16,7 @@ interface RegisteredTool {
   name: string;
   execute: (
     toolCallId: string,
-    params: { path: string; mode?: "transcribe" | "understand"; prompt?: string },
+    params: { path: string; prompt?: string },
     signal?: unknown,
     onUpdate?: unknown,
     ctx?: MinimalExtensionContext,
@@ -29,6 +29,18 @@ function fakeContext(models: RegistryModel[], apiKey = "registry-resolved-key"):
     modelRegistry: {
       getAvailable: () => models,
       getApiKeyAndHeaders: async () => ({ ok: true, apiKey }),
+    },
+  };
+}
+
+/** Builds a fake `MinimalExtensionContext` whose registry reports a resolved credential for exactly one provider id (issue #243 transcription-chain resolution). */
+function fakeContextWithProviderCredential(provider: string, apiKey = "provider-resolved-key"): MinimalExtensionContext {
+  return {
+    modelRegistry: {
+      getAvailable: () => [],
+      getApiKeyAndHeaders: async () => ({ ok: false }),
+      getProviderAuthStatus: (p: string) => (p === provider ? { configured: true } : { configured: false }),
+      getApiKeyForProvider: async (p: string) => (p === provider ? apiKey : undefined),
     },
   };
 }
@@ -108,7 +120,7 @@ describe("buildUnderstandAudioTool execute()", () => {
     expect(result.content[0].text).toContain("ogg");
   });
 
-  it("defaults to mode:'transcribe' and routes through the multipart transcription path", async () => {
+  it("no prompt -> routes through the multipart transcription path via env override", async () => {
     const filePath = writeTempWavFile();
     try {
       let calledUrl = "";
@@ -116,7 +128,7 @@ describe("buildUnderstandAudioTool execute()", () => {
         calledUrl = url;
         return { ok: true, status: 200, statusText: "OK", json: async () => ({ text: "real transcript text" }) };
       }) as unknown as typeof fetch;
-      const tool = buildUnderstandAudioTool({}, fetchFn);
+      const tool = buildUnderstandAudioTool({ MULTIMEDIA_TRANSCRIBE_MODEL: "whisper-1", MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
 
       const result = await tool.execute("call-transcribe", { path: filePath });
 
@@ -127,7 +139,7 @@ describe("buildUnderstandAudioTool execute()", () => {
     }
   });
 
-  it("routes mode:'understand' through the chat-completions gpt-audio-1.5 path instead", async () => {
+  it("a `prompt` routes through the chat-completions understanding path instead", async () => {
     const filePath = writeTempWavFile();
     try {
       let calledUrl = "";
@@ -140,12 +152,28 @@ describe("buildUnderstandAudioTool execute()", () => {
           json: async () => ({ choices: [{ message: { content: "It sounds like a calm melody." } }] }),
         };
       }) as unknown as typeof fetch;
-      const tool = buildUnderstandAudioTool({}, fetchFn);
+      const tool = buildUnderstandAudioTool({ MULTIMEDIA_AUDIO_MODEL: "gpt-audio-1.5", MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
 
-      const result = await tool.execute("call-understand", { path: filePath, mode: "understand", prompt: "Describe the mood." });
+      const result = await tool.execute("call-understand", { path: filePath, prompt: "Describe the mood." });
 
       expect(calledUrl).toContain("/chat/completions");
       expect(result.content).toEqual([{ type: "text", text: "It sounds like a calm melody." }]);
+    } finally {
+      unlinkSync(filePath);
+    }
+  });
+
+  it("returns one clear tool error (not a raw fetch call) when zero candidates are configured at all", async () => {
+    const fetchFn: FetchFn = async () => {
+      throw new Error("should not be called: chain must exhaust before any network call");
+    };
+    const tool = buildUnderstandAudioTool({}, fetchFn as unknown as typeof fetch);
+    const filePath = writeTempWavFile();
+    try {
+      const result = await tool.execute("call-exhausted", { path: filePath });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("No audio transcription or understanding path available");
     } finally {
       unlinkSync(filePath);
     }
@@ -204,8 +232,12 @@ describe("findModelByNameHint", () => {
   });
 });
 
-describe("registry-first model resolution (issue #235)", () => {
-  it("understand_audio (transcribe mode) uses the registry-matched model id and resolved api key over env vars", async () => {
+describe("registry-first model resolution (issue #235, generalized for #243)", () => {
+  it("understand_audio (no prompt) resolves a transcription-capable model via provider credential, not getAvailable() (issue #243 regression: OpenRouter-only setup)", async () => {
+    // Exact regression scenario from issue #243: the user's only configured
+    // provider is OpenRouter, and OpenRouter never lists whisper-1 in
+    // getAvailable() (it's not a chat model) -- resolution must instead go
+    // through getProviderAuthStatus/getApiKeyForProvider("openrouter").
     const filePath = writeTempWavFile();
     try {
       let calledModel = "";
@@ -215,15 +247,13 @@ describe("registry-first model resolution (issue #235)", () => {
         calledAuth = init.headers.Authorization;
         return { ok: true, status: 200, statusText: "OK", json: async () => ({ text: "hi" }) };
       }) as unknown as typeof fetch;
-      const tool = buildUnderstandAudioTool({ MULTIMEDIA_AUDIO_API_KEY: "env-key-should-be-ignored" }, fetchFn);
-      const ctx = fakeContext([
-        { id: "gpt-transcribe-2026", name: "gpt-transcribe-2026", api: "openai-completions", baseUrl: "https://registry.example/v1" },
-      ]);
+      const tool = buildUnderstandAudioTool({}, fetchFn);
+      const ctx = fakeContextWithProviderCredential("openrouter", "openrouter-key");
 
-      const result = await tool.execute("call-registry-transcribe", { path: filePath }, undefined, undefined, ctx);
+      const result = await tool.execute("call-openrouter-transcribe", { path: filePath }, undefined, undefined, ctx);
 
-      expect(calledModel).toBe("gpt-transcribe-2026");
-      expect(calledAuth).toBe("Bearer registry-resolved-key");
+      expect(calledModel).toBe("whisper-1");
+      expect(calledAuth).toBe("Bearer openrouter-key");
       expect(result.isError).toBe(false);
     } finally {
       unlinkSync(filePath);
@@ -258,7 +288,7 @@ describe("registry-first model resolution (issue #235)", () => {
     }
   });
 
-  it("falls back to env vars when the registry has no matching model", async () => {
+  it("understand_audio (no prompt) uses the explicit env override even when the registry has no transcription credential", async () => {
     const filePath = writeTempWavFile();
     try {
       let calledAuth = "";
@@ -266,10 +296,10 @@ describe("registry-first model resolution (issue #235)", () => {
         calledAuth = init.headers.Authorization;
         return { ok: true, status: 200, statusText: "OK", json: async () => ({ text: "hi" }) };
       }) as unknown as typeof fetch;
-      const tool = buildUnderstandAudioTool({ MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
+      const tool = buildUnderstandAudioTool({ MULTIMEDIA_TRANSCRIBE_MODEL: "whisper-1", MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
       const ctx = fakeContext([{ id: "claude-sonnet-5", name: "claude-sonnet-5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com" }]);
 
-      await tool.execute("call-fallback", { path: filePath }, undefined, undefined, ctx);
+      await tool.execute("call-env-override", { path: filePath }, undefined, undefined, ctx);
 
       expect(calledAuth).toBe("Bearer env-key");
     } finally {
@@ -277,19 +307,28 @@ describe("registry-first model resolution (issue #235)", () => {
     }
   });
 
-  it("falls back to env vars when no ctx/registry is provided at all", async () => {
+  it("falls back to the understanding chain (env override) when no transcription candidate is configured and no prompt was given", async () => {
     const filePath = writeTempWavFile();
     try {
+      let calledUrl = "";
       let calledAuth = "";
-      const fetchFn = (async (_url: string, init: { headers: Record<string, string> }) => {
+      const fetchFn = (async (url: string, init: { headers: Record<string, string> }) => {
+        calledUrl = url;
         calledAuth = init.headers.Authorization;
-        return { ok: true, status: 200, statusText: "OK", json: async () => ({ text: "hi" }) };
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({ choices: [{ message: { content: "transcribed via understanding fallback" } }] }),
+        };
       }) as unknown as typeof fetch;
-      const tool = buildUnderstandAudioTool({ MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
+      const tool = buildUnderstandAudioTool({ MULTIMEDIA_AUDIO_MODEL: "gpt-audio-1.5", MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
 
-      await tool.execute("call-no-ctx", { path: filePath });
+      const result = await tool.execute("call-no-ctx", { path: filePath });
 
+      expect(calledUrl).toContain("/chat/completions");
       expect(calledAuth).toBe("Bearer env-key");
+      expect(result.isError).toBe(false);
     } finally {
       unlinkSync(filePath);
     }
