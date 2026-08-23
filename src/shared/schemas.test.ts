@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   providerSettingsSchema,
+  saveRecordingSchema,
   startChatRequestSchema,
   workspaceDirSchema,
 } from "./schemas";
@@ -157,6 +158,56 @@ describe("workspaceDirSchema", () => {
 
   it("rejects a non-string value", () => {
     const result = workspaceDirSchema.safeParse(12345);
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("saveRecordingSchema", () => {
+  const validBase64Audio = Buffer.from("fake-webm-audio-bytes").toString("base64");
+
+  it("accepts a valid audio payload", () => {
+    const result = saveRecordingSchema.safeParse({
+      base64Audio: validBase64Audio,
+      mimeType: "audio/webm",
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.mimeType).toBe("audio/webm");
+  });
+
+  it("rejects an empty base64Audio string", () => {
+    const result = saveRecordingSchema.safeParse({
+      base64Audio: "",
+      mimeType: "audio/webm",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a mimeType that is not an audio type", () => {
+    const result = saveRecordingSchema.safeParse({
+      base64Audio: validBase64Audio,
+      mimeType: "video/webm",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("mimeType"))).toBe(true);
+    }
+  });
+
+  it("rejects a base64Audio payload exceeding the 25MB decoded cap", () => {
+    // 25MB decoded needs ~34.95M base64 chars; use 36M to safely exceed it.
+    const oversized = "A".repeat(36_000_000);
+    const result = saveRecordingSchema.safeParse({
+      base64Audio: oversized,
+      mimeType: "audio/webm",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("base64Audio"))).toBe(true);
+    }
+  });
+
+  it("rejects a payload missing required fields entirely", () => {
+    const result = saveRecordingSchema.safeParse({});
     expect(result.success).toBe(false);
   });
 });

@@ -132,6 +132,10 @@ const api: DesktopAgentApi = {
   triggerShortcut(id: string): Promise<void> {
     return ipcRenderer.invoke("shortcuts:trigger", id);
   },
+
+  saveRecording(base64Audio: string, mimeType: string): Promise<{ path: string }> {
+    return ipcRenderer.invoke("audio:save", base64Audio, mimeType);
+  },
 };
 
 contextBridge.exposeInMainWorld("desktopApi", api);

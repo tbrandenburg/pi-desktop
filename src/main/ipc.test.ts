@@ -350,6 +350,23 @@ describe("IPC settings round-trip integration", () => {
     }
   });
 
+  it("saves a recorded audio blob to a real temp .webm file (issue #245)", async () => {
+    const base64Audio = Buffer.from("fake-webm-audio-bytes").toString("base64");
+
+    const result = (await invoke("audio:save", base64Audio, "audio/webm")) as { path: string };
+
+    expect(result.path).toMatch(/pi-desktop-recording-.*\.webm$/);
+    expect(fs.existsSync(result.path)).toBe(true);
+    expect(fs.readFileSync(result.path).toString("base64")).toBe(base64Audio);
+
+    fs.rmSync(result.path, { force: true });
+  });
+
+  it("rejects a non-audio mimeType at the audio:save schema boundary", async () => {
+    const base64Audio = Buffer.from("fake-webm-audio-bytes").toString("base64");
+    await expect(invoke("audio:save", base64Audio, "video/webm")).rejects.toThrow();
+  });
+
   it("round-trips tools-expanded state through the IPC boundary (issue #139)", async () => {
     expect(await invoke("extension-ui:get-tools-expanded")).toBe(false);
 
