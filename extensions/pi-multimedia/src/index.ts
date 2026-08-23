@@ -33,8 +33,14 @@ declare function fetch(url: string, init?: unknown): Promise<{
 
 export const AUDIO_API_KEY_ENV = "MULTIMEDIA_AUDIO_API_KEY";
 export const AUDIO_BASE_URL_ENV = "MULTIMEDIA_AUDIO_BASE_URL";
+/** Overrides `AUDIO_MODEL` (understand mode, default `gpt-audio-1.5`). */
+export const AUDIO_MODEL_ENV = "MULTIMEDIA_AUDIO_MODEL";
+/** Overrides `TRANSCRIBE_MODEL` (transcribe mode, default `gpt-transcribe`). */
+export const TRANSCRIBE_MODEL_ENV = "MULTIMEDIA_TRANSCRIBE_MODEL";
 export const VIDEO_API_KEY_ENV = "MULTIMEDIA_VIDEO_API_KEY";
 export const VIDEO_BASE_URL_ENV = "MULTIMEDIA_VIDEO_BASE_URL";
+/** Overrides `VIDEO_MODEL` (default `gpt-4o`). */
+export const VIDEO_MODEL_ENV = "MULTIMEDIA_VIDEO_MODEL";
 
 const UnderstandAudioParams = Type.Object({
   path: Type.String({ description: "Absolute or workspace-relative path to a local audio file (wav/mp3/m4a)." }),
@@ -148,6 +154,7 @@ export function buildUnderstandAudioTool(
         const result = await understandAudioViaApi(base64Audio, format, prompt, {
           apiKey: env[AUDIO_API_KEY_ENV] ?? "",
           baseUrl: env[AUDIO_BASE_URL_ENV],
+          model: env[AUDIO_MODEL_ENV],
           fetchFn: fetchFn as never,
         });
         return { ...result, details: undefined };
@@ -156,6 +163,7 @@ export function buildUnderstandAudioTool(
       const result = await transcribeAudioViaApi(base64Audio, format, {
         apiKey: env[AUDIO_API_KEY_ENV] ?? "",
         baseUrl: env[AUDIO_BASE_URL_ENV],
+        model: env[TRANSCRIBE_MODEL_ENV],
         fetchFn: fetchFn as unknown as TranscribeFetchFn,
       });
       return { ...result, details: undefined };
@@ -191,6 +199,7 @@ export function buildUnderstandVideoTool(
       const result = await understandVideo(params.path, prompt, frameCount, {
         apiKey: env[VIDEO_API_KEY_ENV] ?? "",
         baseUrl: env[VIDEO_BASE_URL_ENV],
+        model: env[VIDEO_MODEL_ENV],
         fetchFn: fetchFn as never,
       });
       return { ...result, details: undefined };
