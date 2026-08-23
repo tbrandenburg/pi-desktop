@@ -132,27 +132,30 @@ export function MessageBubble({ message }: { message: DisplayMessage }) {
             : "relative max-w-[80%] rounded-2xl border border-surface-border bg-surface-panel px-5 py-4 text-sm leading-relaxed text-white/90"
         }
       >
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          className={MARKDOWN_CLASSNAME}
-          components={{
-            code(props) {
-              const { className, children } = props;
-              const match = /language-(\w+)/.exec(className ?? "");
-              const value = String(children ?? "").replace(/\n$/, "");
-              if (match) {
-                return <CodeBlock language={match[1]} value={value} />;
-              }
-              return (
-                <code className="rounded bg-surface-hover px-1 py-0.5 text-[13px]">
-                  {value}
-                </code>
-              );
-            },
-          }}
-        >
-          {message.content}
-        </ReactMarkdown>
+        {/* react-markdown v10 dropped the `className` prop; wrap it in a div instead
+            (see react-markdown changelog / issue #231 dependency bump). */}
+        <div className={MARKDOWN_CLASSNAME}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              code(props) {
+                const { className, children } = props;
+                const match = /language-(\w+)/.exec(className ?? "");
+                const value = String(children ?? "").replace(/\n$/, "");
+                if (match) {
+                  return <CodeBlock language={match[1]} value={value} />;
+                }
+                return (
+                  <code className="rounded bg-surface-hover px-1 py-0.5 text-[13px]">
+                    {value}
+                  </code>
+                );
+              },
+            }}
+          >
+            {message.content}
+          </ReactMarkdown>
+        </div>
         {message.streaming && !message.content && message.stepLabel && (
           <TypewriterCaption label={message.stepLabel} />
         )}
