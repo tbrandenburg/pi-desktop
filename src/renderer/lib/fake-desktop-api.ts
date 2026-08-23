@@ -278,5 +278,11 @@ export function createFakeDesktopApi(): DesktopAgentApi {
     },
 
     async triggerShortcut() {},
+
+    async saveRecording() {
+      // No real filesystem in the browser dev harness -- a canned fixed
+      // path is the honest fake, matching this file's other no-op fakes.
+      return { path: "/tmp/fake-recording.webm" };
+    },
   };
 }

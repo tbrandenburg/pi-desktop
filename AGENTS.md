@@ -251,6 +251,18 @@ stylesheet or a per-component test. Use the browser fake bridge for renderer UI 
   depending on a system binary, check whether that binary is installed by
   the CI workflow (`.github/workflows/*.yml`), not just present locally, and
   add an explicit install step if missing.
+- 2026-08-23: For microphone/`getUserMedia` E2E checks in a non-interactive
+  session (issue #245), the app's own CSP (`connect-src 'self'
+  http://localhost:4756 ...`) blocks a page-side `fetch()` to any other local
+  origin (e.g. a throwaway `python3 -m http.server` used to host a synthetic
+  audio fixture), even though the fixture is only test scaffolding. Passing
+  the fixture as an inline base64 string decoded client-side with
+  `atob()`/`decodeAudioData` avoids the CSP entirely and is the more reliable
+  pattern for injecting fake `getUserMedia` streams. Also,
+  `playwright_browser_run_code_unsafe`'s `filename` script must be a bare
+  `async (page) => { ... }` expression (no `module.exports =` wrapper, no
+  trailing semicolon after the closing brace) and must live inside an
+  allowed root (the repo itself or `.playwright-mcp/`), not `/tmp`.
 
 ## Archived incident narratives
 

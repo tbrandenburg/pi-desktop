@@ -56,6 +56,8 @@ describe("detectAudioFormat", () => {
     expect(detectAudioFormat("clip.wav")).toBe("wav");
     expect(detectAudioFormat("clip.mp3")).toBe("mp3");
     expect(detectAudioFormat("/abs/path/clip.m4a")).toBe("mp3");
+    // Browser MediaRecorder default output (issue #245 mic-record button).
+    expect(detectAudioFormat("clip.webm")).toBe("webm");
   });
 
   it("throws UnsupportedAudioFormatError for unknown or missing extensions", () => {
@@ -267,6 +269,15 @@ describe("buildTranscriptionFormData", () => {
     const filePart = form.get("file") as File;
     expect(filePart.name).toBe("audio.mp3");
     expect(filePart.type).toBe("audio/mpeg");
+  });
+
+  it("uses webm content-type and filename for webm format (browser MediaRecorder output, issue #245)", () => {
+    const base64 = buildSyntheticWavBase64();
+    const form = buildTranscriptionFormData(base64, "webm", realMultipartFactory) as unknown as FormData;
+
+    const filePart = form.get("file") as File;
+    expect(filePart.name).toBe("audio.webm");
+    expect(filePart.type).toBe("audio/webm");
   });
 });
 

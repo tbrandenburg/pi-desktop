@@ -2,7 +2,7 @@
 // from unit-test coverage/mutation targets - verified via real packaged-app
 // CDP checks (scripts/cdp-drive.ts) instead. See AGENTS.md lessons #16/#17
 // and issue #70.
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow, app, session } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { createMainWindow } from "./windows";
 import { resolveLaunchDirectoryArg } from "./cli-args";
@@ -16,6 +16,14 @@ function getWindow(): BrowserWindow | null {
 }
 
 app.whenReady().then(async () => {
+  // Issue #245: the mic-record composer button needs `getUserMedia({ audio })`
+  // to succeed, which Electron denies by default. Explicitly allow only
+  // `media` (mic/camera) requests and deny everything else -- never a
+  // silent allow-all.
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === "media");
+  });
+
   // Issue #164: `pi-desktop <dir>` (e.g. `pi-desktop .`) seeds the workspace
   // dir from the launch cwd -- unlike the persisted-settings default, the
   // launch cwd of an explicit CLI invocation IS meaningful (see cli-args.ts).
