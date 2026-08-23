@@ -104,14 +104,25 @@ export interface MinimalExtensionContext {
  * talk to.
  *
  * Within that filtered set, prefers an exact case-insensitive `id`/`name`
- * match, else the first case-insensitive substring match.
+ * match, else the first case-insensitive substring match, checked in both
+ * directions against the candidate's "core" (its id/name with any
+ * `provider/` prefix stripped). Real-world registry ids are often shorter
+ * than this tool's hardcoded default hint (e.g. OpenRouter's
+ * `openai/gpt-audio` vs. the default hint `gpt-audio-1.5`), so checking
+ * only `id.includes(hint)` misses them; checking `hint.includes(core)` too
+ * catches version/date suffixes the hint carries that the real id doesn't.
  */
 export function findModelByNameHint(models: RegistryModel[], hint: string): RegistryModel | undefined {
   const candidates = models.filter((model) => model.api === "openai-completions");
   const needle = hint.toLowerCase();
+  const coreOf = (id: string) => id.slice(id.lastIndexOf("/") + 1);
   const exact = candidates.find((model) => model.id.toLowerCase() === needle || model.name.toLowerCase() === needle);
   if (exact) return exact;
-  return candidates.find((model) => model.id.toLowerCase().includes(needle) || model.name.toLowerCase().includes(needle));
+  return candidates.find((model) => {
+    const idCore = coreOf(model.id.toLowerCase());
+    const nameCore = coreOf(model.name.toLowerCase());
+    return idCore.includes(needle) || needle.includes(idCore) || nameCore.includes(needle) || needle.includes(nameCore);
+  });
 }
 
 /** What a resolved audio/video API call needs, regardless of which source (registry or env vars) it came from. */
