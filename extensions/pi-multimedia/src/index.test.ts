@@ -193,6 +193,15 @@ describe("findModelByNameHint", () => {
 
     expect(findModelByNameHint(models, "gpt-transcribe")).toBeUndefined();
   });
+
+  it("matches a real-world OpenRouter id shorter than the default hint (issue #239)", () => {
+    // Real reproduction: OpenRouter's `openai/gpt-audio` vs. this tool's default
+    // AUDIO_MODEL hint `gpt-audio-1.5` -- neither is a substring of the other
+    // without stripping the `openai/` provider prefix first.
+    const models = [openaiModel("openai/gpt-audio")];
+
+    expect(findModelByNameHint(models, "gpt-audio-1.5")).toBe(models[0]);
+  });
 });
 
 describe("registry-first model resolution (issue #235)", () => {
