@@ -50,29 +50,44 @@ both degrade to `isError: true` instead of throwing.
 
 ## Configuration
 
-Both tools read their API key/base URL/model from process environment
-variables, independent of pi-desktop's own per-model settings store
-(`src/main/settings/store.ts`):
+Both tools resolve their API key/base URL/model in two steps, in order:
+
+1. **Registry match (preferred)**: if the tool is invoked from a real pi
+   session, `ctx.modelRegistry.getAvailable()` — the same resolved
+   credential set (settings.json + auth.json + OAuth) that already powers
+   the model picker — is searched for a model whose id/name matches the
+   configured hint (see `MULTIMEDIA_*_MODEL` below; defaults to
+   `gpt-audio-1.5`/`gpt-transcribe`/`gpt-4o`), best-effort, exact-match
+   first then substring. The search is restricted to models whose `api` is
+   `"openai-completions"` — the one pi-ai API id whose wire format matches
+   what this package's request builders send; other api ids
+   (`openai-responses`, `anthropic-messages`, `bedrock-converse-stream`,
+   etc.) are different, incompatible wire formats despite some sharing
+   "openai" in the name. On a match, the model's own real, already-resolved
+   API key/base URL (`ctx.modelRegistry.getApiKeyAndHeaders(model)`) is used
+   — **no separate configuration needed** if a matching model is already
+   set up in pi-desktop's Settings.
+2. **Env var fallback**: if no registry is available (e.g. running this
+   package standalone/outside pi-desktop, or in these unit tests) or no
+   matching model is found, falls back to process environment variables:
 
 | Variable | Purpose |
 | --- | --- |
 | `MULTIMEDIA_AUDIO_API_KEY` | API key for `understand_audio` |
 | `MULTIMEDIA_AUDIO_BASE_URL` | Optional override of the audio API base URL |
-| `MULTIMEDIA_AUDIO_MODEL` | Optional override of the `understand` mode model (default `gpt-audio-1.5`) |
-| `MULTIMEDIA_TRANSCRIBE_MODEL` | Optional override of the `transcribe` mode model (default `gpt-transcribe`) |
+| `MULTIMEDIA_AUDIO_MODEL` | Overrides the `understand` mode model/search hint (default `gpt-audio-1.5`) |
+| `MULTIMEDIA_TRANSCRIBE_MODEL` | Overrides the `transcribe` mode model/search hint (default `gpt-transcribe`) |
 | `MULTIMEDIA_VIDEO_API_KEY` | API key for `understand_video` |
 | `MULTIMEDIA_VIDEO_BASE_URL` | Optional override of the video/vision API base URL |
-| `MULTIMEDIA_VIDEO_MODEL` | Optional override of the vision model (default `gpt-4o`) |
+| `MULTIMEDIA_VIDEO_MODEL` | Overrides the vision model/search hint (default `gpt-4o`) |
 
-Without a key set, `execute()` returns a normal `isError` tool result (never
-throws) explaining the missing configuration. `understand_video` additionally
-requires a local `ffmpeg`/`ffprobe` binary on `PATH`.
+Without a key resolved via either path, `execute()` returns a normal
+`isError` tool result (never throws) explaining the missing configuration.
+`understand_video` additionally requires a local `ffmpeg`/`ffprobe` binary
+on `PATH`.
 
-**Known gap**: unlike pi-desktop's built-in model providers, there is
-currently no Settings UI to configure these keys — they must be set as real
-process environment variables before launching pi-desktop. Wiring this
-extension into the existing settings store is tracked as a follow-up (not
-part of this issue's scope).
+See issue #235 for the design rationale behind preferring registry reuse
+over a dedicated new Settings UI page.
 
 ## Known limitations
 

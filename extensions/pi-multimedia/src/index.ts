@@ -12,14 +12,16 @@
  */
 import { Type } from "typebox";
 import {
+  AUDIO_MODEL,
   detectAudioFormat,
   transcribeAudioViaApi,
+  TRANSCRIBE_MODEL,
   understandAudioViaApi,
   type AudioToolResult,
   type TranscribeFetchFn,
 } from "./audio.js";
 import { readFileAsBase64 } from "./fs-io.js";
-import { understandVideo, understandVideoViaApi, type VideoToolResult } from "./video.js";
+import { understandVideo, understandVideoViaApi, VIDEO_MODEL, type VideoToolResult } from "./video.js";
 
 // Minimal ambient declaration: the shared extension tsconfig deliberately has
 // no Node type definitions, and this package must not add dependencies.
@@ -41,6 +43,116 @@ export const VIDEO_API_KEY_ENV = "MULTIMEDIA_VIDEO_API_KEY";
 export const VIDEO_BASE_URL_ENV = "MULTIMEDIA_VIDEO_BASE_URL";
 /** Overrides `VIDEO_MODEL` (default `gpt-4o`). */
 export const VIDEO_MODEL_ENV = "MULTIMEDIA_VIDEO_MODEL";
+
+/**
+ * Minimal shape of pi-ai's `Model<Api>` (see `@earendil-works/pi-ai`'s
+ * `types.d.ts`), only the fields this module reads. Declared locally rather
+ * than imported: this package intentionally has zero
+ * pi-ai/pi-coding-agent runtime dependencies (see `MinimalExtensionApi`
+ * below for the same rationale applied to the extension activation API).
+ */
+export interface RegistryModel {
+  id: string;
+  name: string;
+  api: string;
+  baseUrl: string;
+}
+
+/** Minimal shape of pi-coding-agent's `ResolvedRequestAuth` (`core/model-registry.ts`), only the success-path fields this module reads. */
+export interface ResolvedModelAuth {
+  ok: boolean;
+  apiKey?: string;
+  baseUrl?: string;
+}
+
+/** Minimal shape of pi-coding-agent's `ModelRegistry` (`core/model-registry.ts`), only the methods this module calls. */
+export interface MinimalModelRegistry {
+  /** Models with usable (already-configured) auth — the same set the model picker offers. */
+  getAvailable(): RegistryModel[];
+  /** Resolves the real API key/base URL already configured for this model via Settings/auth.json/OAuth. */
+  getApiKeyAndHeaders(model: RegistryModel): Promise<ResolvedModelAuth>;
+}
+
+/**
+ * Minimal shape of pi-coding-agent's `ExtensionContext` (`core/extensions/types.ts`),
+ * only the field this module reads. The real `ToolDefinition.execute` is
+ * called with `(toolCallId, params, signal, onUpdate, ctx)`; `ctx` is
+ * optional here purely so this package's existing unit tests (which call
+ * `execute(toolCallId, params)` directly, without a real agent session)
+ * keep working unchanged.
+ */
+export interface MinimalExtensionContext {
+  modelRegistry?: MinimalModelRegistry;
+}
+
+/**
+ * Best-effort search across models pi-desktop already has loaded with
+ * usable auth (`ctx.modelRegistry.getAvailable()`) for one matching `hint`
+ * by id/name — the same resolved credential set (settings.json + auth.json
+ * + OAuth) that already powers the model picker, so a model configured
+ * once in Settings "just works" here too, with no separate
+ * `MULTIMEDIA_*_API_KEY` needed (issue #235).
+ *
+ * Filtered to `api === "openai-completions"` first: that is the one pi-ai
+ * `Api` id whose wire format (`/v1/chat/completions`-style request, Bearer
+ * auth, `choices[0].message.content` response) matches what this package's
+ * hand-rolled request builders in `audio.ts`/`video.ts` already speak.
+ * Other api ids (`openai-responses`, `anthropic-messages`,
+ * `bedrock-converse-stream`, etc.) are different wire formats this code
+ * does not send, despite some sharing "openai" in the name — matching by
+ * name alone across all apis could pick a model this code can't actually
+ * talk to.
+ *
+ * Within that filtered set, prefers an exact case-insensitive `id`/`name`
+ * match, else the first case-insensitive substring match.
+ */
+export function findModelByNameHint(models: RegistryModel[], hint: string): RegistryModel | undefined {
+  const candidates = models.filter((model) => model.api === "openai-completions");
+  const needle = hint.toLowerCase();
+  const exact = candidates.find((model) => model.id.toLowerCase() === needle || model.name.toLowerCase() === needle);
+  if (exact) return exact;
+  return candidates.find((model) => model.id.toLowerCase().includes(needle) || model.name.toLowerCase().includes(needle));
+}
+
+/** What a resolved audio/video API call needs, regardless of which source (registry or env vars) it came from. */
+export interface ResolvedApiConfig {
+  apiKey: string;
+  baseUrl?: string;
+  model?: string;
+}
+
+/**
+ * Resolves API config by trying `ctx.modelRegistry` first (via
+ * `findModelByNameHint`), falling back to the explicit
+ * `MULTIMEDIA_*_API_KEY`/`MULTIMEDIA_*_BASE_URL`/`MULTIMEDIA_*_MODEL` env
+ * vars when no registry match is found (or no registry is available at
+ * all, e.g. this package's own unit tests, or running standalone outside
+ * pi-desktop). Never throws: any registry lookup failure is treated the
+ * same as "no match found".
+ */
+async function resolveApiConfig(
+  ctx: MinimalExtensionContext,
+  hint: string,
+  envApiKey: string | undefined,
+  envBaseUrl: string | undefined,
+  envModel: string | undefined,
+): Promise<ResolvedApiConfig> {
+  const registry = ctx.modelRegistry;
+  if (registry) {
+    try {
+      const match = findModelByNameHint(registry.getAvailable(), hint);
+      if (match) {
+        const auth = await registry.getApiKeyAndHeaders(match);
+        if (auth.ok && auth.apiKey) {
+          return { apiKey: auth.apiKey, baseUrl: auth.baseUrl ?? match.baseUrl, model: match.id };
+        }
+      }
+    } catch {
+      // Best-effort convenience only -- fall through to env vars below.
+    }
+  }
+  return { apiKey: envApiKey ?? "", baseUrl: envBaseUrl, model: envModel };
+}
 
 const UnderstandAudioParams = Type.Object({
   path: Type.String({ description: "Absolute or workspace-relative path to a local audio file (wav/mp3/m4a)." }),
@@ -83,6 +195,9 @@ interface MinimalToolDefinition<TParameters = unknown, TParams = unknown, TResul
   execute: (
     toolCallId: string,
     params: TParams,
+    signal?: unknown,
+    onUpdate?: unknown,
+    ctx?: MinimalExtensionContext,
   ) => Promise<{ content: TResult["content"]; details: unknown; isError?: boolean }>;
 }
 
@@ -119,7 +234,7 @@ export function buildUnderstandAudioTool(
         "that is expected, not an error — switch to `understand` mode if a description is actually wanted.",
     ],
     parameters: UnderstandAudioParams,
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, ctx = {}) => {
       const mode = params.mode ?? "transcribe";
 
       let format: ReturnType<typeof detectAudioFormat>;
@@ -151,19 +266,33 @@ export function buildUnderstandAudioTool(
 
       if (mode === "understand") {
         const prompt = params.prompt?.trim() || DEFAULT_PROMPT;
+        const config = await resolveApiConfig(
+          ctx,
+          env[AUDIO_MODEL_ENV] ?? AUDIO_MODEL,
+          env[AUDIO_API_KEY_ENV],
+          env[AUDIO_BASE_URL_ENV],
+          env[AUDIO_MODEL_ENV],
+        );
         const result = await understandAudioViaApi(base64Audio, format, prompt, {
-          apiKey: env[AUDIO_API_KEY_ENV] ?? "",
-          baseUrl: env[AUDIO_BASE_URL_ENV],
-          model: env[AUDIO_MODEL_ENV],
+          apiKey: config.apiKey,
+          baseUrl: config.baseUrl,
+          model: config.model,
           fetchFn: fetchFn as never,
         });
         return { ...result, details: undefined };
       }
 
+      const config = await resolveApiConfig(
+        ctx,
+        env[TRANSCRIBE_MODEL_ENV] ?? TRANSCRIBE_MODEL,
+        env[AUDIO_API_KEY_ENV],
+        env[AUDIO_BASE_URL_ENV],
+        env[TRANSCRIBE_MODEL_ENV],
+      );
       const result = await transcribeAudioViaApi(base64Audio, format, {
-        apiKey: env[AUDIO_API_KEY_ENV] ?? "",
-        baseUrl: env[AUDIO_BASE_URL_ENV],
-        model: env[TRANSCRIBE_MODEL_ENV],
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        model: config.model,
         fetchFn: fetchFn as unknown as TranscribeFetchFn,
       });
       return { ...result, details: undefined };
@@ -192,14 +321,21 @@ export function buildUnderstandVideoTool(
       "Prefer a higher `frameCount` for longer or fast-changing videos where a few frames may miss key content.",
     ],
     parameters: UnderstandVideoParams,
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, ctx = {}) => {
       const prompt = params.prompt?.trim() || DEFAULT_VIDEO_PROMPT;
       const frameCount = params.frameCount ?? DEFAULT_FRAME_COUNT;
 
+      const config = await resolveApiConfig(
+        ctx,
+        env[VIDEO_MODEL_ENV] ?? VIDEO_MODEL,
+        env[VIDEO_API_KEY_ENV],
+        env[VIDEO_BASE_URL_ENV],
+        env[VIDEO_MODEL_ENV],
+      );
       const result = await understandVideo(params.path, prompt, frameCount, {
-        apiKey: env[VIDEO_API_KEY_ENV] ?? "",
-        baseUrl: env[VIDEO_BASE_URL_ENV],
-        model: env[VIDEO_MODEL_ENV],
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        model: config.model,
         fetchFn: fetchFn as never,
       });
       return { ...result, details: undefined };
