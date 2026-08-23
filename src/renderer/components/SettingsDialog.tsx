@@ -3,11 +3,13 @@ import { useEffect, useState } from "react";
 import type { PackageInfo } from "../../shared/events";
 import { desktopApi } from "../lib/desktop-api";
 import { RECOMMENDED_PACKAGES } from "../lib/recommended-packages";
+import { DEFAULT_WINDOW_TITLE, getStoredTitle, setStoredTitle } from "../lib/window-title";
 import { useSettingsStore } from "../state/settings-store";
 
 export function SettingsDialog() {
   const isOpen = useSettingsStore((state) => state.isOpen);
   const close = useSettingsStore((state) => state.close);
+  const [windowTitle, setWindowTitle] = useState(() => getStoredTitle());
 
   const [packages, setPackages] = useState<PackageInfo[]>([]);
   const [source, setSource] = useState("");
@@ -64,6 +66,25 @@ export function SettingsDialog() {
           <button type="button" onClick={close} className="text-white/50 hover:text-white">
             <X size={18} />
           </button>
+        </div>
+
+        <div className="mb-4">
+          <h3 className="mb-2 text-sm font-semibold text-white">General</h3>
+          <label htmlFor="settings-window-title" className="mb-1 block text-xs text-white/60">
+            Header title
+          </label>
+          <input
+            id="settings-window-title"
+            type="text"
+            value={windowTitle}
+            onChange={(e) => {
+              const value = e.target.value;
+              setWindowTitle(value);
+              setStoredTitle(value);
+            }}
+            placeholder={DEFAULT_WINDOW_TITLE}
+            className="w-full rounded-lg border border-surface-border bg-black/20 px-2 py-1 text-sm text-white placeholder:text-white/40"
+          />
         </div>
 
         <div className="mb-4">

@@ -11,6 +11,7 @@ import { SettingsDialog } from "./SettingsDialog";
 import { Sidebar } from "./Sidebar";
 import { desktopApi } from "../lib/desktop-api";
 import { normalizeShortcutEvent } from "../lib/shortcut-key";
+import { WINDOW_TITLE_CHANGE_EVENT, getStoredTitle } from "../lib/window-title";
 import { DEFAULT_ZOOM, ZOOM_STEP, getZoom, setZoom } from "../lib/zoom";
 import { useChatStore } from "../state/chat-store";
 import { useExtensionUIStore } from "../state/extension-ui-store";
@@ -58,10 +59,17 @@ export function AppShell() {
   }, [handleExtensionUIRequest]);
 
   // Extension-set window title (issue #137): the real OS title is set
-  // directly in the main process; this mirrors it into the in-app header,
-  // falling back to the default app name when no extension has called
-  // `setTitle()` yet.
-  const title = titlePush?.title ?? "Pi Desktop";
+  // directly in the main process; this mirrors it into the in-app header.
+  // The user's custom title (issue #251, persisted in localStorage) is the
+  // fallback when no extension has called `setTitle()` yet, and itself
+  // falls back to the default app name when unset.
+  const [storedTitle, setStoredTitleState] = useState(() => getStoredTitle());
+  useEffect(() => {
+    const onTitleChange = () => setStoredTitleState(getStoredTitle());
+    window.addEventListener(WINDOW_TITLE_CHANGE_EVENT, onTitleChange);
+    return () => window.removeEventListener(WINDOW_TITLE_CHANGE_EVENT, onTitleChange);
+  }, []);
+  const title = titlePush?.title ?? storedTitle;
 
   // Extension status area (issue #138): `set-status` pushes are keyed by
   // `key`, and the store only retains the single most recent push overall,
