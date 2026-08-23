@@ -1,8 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { mkdtempSync, unlinkSync, writeFileSync } from "fs";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { execFileSync } from "child_process";
+import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import piMultimedia, { buildUnderstandAudioTool, buildUnderstandVideoTool } from "./index.js";
+import piMultimedia, {
+  buildUnderstandAudioTool,
+  buildUnderstandVideoTool,
+  findModelByNameHint,
+  type MinimalExtensionContext,
+  type RegistryModel,
+} from "./index.js";
 import type { FetchFn } from "./audio.js";
 
 interface RegisteredTool {
@@ -10,7 +17,20 @@ interface RegisteredTool {
   execute: (
     toolCallId: string,
     params: { path: string; mode?: "transcribe" | "understand"; prompt?: string },
+    signal?: unknown,
+    onUpdate?: unknown,
+    ctx?: MinimalExtensionContext,
   ) => Promise<{ content: { type: string; text: string }[]; isError?: boolean }>;
+}
+
+/** Builds a fake `MinimalExtensionContext` with a registry exposing exactly the given models and a fixed resolved api key. */
+function fakeContext(models: RegistryModel[], apiKey = "registry-resolved-key"): MinimalExtensionContext {
+  return {
+    modelRegistry: {
+      getAvailable: () => models,
+      getApiKeyAndHeaders: async () => ({ ok: true, apiKey }),
+    },
+  };
 }
 
 /** Writes a minimal but structurally valid WAV file to a temp path and returns its path. */
@@ -143,5 +163,126 @@ describe("buildUnderstandVideoTool execute()", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("does-not-exist.mp4");
+  });
+});
+
+describe("findModelByNameHint", () => {
+  const openaiModel = (id: string, name = id): RegistryModel => ({ id, name, api: "openai-completions", baseUrl: "https://api.openai.com/v1" });
+  const anthropicModel = (id: string): RegistryModel => ({ id, name: id, api: "anthropic-messages", baseUrl: "https://api.anthropic.com" });
+
+  it("prefers an exact id match over a substring match", () => {
+    const models = [openaiModel("gpt-audio-1.5-preview"), openaiModel("gpt-transcribe")];
+
+    expect(findModelByNameHint(models, "gpt-transcribe")).toBe(models[1]);
+  });
+
+  it("falls back to a case-insensitive substring match when no exact match exists", () => {
+    const models = [openaiModel("azure/gpt-audio-1.5-2026-08")];
+
+    expect(findModelByNameHint(models, "GPT-AUDIO-1.5")).toBe(models[0]);
+  });
+
+  it("excludes models whose api is not openai-completions, even on an exact name match", () => {
+    const models = [anthropicModel("gpt-audio-1.5")];
+
+    expect(findModelByNameHint(models, "gpt-audio-1.5")).toBeUndefined();
+  });
+
+  it("returns undefined when nothing matches", () => {
+    const models = [openaiModel("claude-sonnet-5")];
+
+    expect(findModelByNameHint(models, "gpt-transcribe")).toBeUndefined();
+  });
+});
+
+describe("registry-first model resolution (issue #235)", () => {
+  it("understand_audio (transcribe mode) uses the registry-matched model id and resolved api key over env vars", async () => {
+    const filePath = writeTempWavFile();
+    try {
+      let calledModel = "";
+      let calledAuth = "";
+      const fetchFn = (async (_url: string, init: { headers: Record<string, string>; body: FormData }) => {
+        calledModel = init.body.get("model") as string;
+        calledAuth = init.headers.Authorization;
+        return { ok: true, status: 200, statusText: "OK", json: async () => ({ text: "hi" }) };
+      }) as unknown as typeof fetch;
+      const tool = buildUnderstandAudioTool({ MULTIMEDIA_AUDIO_API_KEY: "env-key-should-be-ignored" }, fetchFn);
+      const ctx = fakeContext([
+        { id: "gpt-transcribe-2026", name: "gpt-transcribe-2026", api: "openai-completions", baseUrl: "https://registry.example/v1" },
+      ]);
+
+      const result = await tool.execute("call-registry-transcribe", { path: filePath }, undefined, undefined, ctx);
+
+      expect(calledModel).toBe("gpt-transcribe-2026");
+      expect(calledAuth).toBe("Bearer registry-resolved-key");
+      expect(result.isError).toBe(false);
+    } finally {
+      unlinkSync(filePath);
+    }
+  });
+
+  it("understand_video uses the registry-matched model and resolved api key over env vars", async () => {
+    const fixtureDir = mkdtempSync(join(tmpdir(), "pi-multimedia-index-video-fixture-"));
+    const videoPath = join(fixtureDir, "fixture.mp4");
+    execFileSync("ffmpeg", ["-y", "-f", "lavfi", "-i", "testsrc=duration=1:size=160x120:rate=5", videoPath], { stdio: "pipe" });
+    try {
+      let calledModel = "";
+      let calledAuth = "";
+      const fetchFn = (async (_url: string, init: { headers: Record<string, string>; body: string }) => {
+        const body = JSON.parse(init.body) as { model: string };
+        calledModel = body.model;
+        calledAuth = init.headers.Authorization;
+        return { ok: true, status: 200, statusText: "OK", json: async () => ({ choices: [{ message: { content: "a scene" } }] }) };
+      }) as unknown as typeof fetch;
+      const tool = buildUnderstandVideoTool({ MULTIMEDIA_VIDEO_API_KEY: "env-key-should-be-ignored" }, fetchFn);
+      const ctx = fakeContext([
+        { id: "gpt-4o-vision-2026", name: "gpt-4o-vision-2026", api: "openai-completions", baseUrl: "https://registry.example/v1" },
+      ]);
+
+      const result = await tool.execute("call-registry-video", { path: videoPath, frameCount: 1 }, undefined, undefined, ctx);
+
+      expect(calledModel).toBe("gpt-4o-vision-2026");
+      expect(calledAuth).toBe("Bearer registry-resolved-key");
+      expect(result.isError).toBe(false);
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to env vars when the registry has no matching model", async () => {
+    const filePath = writeTempWavFile();
+    try {
+      let calledAuth = "";
+      const fetchFn = (async (_url: string, init: { headers: Record<string, string> }) => {
+        calledAuth = init.headers.Authorization;
+        return { ok: true, status: 200, statusText: "OK", json: async () => ({ text: "hi" }) };
+      }) as unknown as typeof fetch;
+      const tool = buildUnderstandAudioTool({ MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
+      const ctx = fakeContext([{ id: "claude-sonnet-5", name: "claude-sonnet-5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com" }]);
+
+      await tool.execute("call-fallback", { path: filePath }, undefined, undefined, ctx);
+
+      expect(calledAuth).toBe("Bearer env-key");
+    } finally {
+      unlinkSync(filePath);
+    }
+  });
+
+  it("falls back to env vars when no ctx/registry is provided at all", async () => {
+    const filePath = writeTempWavFile();
+    try {
+      let calledAuth = "";
+      const fetchFn = (async (_url: string, init: { headers: Record<string, string> }) => {
+        calledAuth = init.headers.Authorization;
+        return { ok: true, status: 200, statusText: "OK", json: async () => ({ text: "hi" }) };
+      }) as unknown as typeof fetch;
+      const tool = buildUnderstandAudioTool({ MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
+
+      await tool.execute("call-no-ctx", { path: filePath });
+
+      expect(calledAuth).toBe("Bearer env-key");
+    } finally {
+      unlinkSync(filePath);
+    }
   });
 });
