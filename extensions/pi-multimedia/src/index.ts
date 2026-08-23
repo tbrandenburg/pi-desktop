@@ -186,7 +186,7 @@ async function resolveApiConfig(
 }
 
 const UnderstandAudioParams = Type.Object({
-  path: Type.String({ description: "Absolute or workspace-relative path to a local audio file (wav/mp3/m4a)." }),
+  path: Type.String({ description: "Absolute or workspace-relative path to a local audio file (wav/mp3/m4a/webm)." }),
   prompt: Type.Optional(
     Type.String({
       description:
@@ -245,12 +245,12 @@ export function buildUnderstandAudioTool(
     name: "understand_audio",
     label: "Understand Audio",
     description:
-      "Transcribes or understands the contents of a local audio file (wav/mp3/m4a). Without a `prompt`, returns " +
+      "Transcribes or understands the contents of a local audio file (wav/mp3/m4a/webm). Without a `prompt`, returns " +
       "cheap speech-to-text via a dedicated transcription model/endpoint. With a `prompt`, sends the audio to a " +
       "reasoning-capable audio model for questions beyond words, e.g. tone or background sound. Bypasses ordinary " +
       "chat message content, which has no native audio block type.",
     promptSnippet:
-      "Call `understand_audio` whenever the user references a local audio file path (wav/mp3/m4a) and wants to " +
+      "Call `understand_audio` whenever the user references a local audio file path (wav/mp3/m4a/webm) and wants to " +
       "know what is said in it, or wants it summarized/transcribed.",
     promptGuidelines: [
       "Omit `prompt` for 'what does this say' / 'transcribe this' requests — it is the cheap, speech-oriented path.",
