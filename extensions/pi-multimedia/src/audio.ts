@@ -61,6 +61,7 @@ export interface AudioChatCompletionsRequest {
   // the `input_audio` content block below regardless of output modalities.
   modalities: ["text"];
   messages: [
+    { role: "system"; content: string },
     {
       role: "user";
       content: [TextContentBlock, InputAudioContentBlock];
@@ -69,6 +70,36 @@ export interface AudioChatCompletionsRequest {
 }
 
 export const AUDIO_MODEL = "gpt-audio-1.5";
+
+/**
+ * System instruction prepended to every "understanding" (prompted) request.
+ *
+ * Rationale (issue #247), confirmed with real, live OpenRouter calls against
+ * `openai/gpt-audio` (see PR discussion for the raw request/response pairs):
+ * - A clip with clear speech never hedges, with or without this prompt.
+ * - A clip with no clear speech (e.g. pure background noise) sometimes makes
+ *   the raw model emit a generic "I don't have the ability to analyze audio"
+ *   refusal, and the orchestrating chat model then faithfully relays that
+ *   refusal as if the tool itself had failed, even though the HTTP call
+ *   succeeded.
+ * - An earlier, heavier version of this prompt ("you are an audio analysis
+ *   assistant... do not refuse") measurably traded that refusal for
+ *   hallucination: it made the model confidently invent a fake tone of voice
+ *   and background sound for the same no-speech clip. That is worse than a
+ *   visible hedge, so this prompt intentionally does NOT forbid saying "no
+ *   speech" — it only forbids the generic, conversation-breaking "I can't
+ *   process audio at all" refusal.
+ * - This is a real, measured improvement (fewer generic refusals across
+ *   repeated live runs), not a guaranteed fix: `gpt-audio` remains
+ *   stochastic on ambiguous/non-speech audio and can still occasionally
+ *   describe background texture that isn't clearly a voice. Keep this
+ *   prompt short and conversational so it stays part of a fluent reply
+ *   instead of prompting a formal "analysis report".
+ */
+export const AUDIO_UNDERSTANDING_SYSTEM_PROMPT =
+  "Reply naturally, as part of a normal conversation. Weave in what you notice in the audio -- tone of voice, " +
+  "emotion, background sound -- as relevant details, not as a formal analysis. If you don't hear something " +
+  "clearly (e.g. no speech), just say so briefly instead of claiming you can't process audio at all.";
 
 /** Builds the OpenAI-style chat completions request body for audio understanding. */
 export function buildAudioRequest(
@@ -81,6 +112,7 @@ export function buildAudioRequest(
     model,
     modalities: ["text"],
     messages: [
+      { role: "system", content: AUDIO_UNDERSTANDING_SYSTEM_PROMPT },
       {
         role: "user",
         content: [

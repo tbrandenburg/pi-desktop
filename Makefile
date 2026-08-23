@@ -70,13 +70,14 @@ help:
 install:
 	npm install
 
-## Start service in dev mode
+## Start service in dev mode (rebuilds extensions/* dist/ first, see #246)
 run:
 	@bash scripts/run-with-sandbox-check.sh dev
 
 ## Start dev mode with the opt-in local web bridge (issue #228): no Electron
 ## window, so a plain browser tab at the printed Vite dev server URL talks to
 ## the real backend instead of the fake bridge. Stop with 'make stop'.
+## Rebuilds extensions/* dist/ first, see #246.
 run-web:
 	@bash scripts/run-with-sandbox-check.sh dev:web
 
