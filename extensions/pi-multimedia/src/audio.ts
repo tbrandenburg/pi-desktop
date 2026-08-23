@@ -299,6 +299,7 @@ export async function transcribeAudioViaApi(
   if (!response.ok) {
     return {
       isError: true,
+      status: response.status,
       content: [
         {
           type: "text",
@@ -340,6 +341,15 @@ export interface UnderstandAudioOptions {
 export interface AudioToolResult {
   content: TextContentBlock[];
   isError: boolean;
+  /**
+   * HTTP status code of the underlying API response, when the failure came
+   * from a non-ok HTTP response (as opposed to a network error before any
+   * response was received, or a parse failure after a 2xx). Used by
+   * `audio-resolution.ts`'s chain runner to classify "try next candidate"
+   * (e.g. a 400 "model does not exist"-shaped rejection) vs. "surface this
+   * error immediately" (401/429/network failures) per issue #243.
+   */
+  status?: number;
 }
 
 /**
@@ -381,6 +391,7 @@ export async function understandAudioViaApi(
   if (!response.ok) {
     return {
       isError: true,
+      status: response.status,
       content: [
         {
           type: "text",

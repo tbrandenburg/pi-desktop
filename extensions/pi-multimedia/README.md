@@ -16,10 +16,64 @@ design rationale and live-verification history.
 | Param | Required | Description |
 | --- | --- | --- |
 | `path` | yes | Path to a local `.wav`/`.mp3`/`.m4a` file |
-| `prompt` | no | What to ask about the audio (default: transcribe + describe) |
+| `prompt` | no | What to ask about the audio (default: plain transcription; a prompt switches to audio-understanding — see below) |
 
 The actual network call is behind an injectable `fetchFn` so `src/audio.ts`
 is fully unit-testable without ever hitting the network (see `src/audio.test.ts`).
+
+### Transcription vs. understanding, and candidate chains (issue #243)
+
+`understand_audio` no longer takes a `mode` parameter. Instead, behavior is
+inferred from whether `prompt` is given:
+
+- **No `prompt`** — the user wants words. The **transcription chain** is
+  tried first (cheap speech-to-text via a dedicated `/audio/transcriptions`
+  endpoint). Only if zero transcription candidates are resolvable at all
+  does it fall back to the **understanding chain** with a default
+  "transcribe and describe" prompt.
+- **`prompt` given** — the user wants reasoning about the audio (tone,
+  background, music, etc.). Only the **understanding chain** is tried
+  (`/chat/completions` with an `input_audio` content block).
+
+Both chains are ordered, provider-agnostic candidate lists, tried in order
+until one succeeds:
+
+**Transcription chain:**
+1. Explicit env override: `MULTIMEDIA_TRANSCRIBE_MODEL` +
+   `MULTIMEDIA_AUDIO_API_KEY`/`MULTIMEDIA_AUDIO_BASE_URL` — if set, trusted
+   and discovery is skipped entirely.
+2. For each provider with a resolved credential (checked via
+   `ctx.modelRegistry.getProviderAuthStatus`/`getApiKeyForProvider` — **not**
+   whether a matching model appears in `getAvailable()`, since transcription
+   models like `whisper-1` are never listed there), that provider's
+   well-known transcription model id(s), in order:
+   `openai` → `gpt-4o-mini-transcribe` → `whisper-1`;
+   `openrouter` → `whisper-1`; `groq` → `whisper-large-v3`.
+3. No credential for any known transcription-capable provider → chain
+   exhausted (not failed) → falls back to the understanding chain.
+
+**Understanding chain:**
+1. Explicit env override: `MULTIMEDIA_AUDIO_MODEL` + key/base URL.
+2. Registry hint-match: `ctx.modelRegistry.getAvailable()` searched for a
+   known audio-input-capable chat model (`gpt-audio`, `gpt-audio-mini`,
+   `gpt-4o-audio-preview`, ...) via `findModelByNameHint`.
+3. No credential/model resolvable → chain exhausted.
+
+A candidate is skipped (tried next) only when it was never resolvable (no
+credential), or the provider rejects the model as unrecognized (a 400
+"model does not exist"-shaped response). A genuine 401/429/network failure
+from an already-resolved candidate is surfaced immediately as-is — never
+silently retried past a real auth/rate-limit error. On full exhaustion, one
+clear tool error is returned (never a raw 401), naming every candidate tried
+and why.
+
+Set `PI_MULTIMEDIA_DEBUG=1` for structured, one-line-per-candidate debug
+logging to stderr (off by default):
+
+```
+[pi-multimedia] chain=transcription candidate=1/3 provider=openai model=gpt-4o-mini-transcribe result=skip reason=no-credential
+[pi-multimedia] chain=transcription candidate=2/3 provider=openrouter model=whisper-1 result=success
+```
 
 ## Tool: `understand_video`
 
@@ -50,36 +104,20 @@ both degrade to `isError: true` instead of throwing.
 
 ## Configuration
 
-Both tools resolve their API key/base URL/model in two steps, in order:
-
-1. **Registry match (preferred)**: if the tool is invoked from a real pi
-   session, `ctx.modelRegistry.getAvailable()` — the same resolved
-   credential set (settings.json + auth.json + OAuth) that already powers
-   the model picker — is searched for a model whose id/name matches the
-   configured hint (see `MULTIMEDIA_*_MODEL` below; defaults to
-   `gpt-audio-1.5`/`gpt-transcribe`/`gpt-4o`), best-effort, exact-match
-   first then substring. The search is restricted to models whose `api` is
-   `"openai-completions"` — the one pi-ai API id whose wire format matches
-   what this package's request builders send; other api ids
-   (`openai-responses`, `anthropic-messages`, `bedrock-converse-stream`,
-   etc.) are different, incompatible wire formats despite some sharing
-   "openai" in the name. On a match, the model's own real, already-resolved
-   API key/base URL (`ctx.modelRegistry.getApiKeyAndHeaders(model)`) is used
-   — **no separate configuration needed** if a matching model is already
-   set up in pi-desktop's Settings.
-2. **Env var fallback**: if no registry is available (e.g. running this
-   package standalone/outside pi-desktop, or in these unit tests) or no
-   matching model is found, falls back to process environment variables:
+`understand_audio`'s resolution is described above (candidate chains, issue
+#243). `understand_video` keeps the older, simpler two-step resolution: a
+registry name-hint match first, then env var fallback.
 
 | Variable | Purpose |
 | --- | --- |
-| `MULTIMEDIA_AUDIO_API_KEY` | API key for `understand_audio` |
+| `MULTIMEDIA_AUDIO_API_KEY` | API key for `understand_audio`'s env-override candidates (both chains) |
 | `MULTIMEDIA_AUDIO_BASE_URL` | Optional override of the audio API base URL |
-| `MULTIMEDIA_AUDIO_MODEL` | Overrides the `understand` mode model/search hint (default `gpt-audio-1.5`) |
-| `MULTIMEDIA_TRANSCRIBE_MODEL` | Overrides the `transcribe` mode model/search hint (default `gpt-transcribe`) |
+| `MULTIMEDIA_AUDIO_MODEL` | Explicit understanding-chain model override |
+| `MULTIMEDIA_TRANSCRIBE_MODEL` | Explicit transcription-chain model override |
 | `MULTIMEDIA_VIDEO_API_KEY` | API key for `understand_video` |
 | `MULTIMEDIA_VIDEO_BASE_URL` | Optional override of the video/vision API base URL |
 | `MULTIMEDIA_VIDEO_MODEL` | Overrides the vision model/search hint (default `gpt-4o`) |
+| `PI_MULTIMEDIA_DEBUG` | Set to `1` for structured per-candidate debug logging (see above) |
 
 Without a key resolved via either path, `execute()` returns a normal
 `isError` tool result (never throws) explaining the missing configuration.
@@ -87,7 +125,8 @@ Without a key resolved via either path, `execute()` returns a normal
 on `PATH`.
 
 See issue #235 for the design rationale behind preferring registry reuse
-over a dedicated new Settings UI page.
+over a dedicated new Settings UI page, and issue #243 for the transcription
+vs. understanding candidate-chain design.
 
 ## Known limitations
 

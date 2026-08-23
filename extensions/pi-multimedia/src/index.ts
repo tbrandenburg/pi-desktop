@@ -12,14 +12,20 @@
  */
 import { Type } from "typebox";
 import {
-  AUDIO_MODEL,
   detectAudioFormat,
   transcribeAudioViaApi,
-  TRANSCRIBE_MODEL,
   understandAudioViaApi,
   type AudioToolResult,
   type TranscribeFetchFn,
 } from "./audio.js";
+import {
+  buildExhaustionError,
+  debugLoggerFor,
+  resolveTranscriptionChain,
+  resolveUnderstandingChain,
+  runChain,
+  type AudioCandidate,
+} from "./audio-resolution.js";
 import { readFileAsBase64 } from "./fs-io.js";
 import { understandVideo, understandVideoViaApi, VIDEO_MODEL, type VideoToolResult } from "./video.js";
 
@@ -56,6 +62,8 @@ export interface RegistryModel {
   name: string;
   api: string;
   baseUrl: string;
+  /** The provider id this model belongs to (e.g. "openai", "openrouter"). Used by the audio candidate-chain resolution (issue #243). */
+  provider?: string;
 }
 
 /** Minimal shape of pi-coding-agent's `ResolvedRequestAuth` (`core/model-registry.ts`), only the success-path fields this module reads. */
@@ -71,6 +79,18 @@ export interface MinimalModelRegistry {
   getAvailable(): RegistryModel[];
   /** Resolves the real API key/base URL already configured for this model via Settings/auth.json/OAuth. */
   getApiKeyAndHeaders(model: RegistryModel): Promise<ResolvedModelAuth>;
+  /**
+   * Whether a given provider id has *any* resolved credential at all,
+   * independent of whether that provider lists a matching model in
+   * `getAvailable()`. Needed because transcription models (`whisper-1`,
+   * `gpt-transcribe`, etc.) are never chat models and so never appear in
+   * `getAvailable()` (issue #243).
+   */
+  getProviderAuthStatus?(provider: string): { configured: boolean } | undefined;
+  /** Resolves the raw API key for a provider id directly, without needing a `Model` object. */
+  getApiKeyForProvider?(provider: string): Promise<string | undefined>;
+  /** Looks up a provider's own config (e.g. its default `baseUrl`). */
+  getProvider?(provider: string): { baseUrl?: string } | undefined;
 }
 
 /**
@@ -167,17 +187,11 @@ async function resolveApiConfig(
 
 const UnderstandAudioParams = Type.Object({
   path: Type.String({ description: "Absolute or workspace-relative path to a local audio file (wav/mp3/m4a)." }),
-  mode: Type.Optional(
-    Type.Union([Type.Literal("transcribe"), Type.Literal("understand")], {
-      description:
-        "'transcribe' (default): cheap speech-to-text via the dedicated gpt-transcribe endpoint — use this for " +
-        "'what is said in this file?'. 'understand': reasoning about tone/background/non-speech sound via the " +
-        "audio-capable chat model — requires `prompt`; use only when transcription alone isn't enough.",
-    }),
-  ),
   prompt: Type.Optional(
     Type.String({
-      description: "Required when mode is 'understand'. What to ask about the audio (e.g. describe tone/background/music).",
+      description:
+        "What to ask about the audio. Omit for plain speech-to-text (transcription). Provide a prompt to ask " +
+        "about qualities beyond words, e.g. tone, emotion, background noise, or music description.",
     }),
   ),
 });
@@ -224,30 +238,29 @@ interface MinimalExtensionApi {
 export function buildUnderstandAudioTool(
   env: Record<string, string | undefined>,
   fetchFn: typeof fetch = fetch,
-): MinimalToolDefinition<typeof UnderstandAudioParams, { path: string; mode?: "transcribe" | "understand"; prompt?: string }, AudioToolResult> {
+): MinimalToolDefinition<typeof UnderstandAudioParams, { path: string; prompt?: string }, AudioToolResult> {
+  const logger = debugLoggerFor(env);
+
   return {
     name: "understand_audio",
     label: "Understand Audio",
     description:
-      "Transcribes or understands the contents of a local audio file (wav/mp3/m4a). Default mode ('transcribe') " +
-      "returns cheap speech-to-text via the dedicated gpt-transcribe endpoint. Opt-in mode ('understand', requires " +
-      "`prompt`) sends the audio to a reasoning-capable audio model for questions beyond words, e.g. tone or " +
-      "background sound. Bypasses ordinary chat message content, which has no native audio block type.",
+      "Transcribes or understands the contents of a local audio file (wav/mp3/m4a). Without a `prompt`, returns " +
+      "cheap speech-to-text via a dedicated transcription model/endpoint. With a `prompt`, sends the audio to a " +
+      "reasoning-capable audio model for questions beyond words, e.g. tone or background sound. Bypasses ordinary " +
+      "chat message content, which has no native audio block type.",
     promptSnippet:
       "Call `understand_audio` whenever the user references a local audio file path (wav/mp3/m4a) and wants to " +
       "know what is said in it, or wants it summarized/transcribed.",
     promptGuidelines: [
-      "Use the default `mode: 'transcribe'` for 'what does this say' / 'transcribe this' requests — it is the " +
-        "cheap, speech-oriented path.",
-      "Only use `mode: 'understand'` (and supply a `prompt`) when the user asks about qualities beyond words, " +
-        "e.g. tone, emotion, background noise, or music description — it is a more expensive reasoning call.",
-      "If the audio is music or otherwise non-speech, `transcribe` mode may return an empty/near-empty result; " +
-        "that is expected, not an error — switch to `understand` mode if a description is actually wanted.",
+      "Omit `prompt` for 'what does this say' / 'transcribe this' requests — it is the cheap, speech-oriented path.",
+      "Only supply a `prompt` when the user asks about qualities beyond words, e.g. tone, emotion, background " +
+        "noise, or music description — it is a more expensive reasoning call.",
+      "If the audio is music or otherwise non-speech, the no-prompt path may return an empty/near-empty result; " +
+        "that is expected, not an error — supply a `prompt` if a description is actually wanted.",
     ],
     parameters: UnderstandAudioParams,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx = {}) => {
-      const mode = params.mode ?? "transcribe";
-
       let format: ReturnType<typeof detectAudioFormat>;
       try {
         format = detectAudioFormat(params.path);
@@ -275,38 +288,55 @@ export function buildUnderstandAudioTool(
         };
       }
 
-      if (mode === "understand") {
-        const prompt = params.prompt?.trim() || DEFAULT_PROMPT;
-        const config = await resolveApiConfig(
-          ctx,
-          env[AUDIO_MODEL_ENV] ?? AUDIO_MODEL,
-          env[AUDIO_API_KEY_ENV],
-          env[AUDIO_BASE_URL_ENV],
-          env[AUDIO_MODEL_ENV],
-        );
-        const result = await understandAudioViaApi(base64Audio, format, prompt, {
-          apiKey: config.apiKey,
-          baseUrl: config.baseUrl,
-          model: config.model,
+      const hasPrompt = Boolean(params.prompt?.trim());
+
+      const callTranscribe = (candidate: AudioCandidate) =>
+        transcribeAudioViaApi(base64Audio, format, {
+          apiKey: candidate.apiKey ?? "",
+          baseUrl: candidate.baseUrl,
+          model: candidate.model,
+          fetchFn: fetchFn as unknown as TranscribeFetchFn,
+        });
+      const callUnderstand = (prompt: string) => (candidate: AudioCandidate) =>
+        understandAudioViaApi(base64Audio, format, prompt, {
+          apiKey: candidate.apiKey ?? "",
+          baseUrl: candidate.baseUrl,
+          model: candidate.model,
           fetchFn: fetchFn as never,
         });
-        return { ...result, details: undefined };
+
+      if (hasPrompt) {
+        const chain = await resolveUnderstandingChain(ctx, env, AUDIO_MODEL_ENV, AUDIO_API_KEY_ENV, AUDIO_BASE_URL_ENV, findModelByNameHint);
+        const outcome = await runChain("understanding", chain, callUnderstand(params.prompt!.trim()), logger);
+        if (outcome.kind === "exhausted") {
+          return { ...buildExhaustionError(outcome.reasons), details: undefined };
+        }
+        return { ...outcome.result, details: undefined };
       }
 
-      const config = await resolveApiConfig(
+      const transcriptionChain = await resolveTranscriptionChain(ctx, env, TRANSCRIBE_MODEL_ENV, AUDIO_API_KEY_ENV, AUDIO_BASE_URL_ENV);
+      const transcribeOutcome = await runChain("transcription", transcriptionChain, callTranscribe, logger);
+      if (transcribeOutcome.kind !== "exhausted") {
+        return { ...transcribeOutcome.result, details: undefined };
+      }
+
+      // Zero transcription candidates were resolvable at all -- hand off to
+      // the understanding chain with a default transcribe-oriented prompt,
+      // per issue #243. A *real* transcription failure (401/429/network)
+      // is never silently retried here; only exhaustion falls through.
+      const understandingChain = await resolveUnderstandingChain(
         ctx,
-        env[TRANSCRIBE_MODEL_ENV] ?? TRANSCRIBE_MODEL,
-        env[AUDIO_API_KEY_ENV],
-        env[AUDIO_BASE_URL_ENV],
-        env[TRANSCRIBE_MODEL_ENV],
+        env,
+        AUDIO_MODEL_ENV,
+        AUDIO_API_KEY_ENV,
+        AUDIO_BASE_URL_ENV,
+        findModelByNameHint,
       );
-      const result = await transcribeAudioViaApi(base64Audio, format, {
-        apiKey: config.apiKey,
-        baseUrl: config.baseUrl,
-        model: config.model,
-        fetchFn: fetchFn as unknown as TranscribeFetchFn,
-      });
-      return { ...result, details: undefined };
+      const understandOutcome = await runChain("understanding", understandingChain, callUnderstand(DEFAULT_PROMPT), logger);
+      if (understandOutcome.kind === "exhausted") {
+        return { ...buildExhaustionError([...transcribeOutcome.reasons, ...understandOutcome.reasons]), details: undefined };
+      }
+      return { ...understandOutcome.result, details: undefined };
     },
   };
 }
