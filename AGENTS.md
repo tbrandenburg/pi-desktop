@@ -99,6 +99,16 @@ stylesheet or a per-component test. Use the browser fake bridge for renderer UI 
   port, `--no-sandbox`, and `--disable-gpu` under headless X11.
 - Before relaunching, inspect the intended debug-port owner, cwd, and command line;
   AppImage survivor processes may not contain the AppImage filename in their cmdline.
+- Before building a container/VM to work around a missing display or sandbox
+  permission, run `echo $DISPLAY && xdpyinfo >/dev/null` and check for an
+  existing fallback in this repo first (`scripts/run-with-sandbox-check.sh`
+  already auto-wraps with `xvfb-run` when `DISPLAY` is unset and auto-sets
+  `ELECTRON_DISABLE_SANDBOX=1` when `chrome-sandbox` isn't root-owned/4755).
+  Container isolation is for testing install/packaging cleanliness, not for
+  working around a missing display or missing root. If isolation is still
+  genuinely required, never RW-mount the real repo or reuse live
+  `.pi/agent`/OAuth state into the container; use scoped, single-use
+  credentials and `docker rm -f` the container immediately after.
 - Give slow providers 15-45 seconds and distinguish rate-limit errors from hangs.
 - Trust a chat only after a fresh conversation produces an actual assistant reply.
 - Never sleep to wait for an observable condition. Poll the condition with a bounded
@@ -142,10 +152,11 @@ stylesheet or a per-component test. Use the browser fake bridge for renderer UI 
 - 2026-08-11: A lockstep dependency bump (`npm ci` + `npm run check` green) is not
   proof of compatibility if the two updated packages disagree on a shared on-disk
   format they both claim to support (here: `pi-coding-agent@0.84.1` writes session
-  JSONL v3, `pi-agent-core@0.84.1` requires v4). Root-cause by reading each
-  package's own compiled constants/source before rewriting call sites; the correct
-  fix was routing all reads through the same library that already owns writing,
-  not reconciling two disagreeing libraries.
+  JSONL v3, `pi-agent-core@0.84.1` requires v4). When two coupled packages share an
+  on-disk format, read each package's own compiled constants/source (not just its
+  changelog) to find the format version each one actually expects, and route every
+  read through whichever library already owns writing that format; do not patch
+  call sites to reconcile two libraries that disagree with each other.
 - 2026-08-11: A duration/behavior breach in `make test` naming a file no branch
   touched is not automatically a regression, but is not automatically flake
   either — isolate the single file, then re-run the full suite once cleanly
@@ -214,8 +225,10 @@ stylesheet or a per-component test. Use the browser fake bridge for renderer UI 
   sub-command) silently splits into multiple top-level arguments instead.
   Symptom looked unrelated to quoting: `/bin/sh: 1: scripts/run-electron-dev.ts:
   Permission denied` (the path was being executed directly as its own
-  command). Fixed by invoking the local binary directly (no `shell: true`)
-  so each array element is passed through as one literal argv token.
+  command). Never pass `{ shell: true }` to `child_process.spawn` when any
+  `args` element itself contains spaces (e.g. a sub-command string meant to
+  stay one token); invoke the binary directly without `shell: true` instead,
+  so each array element is preserved as one literal argv token.
 
 - 2026-08-22: A git worktree created under `.worktrees/` does not get its own
   `node_modules`; `npm run <script>` for `tsc`/`vitest`/`oxlint` still works
