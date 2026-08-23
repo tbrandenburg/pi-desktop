@@ -39,6 +39,11 @@ jobs:
       # deps (@emnapi/*) differently depending on install context, so it produced
       # false drift on every run. `npm ci` is the robust check.
       - run: npm ci
+      # extensions/pi-multimedia's video tests shell out to a real ffmpeg to
+      # generate synthetic test fixtures and probe real seek/decode boundary
+      # behavior (issue #234) -- ubuntu-latest runners do not ship ffmpeg by
+      # default.
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: make audit
       - run: npm run check
       # `make test` wraps `npm test` with a duration-budget check
