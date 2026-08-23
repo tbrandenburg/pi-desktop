@@ -1,0 +1,27 @@
+{
+  "name": "@pi-desktop/pi-multimedia",
+  "version": "0.1.0",
+  "description": "PoC first-party pi extension registering understand_audio and understand_video tools that let the LLM understand audio/video directly via raw HTTP calls (and, for video, local ffmpeg frame-extraction), bypassing pi-ai's message schema.",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "keywords": ["pi-package", "pi-extension", "multimedia", "audio", "video"],
+  "files": ["dist", "README.md"],
+  "publishConfig": { "access": "public" },
+  "pi": {
+    "extensions": ["dist/index.js"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "dependencies": {
+    "typebox": "*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  }
+}
