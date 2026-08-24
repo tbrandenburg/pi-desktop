@@ -46,7 +46,7 @@
     "@earendil-works/pi-ai": "^0.84.1",
     "@earendil-works/pi-coding-agent": "^0.84.1",
     "electron-store": "^8.2.0",
-    "immer": "^11.1.15",
+    "immer": "^11.1.18",
     "lucide-react": "^1.33.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -55,7 +55,7 @@
     "remark-gfm": "^4.0.0",
     "ws": "^8.21.3",
     "zod": "^4.4.3",
-    "zustand": "^5.0.3"
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^10.0.0",
@@ -63,23 +63,23 @@
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/react": "^16.3.2",
-    "@testing-library/user-event": "^14.6.1",
+    "@testing-library/user-event": "^14.6.5",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.1.0",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.11",
     "concurrently": "^10.0.5",
-    "electron": "^43.2.0",
+    "electron": "^43.4.1",
     "electron-builder": "^26.15.3",
     "jsdom": "^30.0.1",
     "oxlint": "^1.79.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.19.2",
     "typescript": "^6.0.3",
-    "vite": "^8.1.5",
+    "vite": "^8.2.2",
     "vitest": "^4.1.10"
   }
 }

@@ -5,18 +5,31 @@
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "keywords": ["pi-package", "pi-extension", "multimedia", "audio", "video"],
-  "files": ["dist", "README.md"],
-  "publishConfig": { "access": "public" },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "multimedia",
+    "audio",
+    "video"
+  ],
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "pi": {
-    "extensions": ["dist/index.js"]
+    "extensions": [
+      "dist/index.js"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"
   },
   "dependencies": {
-    "typebox": "*"
+    "typebox": "^1.3.16"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
