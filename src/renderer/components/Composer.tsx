@@ -114,7 +114,7 @@ export function Composer() {
     try {
       const base64Audio = await blobToBase64(blob);
       const { path } = await desktopApi().saveRecording(base64Audio, mimeType);
-      const pushedText = `Please transcribe and interpret this voice note in the context of our conversation, then act on it: ${path}`;
+      const pushedText = `Please transcribe and interpret this voice note in the context of our conversation, then act on it: \`${path}\``;
       const textarea = textareaRef.current;
       setValue((current) => {
         const start = textarea?.selectionStart ?? current.length;
