@@ -120,7 +120,7 @@ describe("buildUnderstandAudioTool execute()", () => {
     expect(result.content[0].text).toContain("ogg");
   });
 
-  it("no prompt -> routes through the multipart transcription path via env override", async () => {
+  it("routes every call through the multipart transcription path via env override, regardless of `prompt`", async () => {
     const filePath = writeTempWavFile();
     try {
       let calledUrl = "";
@@ -139,25 +139,20 @@ describe("buildUnderstandAudioTool execute()", () => {
     }
   });
 
-  it("a `prompt` routes through the chat-completions understanding path instead", async () => {
+  it("a `prompt` has no effect on chain selection or request content (issue #260: prompt kept in schema, never read)", async () => {
     const filePath = writeTempWavFile();
     try {
       let calledUrl = "";
       const fetchFn = (async (url: string) => {
         calledUrl = url;
-        return {
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => ({ choices: [{ message: { content: "It sounds like a calm melody." } }] }),
-        };
+        return { ok: true, status: 200, statusText: "OK", json: async () => ({ text: "real transcript text" }) };
       }) as unknown as typeof fetch;
-      const tool = buildUnderstandAudioTool({ MULTIMEDIA_AUDIO_MODEL: "gpt-audio-1.5", MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
+      const tool = buildUnderstandAudioTool({ MULTIMEDIA_TRANSCRIBE_MODEL: "whisper-1", MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
 
       const result = await tool.execute("call-understand", { path: filePath, prompt: "Describe the mood." });
 
-      expect(calledUrl).toContain("/chat/completions");
-      expect(result.content).toEqual([{ type: "text", text: "It sounds like a calm melody." }]);
+      expect(calledUrl).toContain("/audio/transcriptions");
+      expect(result.content).toEqual([{ type: "text", text: "real transcript text" }]);
     } finally {
       unlinkSync(filePath);
     }
@@ -173,7 +168,41 @@ describe("buildUnderstandAudioTool execute()", () => {
       const result = await tool.execute("call-exhausted", { path: filePath });
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("No audio transcription or understanding path available");
+      expect(result.content[0].text).toContain("No audio transcription path available");
+    } finally {
+      unlinkSync(filePath);
+    }
+  });
+
+  it("falls through to a chat-completions gpt-audio candidate (kind: chat) only once all transcription candidates are exhausted", async () => {
+    const filePath = writeTempWavFile();
+    try {
+      let calledUrl = "";
+      let calledBody: { modalities?: string[]; messages?: Array<{ role: string; content: unknown }> } = {};
+      const fetchFn = (async (url: string, init: { body?: string }) => {
+        if (url.includes("/chat/completions")) {
+          calledUrl = url;
+          calledBody = JSON.parse(init.body ?? "{}");
+          return { ok: true, status: 200, statusText: "OK", json: async () => ({ choices: [{ message: { content: "hello world" } }] }) };
+        }
+        // Every /audio/transcriptions attempt (2 tries for this single
+        // credentialed provider) is rejected as model-not-found (400),
+        // exhausting the transcription-shaped candidates and reaching the
+        // chat-shaped openai/gpt-audio candidate.
+        return { ok: false, status: 400, statusText: "Bad Request", json: async () => ({ error: "model not found" }) };
+      }) as unknown as typeof fetch;
+      const tool = buildUnderstandAudioTool({}, fetchFn);
+      const ctx = fakeContextWithProviderCredential("openrouter", "openrouter-key");
+
+      const result = await tool.execute("call-chat-fallback", { path: filePath }, undefined, undefined, ctx);
+
+      expect(calledUrl).toContain("/chat/completions");
+      expect(calledBody.modalities).toEqual(["text"]);
+      // Must use the new transcription-only prompt, never the tone/emotion-oriented understanding prompt (issue #260).
+      const systemMessage = calledBody.messages?.find((m) => m.role === "system");
+      expect(systemMessage?.content).toContain("verbatim");
+      expect(systemMessage?.content).not.toContain("Weave in what you notice");
+      expect(result.content).toEqual([{ type: "text", text: "hello world" }]);
     } finally {
       unlinkSync(filePath);
     }
@@ -252,7 +281,7 @@ describe("registry-first model resolution (issue #235, generalized for #243)", (
 
       const result = await tool.execute("call-openrouter-transcribe", { path: filePath }, undefined, undefined, ctx);
 
-      expect(calledModel).toBe("whisper-1");
+      expect(calledModel).toBe("gpt-4o-mini-transcribe");
       expect(calledAuth).toBe("Bearer openrouter-key");
       expect(result.isError).toBe(false);
     } finally {
@@ -307,30 +336,4 @@ describe("registry-first model resolution (issue #235, generalized for #243)", (
     }
   });
 
-  it("falls back to the understanding chain (env override) when no transcription candidate is configured and no prompt was given", async () => {
-    const filePath = writeTempWavFile();
-    try {
-      let calledUrl = "";
-      let calledAuth = "";
-      const fetchFn = (async (url: string, init: { headers: Record<string, string> }) => {
-        calledUrl = url;
-        calledAuth = init.headers.Authorization;
-        return {
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => ({ choices: [{ message: { content: "transcribed via understanding fallback" } }] }),
-        };
-      }) as unknown as typeof fetch;
-      const tool = buildUnderstandAudioTool({ MULTIMEDIA_AUDIO_MODEL: "gpt-audio-1.5", MULTIMEDIA_AUDIO_API_KEY: "env-key" }, fetchFn);
-
-      const result = await tool.execute("call-no-ctx", { path: filePath });
-
-      expect(calledUrl).toContain("/chat/completions");
-      expect(calledAuth).toBe("Bearer env-key");
-      expect(result.isError).toBe(false);
-    } finally {
-      unlinkSync(filePath);
-    }
-  });
 });

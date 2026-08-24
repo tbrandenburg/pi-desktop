@@ -16,63 +16,66 @@ design rationale and live-verification history.
 | Param | Required | Description |
 | --- | --- | --- |
 | `path` | yes | Path to a local `.wav`/`.mp3`/`.m4a` file |
-| `prompt` | no | What to ask about the audio (default: plain transcription; a prompt switches to audio-understanding — see below) |
+| `prompt` | no | Unused. Kept in the schema only for backward compatibility (issue #260) — never read or forwarded anywhere. |
 
 The actual network call is behind an injectable `fetchFn` so `src/audio.ts`
 is fully unit-testable without ever hitting the network (see `src/audio.test.ts`).
 
-### Transcription vs. understanding, and candidate chains (issue #243)
+### Transcription-only, fixed fallback chain (issue #260)
 
-`understand_audio` no longer takes a `mode` parameter. Instead, behavior is
-inferred from whether `prompt` is given:
+`understand_audio` is transcription-only: every call transcribes the audio
+and returns plain text. There is no prompt-driven branch — `prompt` has no
+effect on chain selection or request content.
 
-- **No `prompt`** — the user wants words. The **transcription chain** is
-  tried first (cheap speech-to-text via a dedicated `/audio/transcriptions`
-  endpoint). Only if zero transcription candidates are resolvable at all
-  does it fall back to the **understanding chain** with a default
-  "transcribe and describe" prompt.
-- **`prompt` given** — the user wants reasoning about the audio (tone,
-  background, music, etc.). Only the **understanding chain** is tried
-  (`/chat/completions` with an `input_audio` content block).
+A single, fixed, ordered candidate chain is tried until one succeeds:
 
-Both chains are ordered, provider-agnostic candidate lists, tried in order
-until one succeeds:
-
-**Transcription chain:**
 1. Explicit env override: `MULTIMEDIA_TRANSCRIBE_MODEL` +
    `MULTIMEDIA_AUDIO_API_KEY`/`MULTIMEDIA_AUDIO_BASE_URL` — if set, trusted
    and discovery is skipped entirely.
-2. For each provider with a resolved credential (checked via
-   `ctx.modelRegistry.getProviderAuthStatus`/`getApiKeyForProvider` — **not**
-   whether a matching model appears in `getAvailable()`, since transcription
-   models like `whisper-1` are never listed there), that provider's
-   well-known transcription model id(s), in order:
-   `openai` → `gpt-4o-mini-transcribe` → `whisper-1`;
-   `openrouter` → `whisper-1`; `groq` → `whisper-large-v3`.
-3. No credential for any known transcription-capable provider → chain
-   exhausted (not failed) → falls back to the understanding chain.
+2. OpenRouter — `gpt-4o-mini-transcribe`, then `whisper-1`
+   (`/audio/transcriptions`).
+3. Groq — `whisper-large-v3` (`/audio/transcriptions`).
+4. OpenAI — `gpt-4o-mini-transcribe`, then `whisper-1`
+   (`/audio/transcriptions`).
+5. OpenRouter — `openai/gpt-audio`, sent as a `/chat/completions` request
+   with `modalities: ["text"]` and a dedicated transcription-only prompt
+   (never the tone/emotion-oriented `AUDIO_UNDERSTANDING_SYSTEM_PROMPT`).
+6. OpenAI (native `api.openai.com`) — `openai/gpt-audio`, same request
+   shape as candidate 5, always forced to `api.openai.com` regardless of
+   any registry-configured base URL override.
 
-**Understanding chain:**
-1. Explicit env override: `MULTIMEDIA_AUDIO_MODEL` + key/base URL.
-2. Registry hint-match: `ctx.modelRegistry.getAvailable()` searched for a
-   known audio-input-capable chat model (`gpt-audio`, `gpt-audio-mini`,
-   `gpt-4o-audio-preview`, ...) via `findModelByNameHint`.
-3. No credential/model resolvable → chain exhausted.
+Credentials for candidates 2-6 are resolved per-provider via
+`ctx.modelRegistry.getProviderAuthStatus`/`getApiKeyForProvider` — **not**
+whether a matching model appears in `getAvailable()`, since transcription
+models like `whisper-1` are never listed there.
 
-A candidate is skipped (tried next) only when it was never resolvable (no
-credential), or the provider rejects the model as unrecognized (a 400
-"model does not exist"-shaped response). A genuine 401/429/network failure
-from an already-resolved candidate is surfaced immediately as-is — never
-silently retried past a real auth/rate-limit error. On full exhaustion, one
-clear tool error is returned (never a raw 401), naming every candidate tried
-and why.
+This reorders the pre-#260 chain, which tried OpenAI first, then
+OpenRouter, then Groq, and stopped at candidate 1 (equivalent to today's
+candidates 2/4 combined). OpenAI moves from position 1 to position 3.
+
+**Exhaustive retry (issue #260):** the chain never stops early on an
+authentication failure, rate limit, or network error — it always tries every
+remaining candidate. Only a parse failure (malformed response body) is a
+real code/contract bug and surfaces immediately instead of being retried.
+The shared, typed skip-reason vocabulary is:
+
+- `no-credential` — no resolved credential for that provider (pre-call skip).
+- `model-not-found` — HTTP 400 (provider doesn't recognize the model).
+- `auth-failed` — HTTP 401.
+- `rate-limited` — HTTP 429.
+- `network-error` — no HTTP response at all (fetch-level failure).
+
+On full exhaustion (every candidate skipped), one clear tool error is
+returned (never a raw 401/429), naming every candidate tried and why.
 
 Set `PI_MULTIMEDIA_DEBUG=1` for structured, one-line-per-candidate debug
-logging to stderr (off by default):
+logging to stderr (off by default), showing every candidate's specific
+reason in order:
 
 ```
-[pi-multimedia] chain=transcription candidate=1/3 provider=openai model=gpt-4o-mini-transcribe result=skip reason=no-credential
-[pi-multimedia] chain=transcription candidate=2/3 provider=openrouter model=whisper-1 result=success
+[pi-multimedia] chain=audio candidate=1/7 provider=openrouter model=gpt-4o-mini-transcribe result=skip reason=no-credential
+[pi-multimedia] chain=audio candidate=2/7 provider=openrouter model=whisper-1 result=skip reason=no-credential
+[pi-multimedia] chain=audio candidate=3/7 provider=groq model=whisper-large-v3 result=success
 ```
 
 ## Tool: `understand_video`
@@ -104,16 +107,15 @@ both degrade to `isError: true` instead of throwing.
 
 ## Configuration
 
-`understand_audio`'s resolution is described above (candidate chains, issue
-#243). `understand_video` keeps the older, simpler two-step resolution: a
-registry name-hint match first, then env var fallback.
+`understand_audio`'s resolution is described above (fixed fallback chain,
+issue #260). `understand_video` keeps the older, simpler two-step
+resolution: a registry name-hint match first, then env var fallback.
 
 | Variable | Purpose |
 | --- | --- |
-| `MULTIMEDIA_AUDIO_API_KEY` | API key for `understand_audio`'s env-override candidates (both chains) |
-| `MULTIMEDIA_AUDIO_BASE_URL` | Optional override of the audio API base URL |
-| `MULTIMEDIA_AUDIO_MODEL` | Explicit understanding-chain model override |
-| `MULTIMEDIA_TRANSCRIBE_MODEL` | Explicit transcription-chain model override |
+| `MULTIMEDIA_AUDIO_API_KEY` | API key for `understand_audio`'s env-override candidate |
+| `MULTIMEDIA_AUDIO_BASE_URL` | Optional override of the audio API base URL (env-override candidate) |
+| `MULTIMEDIA_TRANSCRIBE_MODEL` | Explicit chain-override model (skips the fixed provider chain entirely) |
 | `MULTIMEDIA_VIDEO_API_KEY` | API key for `understand_video` |
 | `MULTIMEDIA_VIDEO_BASE_URL` | Optional override of the video/vision API base URL |
 | `MULTIMEDIA_VIDEO_MODEL` | Overrides the vision model/search hint (default `gpt-4o`) |
@@ -125,8 +127,9 @@ Without a key resolved via either path, `execute()` returns a normal
 on `PATH`.
 
 See issue #235 for the design rationale behind preferring registry reuse
-over a dedicated new Settings UI page, and issue #243 for the transcription
-vs. understanding candidate-chain design.
+over a dedicated new Settings UI page, and issue #260 for the
+transcription-only, fixed fallback-chain design (superseding issue #243's
+transcription-vs-understanding split).
 
 ## Known limitations
 
