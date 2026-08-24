@@ -53,13 +53,26 @@ async function main(): Promise<void> {
   const bridgeUrl = `http://127.0.0.1:${port}`;
   console.log(`[dev:web] web bridge will listen at ${bridgeUrl}`);
 
-  // Invokes the local `concurrently` binary directly (no shell): with
-  // `shell: true`, Node just space-joins the args array on POSIX instead of
-  // preserving each array element as one argv token, which silently splits
-  // the single "tsx scripts/run-electron-dev.ts" command string into three
-  // separate top-level commands for `concurrently` to (mis)run.
-  const concurrentlyBin = path.join(process.cwd(), "node_modules", ".bin", "concurrently");
-  const child = spawn(concurrentlyBin, ["-k", "npm:dev:main", "tsx scripts/run-electron-dev.ts"], {
+  // Invokes `concurrently`'s JS entry point directly via `process.execPath`
+  // (no shell, no `.bin` shim): with `shell: true`, Node just space-joins
+  // the args array into a single command line on *every* platform instead
+  // of preserving each array element as one argv token, which silently
+  // splits the single "tsx scripts/run-electron-dev.ts" command string into
+  // three separate top-level commands for `concurrently` to (mis)run. The
+  // `.bin/concurrently` shim itself is also platform-specific (a POSIX shell
+  // script vs. a Windows `.cmd`/`.ps1` file), so spawning it directly would
+  // require `shell: true` on Windows anyway. Spawning `node` against
+  // `concurrently`'s actual entry point sidesteps both problems identically
+  // on POSIX and Windows.
+  const concurrentlyEntry = path.join(
+    process.cwd(),
+    "node_modules",
+    "concurrently",
+    "dist",
+    "bin",
+    "index.js",
+  );
+  const child = spawn(process.execPath, [concurrentlyEntry, "-k", "npm:dev:main", "tsx scripts/run-electron-dev.ts"], {
     stdio: "inherit",
     env: {
       ...process.env,
