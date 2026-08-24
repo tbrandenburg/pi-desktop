@@ -106,18 +106,33 @@ export const AUDIO_UNDERSTANDING_SYSTEM_PROMPT =
   "emotion, background sound -- as relevant details, not as a formal analysis. If you don't hear something " +
   "clearly (e.g. no speech), just say so briefly instead of claiming you can't process audio at all.";
 
-/** Builds the OpenAI-style chat completions request body for audio understanding. */
+/**
+ * System instruction for the chat-completions-shaped fallback candidates
+ * (`openai/gpt-audio` via OpenRouter and native OpenAI, issue #260 candidates
+ * 4/5). Deliberately NOT `AUDIO_UNDERSTANDING_SYSTEM_PROMPT` above: that
+ * prompt is tuned to weave in tone/emotion/background commentary and
+ * produces prose, not a transcript. `understand_audio` is transcription-only
+ * (issue #260) end-to-end, so these fallback candidates must still return a
+ * verbatim transcript, not a description.
+ */
+export const AUDIO_TRANSCRIBE_ONLY_PROMPT =
+  "Transcribe the spoken content of this audio verbatim. Return only the transcript text itself -- no commentary, " +
+  "no description of tone/emotion/background sound, no preamble. If there is no discernible speech, return an " +
+  "empty string.";
+
+/** Builds the OpenAI-style chat completions request body for audio understanding. `systemPrompt` defaults to `AUDIO_UNDERSTANDING_SYSTEM_PROMPT`; pass `AUDIO_TRANSCRIBE_ONLY_PROMPT` for the transcription-only fallback candidates (issue #260). */
 export function buildAudioRequest(
   base64Audio: string,
   format: AudioFormat,
   prompt: string,
   model: string = AUDIO_MODEL,
+  systemPrompt: string = AUDIO_UNDERSTANDING_SYSTEM_PROMPT,
 ): AudioChatCompletionsRequest {
   return {
     model,
     modalities: ["text"],
     messages: [
-      { role: "system", content: AUDIO_UNDERSTANDING_SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       {
         role: "user",
         content: [
@@ -325,6 +340,7 @@ export async function transcribeAudioViaApi(
   } catch (error) {
     return {
       isError: true,
+      failureKind: "network",
       content: [
         {
           type: "text",
@@ -357,6 +373,7 @@ export async function transcribeAudioViaApi(
   } catch (error) {
     return {
       isError: true,
+      failureKind: "parse",
       content: [
         {
           type: "text",
@@ -373,6 +390,8 @@ export interface UnderstandAudioOptions {
   fetchFn: FetchFn;
   /** Overrides `AUDIO_MODEL`, e.g. to point at a different provider's audio-capable model. */
   model?: string;
+  /** Overrides the system message; defaults to `AUDIO_UNDERSTANDING_SYSTEM_PROMPT` in `buildAudioRequest`. Pass `AUDIO_TRANSCRIBE_ONLY_PROMPT` for the transcription-only fallback candidates (issue #260). */
+  systemPrompt?: string;
 }
 
 /** Simple text-only tool result content, matching AgentToolResult<unknown>["content"]. */
@@ -388,6 +407,15 @@ export interface AudioToolResult {
    * error immediately" (401/429/network failures) per issue #243.
    */
   status?: number;
+  /**
+   * Distinguishes a fetch-level network failure (no response received) from
+   * a parse failure (2xx response whose body couldn't be parsed) -- both
+   * lack an HTTP `status`, but `audio-resolution.ts`'s chain runner must
+   * treat them differently per issue #260: a network failure is skippable
+   * (try the next candidate), while a parse failure is a real code/contract
+   * bug and must always surface immediately.
+   */
+  failureKind?: "network" | "parse";
 }
 
 /**
@@ -402,7 +430,7 @@ export async function understandAudioViaApi(
   options: UnderstandAudioOptions,
 ): Promise<AudioToolResult> {
   const url = `${options.baseUrl ?? "https://api.openai.com/v1"}/chat/completions`;
-  const body = buildAudioRequest(base64Audio, format, prompt, options.model);
+  const body = buildAudioRequest(base64Audio, format, prompt, options.model, options.systemPrompt);
 
   let response: Awaited<ReturnType<FetchFn>>;
   try {
@@ -417,6 +445,7 @@ export async function understandAudioViaApi(
   } catch (error) {
     return {
       isError: true,
+      failureKind: "network",
       content: [
         {
           type: "text",
@@ -446,6 +475,7 @@ export async function understandAudioViaApi(
   } catch (error) {
     return {
       isError: true,
+      failureKind: "parse",
       content: [
         {
           type: "text",

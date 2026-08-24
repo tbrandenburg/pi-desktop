@@ -1,45 +1,54 @@
 /**
  * Provider-agnostic candidate-chain resolution for `understand_audio`
- * (issue #243). `resolveApiConfig`'s old approach only ever searched
- * `ctx.modelRegistry.getAvailable()` (chat models with usable auth) for a
- * name-hint match. Transcription models (`whisper-1`, `gpt-transcribe`,
- * etc.) are never listed there — they aren't selectable chat models — so
- * that lookup could never succeed for transcription against providers whose
- * catalog only lists chat models (e.g. OpenRouter), silently falling
- * through to an empty API key and a bare 401 from the default OpenAI base
- * URL, even when the user's OpenRouter credential is valid and works fine
- * for `whisper-1` on OpenRouter's own endpoint.
+ * (issue #243, reduced to a single transcription-only chain by issue #260).
  *
- * This module builds an ordered list of candidates per chain
- * (transcription vs. understanding) by checking "is this provider
- * authenticated at all" (`getProviderAuthStatus`/`getApiKeyForProvider`)
- * rather than "is there a matching model in getAvailable()", then runs
- * them in order via `runChain`, which classifies HTTP failures as
- * "skip to next candidate" (no credential, or a 400 model-not-found-shaped
- * rejection) vs. "surface immediately" (401/429/network failures) so a
- * real auth/rate-limit error from an already-resolved candidate is never
- * silently swallowed.
+ * `understand_audio` transcribes every call -- there is no prompt-driven
+ * branch. The chain below is a single, fixed, ordered list of candidates:
+ * an optional env override, then five dedicated transcription-endpoint
+ * candidates across three providers, then two chat-completions-shaped
+ * `gpt-audio` fallback candidates (issue #260). Credentials are resolved via
+ * "is this provider authenticated at all"
+ * (`getProviderAuthStatus`/`getApiKeyForProvider`), never via
+ * `getAvailable()`, which never lists transcription-only models.
+ *
+ * The chain is exhaustive (issue #260): every HTTP failure except a parse
+ * failure is skippable and advances to the next candidate. A parse failure
+ * (malformed response body) is the one exception that still surfaces
+ * immediately -- it is a real code/contract bug, not something the next
+ * candidate could route around.
  */
 import type { AudioToolResult } from "./audio.js";
-import type { MinimalExtensionContext, RegistryModel } from "./index.js";
+import type { MinimalExtensionContext } from "./index.js";
 
 // Minimal ambient declaration: the shared extension tsconfig deliberately has
 // no Node/DOM type definitions, and this package must not add dependencies.
 declare const console: { error(...args: unknown[]): void };
 
 /** Where a candidate's model id and credential came from. */
-export type CandidateSource = "env-override" | "registry-credential" | "registry-hint";
+export type CandidateSource = "env-override" | "registry-credential";
 
-/** One resolvable (or explicitly unresolvable) attempt in a chain. */
+/** Which HTTP call shape a candidate needs (issue #260): the multipart transcription endpoint, or a chat-completions request. */
+export type CandidateKind = "transcribe" | "chat";
+
+/**
+ * Shared, typed vocabulary for both a pre-call unresolved skip
+ * (`no-credential`) and a post-call skippable failure classification. Used
+ * as the single source of truth for both the retry logic (`runChain`) and
+ * `PI_MULTIMEDIA_DEBUG` log lines (issue #260), so they can never disagree.
+ */
+export type CandidateReason = "no-credential" | "model-not-found" | "auth-failed" | "rate-limited" | "network-error";
+
+/** One resolvable (or explicitly unresolvable) attempt in the chain. */
 export interface AudioCandidate {
   provider: string;
   model: string;
   source: CandidateSource;
+  kind: CandidateKind;
   /** Present only when this candidate actually has a usable credential. */
   apiKey?: string;
   baseUrl?: string;
   /** Set instead of `apiKey` when this candidate could not be resolved at all (e.g. no credential for that provider). */
-  unresolvedReason?: string;
+  unresolvedReason?: CandidateReason;
 }
 
 export type ChainLogger = (line: string) => void;
@@ -58,11 +67,35 @@ export function debugLoggerFor(env: Record<string, string | undefined>): ChainLo
   return env.PI_MULTIMEDIA_DEBUG === "1" || env.PI_MULTIMEDIA_DEBUG === "true" ? consoleLogger : noopLogger;
 }
 
-/** Well-known transcription-capable models per provider id, tried in order (issue #243). */
-const TRANSCRIPTION_MODELS_BY_PROVIDER: Array<{ provider: string; models: string[] }> = [
-  { provider: "openai", models: ["gpt-4o-mini-transcribe", "whisper-1"] },
-  { provider: "openrouter", models: ["whisper-1"] },
-  { provider: "groq", models: ["whisper-large-v3"] },
+/** One entry in the fixed chain spec below, before credential resolution. */
+interface CandidateSpec {
+  provider: string;
+  model: string;
+  kind: CandidateKind;
+  /** Overrides the registry/default base URL for this specific candidate (e.g. forcing native `api.openai.com` regardless of a registry override). */
+  baseUrlOverride?: string;
+}
+
+/**
+ * The fixed candidate chain, in the exact order required by issue #260:
+ * 1-2. OpenRouter transcription models.
+ * 3. Groq transcription model.
+ * 4-5. OpenAI transcription models.
+ * 6. OpenRouter `openai/gpt-audio` (chat-completions shape).
+ * 7. OpenAI native `openai/gpt-audio` (chat-completions shape, forced to
+ *    `api.openai.com`, never a registry-overridden base URL).
+ *
+ * This deliberately reorders the pre-#260 chain (which tried OpenAI first,
+ * then OpenRouter, then Groq) -- OpenAI moves from position 1 to position 3.
+ */
+const FIXED_CANDIDATE_CHAIN: CandidateSpec[] = [
+  { provider: "openrouter", model: "gpt-4o-mini-transcribe", kind: "transcribe" },
+  { provider: "openrouter", model: "whisper-1", kind: "transcribe" },
+  { provider: "groq", model: "whisper-large-v3", kind: "transcribe" },
+  { provider: "openai", model: "gpt-4o-mini-transcribe", kind: "transcribe" },
+  { provider: "openai", model: "whisper-1", kind: "transcribe" },
+  { provider: "openrouter", model: "openai/gpt-audio", kind: "chat" },
+  { provider: "openai", model: "openai/gpt-audio", kind: "chat", baseUrlOverride: "https://api.openai.com/v1" },
 ];
 
 /** Fallback base URLs used only when the registry doesn't expose one for a provider (e.g. in tests / standalone use). */
@@ -72,9 +105,6 @@ const DEFAULT_PROVIDER_BASE_URLS: Record<string, string | undefined> = {
   groq: "https://api.groq.com/openai/v1",
 };
 
-/** Well-known audio-input-capable chat models, tried in order against the registry's hint-match (issue #243, generalizes the old single hardcoded hint). */
-export const KNOWN_UNDERSTANDING_MODEL_HINTS = ["gpt-audio-1.5", "gpt-audio", "gpt-audio-mini", "gpt-4o-audio-preview"];
-
 /** Minimal shape of registry auth-status lookups this module needs, mirroring `MinimalModelRegistry` in `index.ts`. */
 export interface ProviderAuthAware {
   getProviderAuthStatus?(provider: string): { configured: boolean } | undefined;
@@ -83,13 +113,17 @@ export interface ProviderAuthAware {
 }
 
 /**
- * Builds the ordered transcription candidate chain. Pure resolution: no
- * network calls. `env` overrides skip discovery entirely when set; otherwise
- * each known transcription-capable provider is checked for a credential via
- * `getProviderAuthStatus`/`getApiKeyForProvider` (never via `getAvailable()`,
- * which never lists transcription-only models).
+ * Builds the ordered, fixed audio candidate chain. Pure resolution: no
+ * network calls. `env` override skips discovery entirely when set (single
+ * candidate, `kind: "transcribe"`, matching today's env-override request
+ * shape); otherwise every candidate in `FIXED_CANDIDATE_CHAIN` is resolved
+ * against a provider credential via `getProviderAuthStatus`/
+ * `getApiKeyForProvider` (never via `getAvailable()`, which never lists
+ * transcription-only models). Each provider's credential is resolved at
+ * most once even though a provider (e.g. `openrouter`/`openai`) appears at
+ * multiple chain positions.
  */
-export async function resolveTranscriptionChain(
+export async function resolveAudioChain(
   ctx: MinimalExtensionContext,
   env: Record<string, string | undefined>,
   envModelKey: string,
@@ -100,21 +134,29 @@ export async function resolveTranscriptionChain(
   const envApiKey = env[envApiKeyKey];
   const envBaseUrl = env[envBaseUrlKey];
   if (envModel && (envApiKey || envBaseUrl)) {
-    return [{ provider: "env", model: envModel, source: "env-override", apiKey: envApiKey ?? "", baseUrl: envBaseUrl }];
+    return [
+      { provider: "env", model: envModel, kind: "transcribe", source: "env-override", apiKey: envApiKey ?? "", baseUrl: envBaseUrl },
+    ];
   }
 
   const registry = ctx.modelRegistry as (typeof ctx.modelRegistry & ProviderAuthAware) | undefined;
+  const apiKeyCache = new Map<string, string | undefined>();
+  const resolveKeyCached = async (provider: string): Promise<string | undefined> => {
+    if (!apiKeyCache.has(provider)) {
+      apiKeyCache.set(provider, await resolveProviderApiKey(registry, provider));
+    }
+    return apiKeyCache.get(provider);
+  };
+
   const candidates: AudioCandidate[] = [];
-  for (const { provider, models } of TRANSCRIPTION_MODELS_BY_PROVIDER) {
-    const apiKey = await resolveProviderApiKey(registry, provider);
+  for (const spec of FIXED_CANDIDATE_CHAIN) {
+    const apiKey = await resolveKeyCached(spec.provider);
     if (!apiKey) {
-      candidates.push({ provider, model: models[0], source: "registry-credential", unresolvedReason: "no-credential" });
+      candidates.push({ provider: spec.provider, model: spec.model, kind: spec.kind, source: "registry-credential", unresolvedReason: "no-credential" });
       continue;
     }
-    const baseUrl = registry?.getProvider?.(provider)?.baseUrl ?? DEFAULT_PROVIDER_BASE_URLS[provider];
-    for (const model of models) {
-      candidates.push({ provider, model, source: "registry-credential", apiKey, baseUrl });
-    }
+    const baseUrl = spec.baseUrlOverride ?? registry?.getProvider?.(spec.provider)?.baseUrl ?? DEFAULT_PROVIDER_BASE_URLS[spec.provider];
+    candidates.push({ provider: spec.provider, model: spec.model, kind: spec.kind, source: "registry-credential", apiKey, baseUrl });
   }
   return candidates;
 }
@@ -134,77 +176,40 @@ async function resolveProviderApiKey(
 }
 
 /**
- * Builds the ordered understanding-chain candidate list. `env` override
- * skips discovery entirely when set; otherwise falls back to today's
- * existing registry hint-match logic (`findModelByNameHint`), generalized
- * to try each of `KNOWN_UNDERSTANDING_MODEL_HINTS` in order.
+ * Classifies a failed `AudioToolResult` into the shared reason vocabulary,
+ * or `undefined` when the failure must surface immediately (a parse
+ * failure: a real code/contract bug, not something the next candidate could
+ * route around). All four HTTP-classified reasons here (400/401/429/no-status
+ * network failure) are skippable (issue #260's exhaustive-retry policy --
+ * a deliberate change from the pre-#260 fail-fast-on-401/429/network
+ * behavior).
  */
-export async function resolveUnderstandingChain(
-  ctx: MinimalExtensionContext,
-  env: Record<string, string | undefined>,
-  envModelKey: string,
-  envApiKeyKey: string,
-  envBaseUrlKey: string,
-  findModelByNameHint: (models: RegistryModel[], hint: string) => RegistryModel | undefined,
-): Promise<AudioCandidate[]> {
-  const envModel = env[envModelKey];
-  const envApiKey = env[envApiKeyKey];
-  const envBaseUrl = env[envBaseUrlKey];
-  if (envModel && (envApiKey || envBaseUrl)) {
-    return [{ provider: "env", model: envModel, source: "env-override", apiKey: envApiKey ?? "", baseUrl: envBaseUrl }];
-  }
-
-  const registry = ctx.modelRegistry;
-  if (!registry) {
-    return [{ provider: "unknown", model: KNOWN_UNDERSTANDING_MODEL_HINTS[0], source: "registry-hint", unresolvedReason: "no-registry" }];
-  }
-
-  try {
-    const available = registry.getAvailable();
-    for (const hint of KNOWN_UNDERSTANDING_MODEL_HINTS) {
-      const match = findModelByNameHint(available, hint);
-      if (!match) continue;
-      const auth = await registry.getApiKeyAndHeaders(match);
-      if (auth.ok && auth.apiKey) {
-        return [
-          {
-            provider: (match as { provider?: string }).provider ?? "unknown",
-            model: match.id,
-            source: "registry-hint",
-            apiKey: auth.apiKey,
-            baseUrl: auth.baseUrl ?? match.baseUrl,
-          },
-        ];
-      }
-    }
-  } catch {
-    // Best-effort convenience only -- fall through to the exhausted result below.
-  }
-  return [{ provider: "unknown", model: KNOWN_UNDERSTANDING_MODEL_HINTS[0], source: "registry-hint", unresolvedReason: "no-model-match" }];
+function classifyFailure(result: AudioToolResult): CandidateReason | undefined {
+  if (result.status === 400) return "model-not-found";
+  if (result.status === 401) return "auth-failed";
+  if (result.status === 429) return "rate-limited";
+  if (result.failureKind === "network") return "network-error";
+  return undefined;
 }
 
-/** Classifies a failed `AudioToolResult` as "try the next candidate" or "surface immediately". Only a 400 (model-not-found-shaped) is skippable; everything else (401/429/network/parse) is surfaced. */
-function isSkippableFailure(result: AudioToolResult): boolean {
-  return result.status === 400;
-}
-
-/** Outcome of running a chain: a real success, a real failure to surface as-is, or full exhaustion (no viable candidates at all — not a failure, a handoff signal). */
+/** Outcome of running the chain: a real success, a real (parse) failure to surface as-is, or full exhaustion (no viable candidates at all — not a failure, but every candidate was skipped). */
 export type ChainResult =
   | { kind: "success"; result: AudioToolResult }
   | { kind: "failure"; result: AudioToolResult }
   | { kind: "exhausted"; reasons: string[] };
 
 /**
- * Runs an ordered candidate chain: calls `call(candidate)` for each resolved
- * candidate in order, stopping at the first success. Unresolved candidates
- * (no credential) are skipped without a network call. A skippable failure
- * (400, model-not-found-shaped) moves to the next candidate. Any other
- * failure (401/429/network/parse) is surfaced immediately as `kind:
- * "failure"` (never silently retried), tagged with which candidate produced
- * it and which remaining candidates were skipped as a result. On full
- * exhaustion (every candidate skipped, none succeeded or failed), returns
- * `kind: "exhausted"` with every skip reason — a handoff signal, not a
- * failure, so callers can fall back to a different chain.
+ * Runs the ordered candidate chain: calls `call(candidate)` for each
+ * resolved candidate in order, stopping at the first success. Unresolved
+ * candidates (no credential) are skipped without a network call. Every
+ * classified HTTP failure (400 model-not-found, 401 auth-failed, 429
+ * rate-limited, network-error) is skippable and moves to the next candidate
+ * -- issue #260's exhaustive-retry policy: authentication/rate-limit/network
+ * failures never stop the chain early. Only a parse failure (malformed
+ * response body) is surfaced immediately as `kind: "failure"`, since that is
+ * a real code/contract bug the next candidate can't route around. On full
+ * exhaustion (every candidate skipped, none succeeded or hit a parse
+ * failure), returns `kind: "exhausted"` with every skip reason.
  */
 export async function runChain(
   chainName: string,
@@ -233,17 +238,18 @@ export async function runChain(
       return { kind: "success", result };
     }
 
-    if (isSkippableFailure(result)) {
+    const reason = classifyFailure(result);
+    if (reason) {
       logger(
-        `[pi-multimedia] chain=${chainName} candidate=${position} provider=${candidate.provider} model=${candidate.model} result=skip reason=model-not-found`,
+        `[pi-multimedia] chain=${chainName} candidate=${position} provider=${candidate.provider} model=${candidate.model} result=skip reason=${reason}`,
       );
-      skipped.push(`${candidate.provider}/${candidate.model} (model not found)`);
+      skipped.push(`${candidate.provider}/${candidate.model} (${reason})`);
       continue;
     }
 
     const remaining = candidates.slice(i + 1).map((c) => `${c.provider}/${c.model}`);
     logger(
-      `[pi-multimedia] chain=${chainName} candidate=${position} provider=${candidate.provider} model=${candidate.model} result=fail status=${result.status ?? "network"}${remaining.length ? ` skipped-remaining=${remaining.join(",")}` : ""}`,
+      `[pi-multimedia] chain=${chainName} candidate=${position} provider=${candidate.provider} model=${candidate.model} result=fail reason=parse-error${remaining.length ? ` skipped-remaining=${remaining.join(",")}` : ""}`,
     );
     return {
       kind: "failure",
@@ -264,7 +270,7 @@ export async function runChain(
   return { kind: "exhausted", reasons: skipped };
 }
 
-/** Builds the final "fully exhausted, zero viable candidates" error message across both chains. */
+/** Builds the final "fully exhausted, zero viable candidates" error message. */
 export function buildExhaustionError(reasons: string[]): AudioToolResult {
   return {
     isError: true,
@@ -272,8 +278,8 @@ export function buildExhaustionError(reasons: string[]): AudioToolResult {
       {
         type: "text",
         text:
-          `No audio transcription or understanding path available. Tried: ${reasons.join(", ")}. ` +
-          "Configure MULTIMEDIA_AUDIO_API_KEY, or add an audio-capable model via Settings.",
+          `No audio transcription path available. Tried: ${reasons.join(", ")}. ` +
+          "Configure MULTIMEDIA_AUDIO_API_KEY, or add an OpenRouter/Groq/OpenAI credential via Settings.",
       },
     ],
   };
