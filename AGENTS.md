@@ -263,6 +263,42 @@ stylesheet or a per-component test. Use the browser fake bridge for renderer UI 
   `async (page) => { ... }` expression (no `module.exports =` wrapper, no
   trailing semicolon after the closing brace) and must live inside an
   allowed root (the repo itself or `.playwright-mcp/`), not `/tmp`.
+- 2026-08-24: `make run-web`'s `PI_DESKTOP_WEB_BRIDGE_HEADLESS=1` never
+  creates a visible `BrowserWindow` — the real UI is driven by Playwright
+  hitting the printed Vite dev server URL (`http://localhost:517x`) in a
+  plain browser tab, not by rendering Electron on screen. Reusing the
+  current interactive session's already-set `DISPLAY` (e.g. `:0.0`) for this
+  headless backend process is normal and safe, not "using the user's
+  desktop" — do not reach for `xvfb-run`, installing `xvfb`, or manually
+  juggling `DISPLAY`/`at` jobs (which strip `DISPLAY` from their env
+  entirely, breaking the GPU/zygote process with "Missing X server") unless
+  `DISPLAY` is genuinely unset. Check `echo $DISPLAY` first; if it is
+  already set in the current shell, just background `make run-web` in that
+  same shell (see next entry) and move on to Playwright.
+- 2026-08-24: Backgrounding a long-lived dev command with a single
+  `nohup cmd & disown` inside one bash tool call is unreliable in this
+  environment — the tool call itself can still hang until its own timeout
+  (observed: `make run-web` under `nohup ... & disown; sleep 2` blocked for
+  the full 120s despite backgrounding). `setsid cmd < /dev/null > log 2>&1 &`
+  (redirecting *all three* std streams, not just stdout/stderr) reliably
+  detaches within a single tool call and returns immediately; poll the log
+  file with separate follow-up bash calls instead of waiting inline. Reserve
+  the `at`-based `detach` skill for surviving conversation end or restarting
+  the agent's own process, not for an ordinary same-session background dev
+  server — `at` jobs run with a stripped-down env (no `DISPLAY`, etc.) that
+  can silently change behavior versus the interactive shell.
+- 2026-08-24: `playwright_browser_run_code_unsafe` executes in a restricted
+  VM context with neither `require` nor dynamic `import()` available (both
+  throw), so it cannot read local fixture files directly via Node's `fs`
+  despite running in the Playwright server process. For injecting a large
+  fixture (e.g. a base64-encoded real audio sample for a fake
+  `getUserMedia` E2E test) into the page, instead copy the fixture into the
+  app's own dev-server-served static directory (e.g. `src/renderer/public/`
+  for this repo's Vite config) and `fetch()` it same-origin from
+  `page.evaluate` — same-origin static assets are already exempt from the
+  app's CSP `connect-src`, and this avoids both the run-in-Node file-read
+  restriction and the cross-origin CSP block noted in the entry above. Clean
+  up the copied fixture file afterward so it doesn't leak into `git status`.
 
 ## Archived incident narratives
 
