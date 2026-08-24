@@ -48,7 +48,9 @@ async function resolveFreePort(preferredPort: number, host = "127.0.0.1"): Promi
 async function main(): Promise<void> {
   const preferredPort = Number(process.env.PI_DESKTOP_WEB_BRIDGE_PORT) || DEFAULT_PORT;
   const port = await resolveFreePort(preferredPort);
-  const bridgeUrl = `http://localhost:${port}`;
+  // The bridge binds explicitly to IPv4 127.0.0.1; keep the client URL on the
+  // same address instead of relying on browser-specific localhost resolution.
+  const bridgeUrl = `http://127.0.0.1:${port}`;
   console.log(`[dev:web] web bridge will listen at ${bridgeUrl}`);
 
   // Invokes the local `concurrently` binary directly (no shell): with
