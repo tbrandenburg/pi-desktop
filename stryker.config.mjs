@@ -23,6 +23,15 @@ export default {
   // through, which defeats its whole purpose - letting tests exercise the
   // REAL, unmocked library. Its real branching logic lives in, and is
   // tested via, the code that consumes AgentCoreLoaders (see issue #223).
+  // src/main/agent/test-support/real-coding-agent-loaders.ts is intentionally
+  // excluded for the identical reason: a test-support re-export helper that
+  // trivially forwards real @earendil-works/pi-coding-agent symbols via a
+  // normal static import, with no independent branching logic of its own to
+  // mutate. Testing it would mean mocking @earendil-works/pi-coding-agent
+  // just to assert the wrapper calls through, which defeats its whole
+  // purpose - letting tests exercise the REAL, unmocked library. Its real
+  // branching logic lives in, and is tested via, the code that consumes
+  // CodingAgentLoaders (see issue #269).
   mutate: [
     "src/**/*.ts",
     "src/**/*.tsx",
@@ -30,6 +39,7 @@ export default {
     "!src/main/index.ts",
     "!src/main/windows.ts",
     "!src/main/agent/test-support/real-agent-core-loaders.ts",
+    "!src/main/agent/test-support/real-coding-agent-loaders.ts",
   ],
   coverageAnalysis: "perTest",
   reporters: ["clear-text", "progress", "html", "json"],
