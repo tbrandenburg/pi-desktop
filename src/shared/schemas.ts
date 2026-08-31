@@ -26,10 +26,16 @@ export const workspaceDirSchema = z.string().min(1);
  */
 const MAX_RECORDING_BYTES = 25 * 1024 * 1024;
 
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
+
 export const saveRecordingSchema = z.object({
   base64Audio: z
     .string()
     .min(1, "Recording data is required")
+    .refine(
+      (value) => value.length % 4 === 0 && BASE64_PATTERN.test(value),
+      "Recording data is not valid base64",
+    )
     .refine((value) => {
       const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
       const decodedBytes = (value.length * 3) / 4 - padding;
