@@ -14,12 +14,22 @@ export default {
   // packaged-app CDP verification (scripts/cdp-drive.ts), not unit tests -
   // unit-testing it would require mocking Electron's app/BrowserWindow APIs
   // wholesale just to hit a coverage number (see issue #70).
+  // src/main/agent/test-support/real-agent-core-loaders.ts is intentionally
+  // excluded: a test-support re-export helper that trivially forwards real
+  // @earendil-works/pi-agent-core symbols via a normal static import (so
+  // Vitest's ESM-aware transform can load them directly), with no
+  // independent branching logic of its own to mutate. Testing it would mean
+  // mocking @earendil-works/pi-agent-core just to assert the wrapper calls
+  // through, which defeats its whole purpose - letting tests exercise the
+  // REAL, unmocked library. Its real branching logic lives in, and is
+  // tested via, the code that consumes AgentCoreLoaders (see issue #223).
   mutate: [
     "src/**/*.ts",
     "src/**/*.tsx",
     "!src/**/*.test.*",
     "!src/main/index.ts",
     "!src/main/windows.ts",
+    "!src/main/agent/test-support/real-agent-core-loaders.ts",
   ],
   coverageAnalysis: "perTest",
   reporters: ["clear-text", "progress", "html", "json"],
