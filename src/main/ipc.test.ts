@@ -367,6 +367,17 @@ describe("IPC settings round-trip integration", () => {
     await expect(invoke("audio:save", base64Audio, "video/webm")).rejects.toThrow();
   });
 
+  it("rejects malformed base64 audio at the audio:save schema boundary and writes no file", async () => {
+    const before = fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith("pi-desktop-recording-"));
+
+    await expect(invoke("audio:save", "not valid base64 !!!", "audio/webm")).rejects.toThrow(
+      /base64/i,
+    );
+
+    const after = fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith("pi-desktop-recording-"));
+    expect(after).toEqual(before);
+  });
+
   it("round-trips tools-expanded state through the IPC boundary (issue #139)", async () => {
     expect(await invoke("extension-ui:get-tools-expanded")).toBe(false);
 

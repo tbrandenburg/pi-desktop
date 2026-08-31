@@ -396,14 +396,7 @@ export function createIpcHandlerRegistry(
       mimeType: rawMimeType,
     });
 
-    let buffer: Buffer;
-    try {
-      buffer = Buffer.from(base64Audio, "base64");
-    } catch (error) {
-      throw new Error(
-        `Failed to decode recording audio: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    const buffer = Buffer.from(base64Audio, "base64");
 
     const filePath = path.join(os.tmpdir(), `pi-desktop-recording-${randomUUID()}.webm`);
     try {
